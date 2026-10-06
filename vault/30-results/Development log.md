@@ -105,6 +105,9 @@ P(120), seeds averaged (P_port; lower is better):
 | fhnw-binpack4-48 | 1.000 | 1.000 | 1.000 | 0.005 |
 | rail01 | 1.000 | 1.000 | 1.000 | 0.927 |
 
+Provenance caveat: the 18 runs span code states 0e69732 (9 clean, 7 with the uncommitted LP-stream code — off in
+these runs) and 770df17 (4); a disabled stream is bit-identical (review of 770df17), so the numbers stand
+([[Mistakes and incidents]], 2026-10-06 15:15–16:35).
 Mean bounded d of A3@ad1 (positive = A3@ad1 better): vs SCIP alone **+0.34** (6 better, 1 worse — radiationm −0.02 —,
 2 equal); vs coupled default +0.11 (4 better, 2 worse: item_placement −0.23, loue −0.22); vs cuOpt alone +0.09 (6
 better, 3 worse: fhnw, radiationm, rail01). Hygiene: 18/18 completed, every incumbent checked (0 failed, 0 unchecked),
