@@ -12,6 +12,9 @@ Files in a run's mailbox directory:
     to_ea.npz          solver -> EA: X (k, n), obj (k,), seq, t
     to_ea_info.json    solver -> EA: {"seq", "t", "incumbent": obj|null, "dual_bound": obj|null, "status"}
     to_ea_lp.npz       solver -> EA, once: x (n,) root LP solution, obj
+    to_ea_lps.npz      solver -> EA, the LP stream (D-011): X (r, n) the solver's last r node LP points (a ring, newest
+                       last), obj (r,), origin (r,) = POINT IDS (increasing), not origin bits — a snapshot, so a
+                       reader that misses a post still sees the points in the ring and takes the ids it has not seen
     ready.<role>       a process has read the instance and is waiting at the barrier
     start              the runner releases both: {"t0": monotonic seconds, "epoch"}
     stop               written when the pair must end (budget, failure); both sides stop promptly
@@ -156,6 +159,7 @@ class Mailbox:
         self.to_ea = Channel(self.dir / "to_ea.npz")
         self.info = InfoChannel(self.dir / "to_ea_info.json")
         self.lp = Channel(self.dir / "to_ea_lp.npz")
+        self.lps = Channel(self.dir / "to_ea_lps.npz")
 
     # ------------------------------------------------------------ order
     def write_order(self, names) -> None:

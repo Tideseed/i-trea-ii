@@ -1,0 +1,17 @@
+# I-TREA II -- self-adaptive repair strategy + the solver's LP stream (development, D-010 / D-011).
+# Berk 2026-10-06: "when solver comes up with suitable good infeasible solutions (minimize infeasibility then maximize
+# objective function) it might be able to inject to EA's population ... We are aiming for more diversity in EA."
+# SCIP reads node LP points under a 2 % time budget, preferring nodes with few fractional integer variables; the EA
+# rounds each to the nearest integer point, ranks the points by (violation of that rounding, objective) and turns each,
+# best first, into 4 repaired children (nearest + 3 randomised roundings) that enter by ordinary survival only.
+# Coupled arms with SCIP only (A3/A4); vault 50-decisions/D-011.
+#
+# Partial file over the defaults. Equivalent overrides:
+#   --set strategy.enabled=true seeding.lp_source=highs_async lp_stream.enabled=true
+name: itrea2-adaptive-lps
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true

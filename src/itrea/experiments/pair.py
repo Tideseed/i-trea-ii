@@ -432,12 +432,19 @@ def solver_flags(spec: ProcSpec, cfg: EAConfig | None) -> list[str]:
         return ["--inert"]
     e = cfg.exchange
     recv = bool(e.to_solver)
-    send = bool(e.from_solver or e.use_dual_bound or e.use_root_lp)
+    ls = cfg.lp_stream
+    send = bool(e.from_solver or e.use_dual_bound or e.use_root_lp or ls.enabled)
     out = []
     if recv:
         out.append("--recv")
     if send:
         out += ["--send", "--inject-band", _fmt_set(e.inject_band), "--inject-k", str(e.inject_k)]
+    if ls.enabled:                                   # D-011: node LP points are read through SCIP's plugin only
+        if spec.kind != "scip":
+            raise RunError(f"lp_stream.enabled needs a SCIP partner, not {spec.kind}")
+        out += ["--lp-stream", "--lp-stream-share", _fmt_set(ls.share), "--lp-stream-ring", str(ls.ring),
+                "--lp-stream-min-gap", _fmt_set(ls.min_gap), "--lp-stream-q", _fmt_set(ls.quantile),
+                "--lp-stream-patience", _fmt_set(ls.patience)]
     return out or ["--inert"]
 
 
@@ -583,7 +590,7 @@ def _exchange_log(mb, opts: PairOptions, run_dir: Path) -> dict:
     out["accepted"] = sum(1 for v in verdicts if v.get("accepted"))
     if opts.mailbox == "redis":
         hist = {}
-        for name in ("to_solver", "to_ea", "lp"):
+        for name in ("to_solver", "to_ea", "lp", "lps"):
             try:
                 hist[name] = [[t, seq, [float(o) for o in objs]] for t, seq, objs in getattr(mb, name).history()]
             except Exception:  # noqa: BLE001

@@ -13,6 +13,9 @@ and `50-decisions/D-004 Mapping I-TREA (2015) to I-TREA II.md`.
 guidance) strategy that children inherit and occasionally redraw (vault `10-design/I-TREA II algorithm.md`,
 "Self-adaptive repair strategy"). While it is off the section is left out of the hash, so existing configuration hashes
 are unchanged.
+
+`lp_stream` (`LpStreamCfg`, off by default, D-011) streams the solver's good infeasible node LP points into the
+population (Berk 2026-10-06). Same hash rule: left out while disabled.
 """
 from __future__ import annotations
 
@@ -202,6 +205,31 @@ class StrategyCfg:
 
 
 @dataclass
+class LpStreamCfg:
+    """The solver -> EA stream of good infeasible solutions (D-011; Berk 2026-10-06: "when solver comes up with suitable
+    good infeasible solutions (minimize infeasibility then maximize objective function) it might be able to inject to
+    EA's population"). The solver side (SCIP only: `scip_run --lp-stream`) reads node LP points under a time budget
+    and prefers nodes with few fractional integer variables; the EA rounds each received point to the nearest integer
+    point, evaluates it, keeps the best `pool` points ranked LEXICOGRAPHICALLY by (violation V of that rounding,
+    objective key) — Berk's order — and turns each unused point, best first, into `roundings` children (the nearest
+    rounding + randomised ones), repaired and then admitted through ordinary survival only: a super-optimal infeasible
+    child competes for Rank 0 under its cap and selection rules, never bypassing them. Off by default: with
+    `enabled: false` the section is inert and is left out of the configuration hash (`EAConfig.hash`)."""
+    enabled: bool = False
+    share: float = 0.02                # solver: the stream's read + post time stays under this share of the wall clock
+    ring: int = 3                      # solver: points per post (the newest; a reader that misses a post loses none)
+    min_gap: float = 0.25              # solver: seconds between two reads, at least
+    quantile: float = 0.25             # solver: a node is good if its fractional count is at most this quantile of the
+                                       # last 32 LP solves
+    patience: float = 1.0              # solver: seconds a due read waits for a good node before it takes the next one
+    roundings: int = 4                 # EA: children per point — the nearest rounding + (roundings - 1) randomised
+    per_tick: int = 2                  # EA: at most this many new points turned into children per exchange tick
+    pool: int = 16                     # EA: points kept, ranked (V of the nearest rounding, key)
+    immigrants: bool = True            # EA: stagnation LP-rounding immigrants take their LP point from the pool's best
+                                       # four, round robin (else always the first LP point)
+
+
+@dataclass
 class EAConfig:
     name: str = "default"
     population: PopulationCfg = field(default_factory=PopulationCfg)
@@ -215,6 +243,7 @@ class EAConfig:
     stagnation: StagnationCfg = field(default_factory=StagnationCfg)
     frontier: FrontierCfg = field(default_factory=FrontierCfg)
     strategy: StrategyCfg = field(default_factory=StrategyCfg)
+    lp_stream: LpStreamCfg = field(default_factory=LpStreamCfg)
     backend: str = "cupy"             # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
     gpu_mem_gb: float = 12.0           # CuPy pool limit (the only GPU memory cap on GB10) = cuOpt's RMM limit in A2:
                                        # equal GPU memory for both partners; cuOpt needs ~10.5 GB (measured 2026-10-06)
@@ -226,13 +255,15 @@ class EAConfig:
         return dataclasses.asdict(self)
 
     def hash(self) -> str:
-        """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy` section
-        while `strategy.enabled` is false: it is inert then, so every configuration written before the section existed
-        keeps its hash (the default's `9ac4a93bf93b` among them)."""
+        """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy` and
+        `lp_stream` sections while disabled: they are inert then, so every configuration written before a section
+        existed keeps its hash (the default's `9ac4a93bf93b` among them)."""
         d = self.to_dict()
         d.pop("name", None)
         if not self.strategy.enabled:
             d.pop("strategy", None)
+        if not self.lp_stream.enabled:
+            d.pop("lp_stream", None)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
     @classmethod
@@ -333,6 +364,15 @@ class EAConfig:
         _check(isinstance(sg.min_share, (int, float)) and not isinstance(sg.min_share, bool)
                and 0.0 <= sg.min_share and sg.min_share * n_strat <= 1.0 + 1e-12,
                "strategy.min_share >= 0 and min_share * (number of strategies) <= 1")
+        ls = self.lp_stream
+        _check(isinstance(ls.enabled, bool) and isinstance(ls.immigrants, bool), "lp_stream.enabled/immigrants are bools")
+        _check(0.0 < ls.share <= 1.0 and ls.min_gap >= 0.0 and 0.0 <= ls.quantile <= 1.0 and ls.patience >= 0.0,
+               "lp_stream: share in (0, 1], min_gap >= 0, quantile in [0, 1], patience >= 0")
+        _check(all(isinstance(v, int) and not isinstance(v, bool) for v in (ls.ring, ls.roundings, ls.per_tick, ls.pool))
+               and ls.ring >= 1 and ls.roundings >= 1 and ls.per_tick >= 1 and ls.pool >= 1,
+               "lp_stream: ring, roundings, per_tick, pool are integers >= 1")
+        _check(not ls.enabled or (self.exchange.enabled and self.exchange.from_solver),
+               "lp_stream.enabled needs exchange.enabled and exchange.from_solver")
         _check(self.backend in ("cupy", "numpy", "auto"), "backend in cupy|numpy|auto")
         _check(self.gpu_mem_gb > 0, "gpu_mem_gb > 0")
         _check(self.log_every >= 1 and self.lineage_depth >= 0, "logging parameters")

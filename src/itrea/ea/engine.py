@@ -860,6 +860,13 @@ class Engine:
             "verdicts_seen", "oom_retries", "stagnation_events", "immigrants_admitted", "immigrants_dropped",
             "lp_immigrants", "ls_moves", "ls_calls", "duplicates", "n_incumbents", "demoted", "incumbents_reverted",
             "rejected_copies", "aborted_generations")}
+        # D-011 LP stream: the solver's node LP points, ranked (V of the nearest rounding, key) — Berk's order
+        self.lps = cfg.lp_stream if (self.from_solver and cfg.lp_stream.enabled) else None
+        self.lps_pool: list[dict] = []
+        self.lps_seen = 0                        # highest point id taken from the stream
+        self.lps_rr = 0                          # round robin over the pool's best for stagnation immigrants
+        if self.lps is not None:
+            self.c.update({k: 0 for k in ("lps_msgs", "lps_points", "lps_used", "lps_rows", "lps_dropped")})
         S = self.S
         self.sc: dict[str, np.ndarray] = {k: np.zeros(S, np.int64) for k in (
             "children", "best_events", "incumbents", "best_events_solver", "incumbents_solver", "repaired",
@@ -1033,8 +1040,9 @@ class Engine:
         cfg = self.cfg
         lp_share = cfg.seeding.lp_rounding if lp_share is None else lp_share
         kw = dict(gene_dtype=self.gene_dtype.name, mem_budget_bytes=self.budgets["operators"])
+        lpx = self._lp_for_immigrants()
         if not self.strat_on:
-            Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host, lp_x=self.lp_x,
+            Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host, lp_x=lpx,
                                 frontier_rows=frontier_rows, lp_share=lp_share, **kw)
             return Xn, on, np.zeros(Xn.shape[0], np.uint8)
         k = int(k)
@@ -1044,7 +1052,7 @@ class Engine:
         on_lp = np.flatnonzero(self.strat_lp[rest]) if self.lp_x is not None else np.zeros(0, np.int64)
         k_lp = int(round(lp_share * on_lp.size))
         Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host,
-                            lp_x=self.lp_x if k_lp else None, frontier_rows=frontier_rows, lp_share=0.0,
+                            lp_x=lpx if k_lp else None, frontier_rows=frontier_rows, lp_share=0.0,
                             lp_count=k_lp, **kw)
         lp_rows = on_lp[:k_lp]                               # rest-positions that become LP roundings
         other = np.setdiff1d(np.arange(rest.size), lp_rows)
@@ -1587,6 +1595,12 @@ class Engine:
             if lm is not None and lm.X.size:
                 self._lp_arrived(np.asarray(lm.X[0], dtype=np.float64), source="solver",
                                  obj=float(lm.obj[0]) if lm.obj.size else None)
+        if self.lps is not None:
+            sm = mb.lps.poll()
+            if sm is not None:
+                self._lps_receive(sm)
+            if self.lps_pool:
+                self._lps_use()
         if self.posted:
             n_rej = self.c["solver_rejections"]
             self._verdicts()
@@ -1618,6 +1632,78 @@ class Engine:
         Xd = self.bk.xp.asarray(Y).astype(self.gene_dtype)
         self.pending.append(_Batch(Xd, np.full(take.size, ORIGIN_INJECTED, np.uint16), repair=False, src="solver",
                                    t=self.trace.now(), strat=self._random_strategies(int(take.size))))
+
+    def _lps_receive(self, msg) -> None:
+        """New points of the LP stream (ids above the last seen): round each to the nearest integer point, evaluate
+        that rounding, and keep the best `lp_stream.pool` points ranked (V, key). The first point becomes the EA's LP
+        point if it has none yet (it then spawns the usual LP-rounding immigrants instead of stream children)."""
+        prob, bk = self.prob, self.bk
+        self.c["lps_msgs"] += 1
+        X = np.asarray(msg.X, dtype=np.float64)
+        ids = np.asarray(msg.origin, dtype=np.int64) if msg.origin is not None else np.zeros(0, np.int64)
+        if ids.shape[0] != X.shape[0] or X.shape[1:] != (prob.n,):
+            self.trace.event("note", msg=f"LP stream message {msg.seq} malformed: X {X.shape}, ids {ids.shape}")
+            return
+        new = np.flatnonzero((ids > self.lps_seen) & np.all(np.isfinite(X), axis=1))
+        if ids.size:
+            self.lps_seen = max(self.lps_seen, int(ids.max()))
+        if new.size == 0:
+            return
+        Y = X[new].copy()
+        if prob.ints.size:
+            Y[:, prob.ints] = np.round(Y[:, prob.ints])
+        Y = np.clip(Y, prob.lb, prob.ub)
+        with self.phase("evaluate"):
+            ev = self._evaluate(bk.xp.asarray(Y).astype(self.gene_dtype))
+        hk, hv, hf = (bk.asnumpy(a) for a in ev)
+        now = self.trace.now()
+        for j, i in enumerate(new):
+            self.lps_pool.append(dict(id=int(ids[i]), x=X[i], y=Y[j], obj=float(msg.obj[i]), V=float(hv[j]),
+                                      key=float(hk[j]), feas=bool(hf[j]), t=now, used=False))
+        self.c["lps_points"] += int(new.size)
+        self.lps_pool.sort(key=lambda q: (q["V"], q["key"]))
+        cap = self.lps.pool
+        if len(self.lps_pool) > cap:
+            self.c["lps_dropped"] += sum(1 for q in self.lps_pool[cap:] if not q["used"])
+            del self.lps_pool[cap:]
+        self.trace.event("lps", seq=int(msg.seq), ids=[int(ids[i]) for i in new], V=[float(v) for v in hv],
+                         key=[float(k) for k in hk], feasible=int(hf.sum()), pool=len(self.lps_pool))
+        if self.lp_x is None and self.lps_pool:
+            first = self.lps_pool[0]
+            first["used"] = True
+            self._lp_arrived(first["x"], source="solver_stream", obj=first["obj"])
+
+    def _lps_use(self) -> None:
+        """Turn up to `lp_stream.per_tick` unused pool points, best (V, key) first, into `lp_stream.roundings` children
+        each — the nearest rounding plus randomised ones — repaired in the next candidate set and admitted by ordinary
+        survival only. Origin SEED_LP | INJECTED | IMMIGRANT marks them (a combination no other path produces)."""
+        ls, bk = self.lps, self.bk
+        todo = [q for q in self.lps_pool if not q["used"]][:ls.per_tick]
+        lp_only = bool(self.strat_on and self.strat_lp.any())
+        for q in todo:
+            q["used"] = True
+            r = ls.roundings
+            Xn = bk.xp.asarray(q["y"][None, :]).astype(self.gene_dtype)
+            if r > 1:
+                Xr, _ = lp_round(bk, self.dp, q["x"], r - 1, self.rng_dev, self.rng_host,
+                                 gene_dtype=self.gene_dtype.name, mem_budget_bytes=self.budgets["operators"])
+                Xn = bk.xp.concatenate([Xn, Xr.astype(self.gene_dtype)])
+            sk = self._random_strategies(r, lp_only=lp_only)
+            self.pending.append(_Batch(Xn, np.full(r, ORIGIN_SEED_LP | ORIGIN_INJECTED | ORIGIN_IMMIGRANT, np.uint16),
+                                       repair=True, src="lps", t=self.trace.now(), strat=sk))
+            self.c["lps_used"] += 1
+            self.c["lps_rows"] += r
+            if self.strat_on:
+                self.sc["immigrants"] += np.bincount(sk, minlength=self.S)
+
+    def _lp_for_immigrants(self):
+        """The LP point for stagnation immigrants: with `lp_stream.immigrants`, the pool's best four, round robin."""
+        if self.lps is not None and self.lps.immigrants and self.lps_pool:
+            top = self.lps_pool[:4]
+            q = top[self.lps_rr % len(top)]
+            self.lps_rr += 1
+            return q["x"]
+        return self.lp_x
 
     def _lp_arrived(self, x: np.ndarray, source: str, obj: float | None = None, **info) -> None:
         if x.shape[0] != self.prob.n or not np.all(np.isfinite(x)):
@@ -1727,6 +1813,10 @@ class Engine:
                          strat_children=self.sc_since["children"].tolist())
             for v in self.sc_since.values():
                 v[:] = 0
+        if self.lps is not None:
+            both = ORIGIN_SEED_LP | ORIGIN_INJECTED
+            extra.update(rank0_stream=int(np.sum((pop.rank == R0) & ((pop.origin & both) == both))),
+                         lps_pool=len(self.lps_pool), lps_unused=sum(1 for q in self.lps_pool if not q["used"]))
         self.trace.event(
             "gen", gen=self.gen, best_key=float(hk[hf].min()) if hf.any() else None,
             median_key=float(np.median(fin)) if fin.size else None, feas_share=float(hf.mean()) if hf.size else 0.0,
@@ -1771,6 +1861,13 @@ class Engine:
             out["frontier"] = dict(X=Xf, keys=keys, dist=dist, ids=self.frontier.ids.copy(),
                                    stats=self.frontier.stats(self.best_key if math.isfinite(self.best_key)
                                                              else (float(keys.min()) if keys.size else math.inf)))
+        if self.lps is not None:
+            both = ORIGIN_SEED_LP | ORIGIN_INJECTED
+            out["lp_stream"] = dict(
+                pool=len(self.lps_pool), unused=sum(1 for q in self.lps_pool if not q["used"]),
+                best=dict(V=self.lps_pool[0]["V"], key=self.lps_pool[0]["key"]) if self.lps_pool else None,
+                final_rank0_stream=int(np.sum((pop.rank == R0) & ((pop.origin & both) == both))),
+                final_stream=int(np.sum((pop.origin & both) == both)))
         out["best_x"] = self.best_x
         return out
 
@@ -1853,7 +1950,8 @@ class _Info:
 
 class _WarmupMailbox:
     """In-memory partner for the warm-up: one solver message (a feasible point and an infeasible variant), one info
-    message (incumbent and bound, so the cutoff row is armed), one LP point, and a rejection of the first post."""
+    message (incumbent and bound, so the cutoff row is armed), one LP point, one LP-stream ring, and a rejection of the
+    first post."""
 
     def __init__(self, syn: Problem, rows: int = 3):
         from itrea.exchange.mailbox import Message
@@ -1870,6 +1968,12 @@ class _WarmupMailbox:
         lp = x0.copy()
         lp[syn.isint] += 0.3
         self.lp = _Chan([Message(X=lp[None, :], obj=np.array([obj0]), seq=1, t=0.0)])
+        # the LP stream (D-011, read only with lp_stream.enabled): `rows` points in one ring, so the "one" pass
+        # evaluates a single nearest rounding as well
+        pts = np.vstack([x0 + 0.3 * syn.isint, x0 + 0.6 * syn.isint, x0 + 0.2 * syn.isint])[:rows]
+        pts = np.clip(pts, syn.lb, syn.ub)
+        self.lps = _Chan([Message(X=pts, obj=np.array([syn.objective(r) for r in pts]), seq=1, t=0.0,
+                                  origin=np.arange(1, pts.shape[0] + 1, dtype=np.int64))])
 
     def stopped(self) -> bool:
         return False

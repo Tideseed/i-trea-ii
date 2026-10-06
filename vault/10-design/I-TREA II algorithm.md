@@ -45,6 +45,13 @@ marked infeasible in the population (it moves to Rank 2) and counted — part I'
 1. **Exchange in** (every `exchange_poll_s`): the solver's incumbent, its pool ("very good" = within `inject_band`
    relative gap of its best, at most `inject_k`), its dual bound and (once) its root LP solution. Injected vectors are
    evaluated and enter C (as part I's population takes in new members, they are ranked by the same rule).
+   With `lp_stream.enabled` ([[D-011 Solver streams good infeasible solutions to the EA]]) also the solver's stream of
+   good infeasible node LP points: each new point is rounded to the nearest integer point and evaluated; the best
+   `lp_stream.pool` points are ranked by (V of that rounding, key) — Berk's order, least infeasible first — and each
+   unused point, best first (at most `per_tick` per tick), gives `roundings` children (the nearest rounding +
+   randomised ones) that are repaired and join C like any child: Rank 0 takes the super-optimal infeasible ones only
+   under its cap and selection rule. Stagnation LP-rounding immigrants then draw their LP point from the pool's best
+   four, round robin.
 2. **Parent selection:** tournament of size `tournament_k` with part I's comparator (`itrea`: Rank 1 < Rank 0 <
    Rank 2, ties by key then V), or `deb` / `stochastic` (stochastic ranking, `p_f`). Optional per-rank parent pools
    (`parent_rank_weights` = [Rank 0, Rank 1, Rank 2]; default one pool, as in part I where every member can enter the

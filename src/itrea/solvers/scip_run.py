@@ -1,6 +1,7 @@
 """SCIP solver process: `python -m itrea.solvers.scip_run --instance P --seed S --budget T --run-dir D [--mailbox M]
 [--run-id R] [--role-name N] [--no-barrier] [--sol-out F] [--mem-mb MB] [--recv] [--send] [--inject-band B]
-[--inject-k K] [--poll-s S] [--inert] [--no-plugin] [--emphasis E] [--arm A]`.
+[--inject-k K] [--poll-s S] [--inert] [--no-plugin] [--emphasis E] [--arm A] [--lp-stream [--lp-stream-share F]
+[--lp-stream-ring R] [--lp-stream-min-gap S] [--lp-stream-q Q] [--lp-stream-patience S]]`.
 
 PySCIPOpt 6.2.1 / SCIP 10, one thread, `limits/memory` = --mem-mb, `randomization/randomseedshift` = seed (the only
 seed parameter varied, as in optopt; common random numbers across arms of a block come from passing the same seed).
@@ -39,12 +40,29 @@ The info channel gets {incumbent, dual_bound, status, stage, n_sols, nodes} when
 solution (original space, `getSolVal(None, v)`) is posted once to `lp` at the first depth-0 AFTERLPNODE call with an
 optimal LP.
 
+LP stream (--lp-stream, D-011; Berk 2026-10-06: "when solver comes up with suitable good infeasible solutions
+(minimize infeasibility then maximize objective function) it might be able to inject to EA's population"): at every
+plugin call after an optimal node LP (AFTERLPNODE, and DURINGLPLOOP for the cut rounds; never in probing) the plugin
+reads two free numbers — the count of fractional integer variables (`getNLPBranchCands`, the infeasibility proxy:
+nearest rounding must repair at least that many coordinates) and the LP objective. An integral LP point is skipped
+(SCIP checks it itself). A point is READ (`getSolVal(None, v)` over the cached original variables, ~0.4 µs per
+variable, measured 2026-10-06) only when (a) a token bucket allows it — the stream's own time (read + post) stays
+under --lp-stream-share of the wall clock since t0, plus a start allowance of two reads so the first point leaves at
+once — (b) at least --lp-stream-min-gap seconds passed since the last read, and (c) the node is good: during the
+first 8 LP solves any node; then its fractional count is at most the --lp-stream-q quantile of the last 32 LP solves,
+or --lp-stream-patience seconds passed since (a) and (b) first allowed a read (so a long dive of poor nodes cannot
+starve the stream). Every node LP has an objective no worse than the root bound and better than SCIP's incumbent
+(else the node is pruned): the points are super-optimal and, rounded, are Rank 0 material for the EA. The last
+--lp-stream-ring points are posted together to `lps` (newest last; `origin` carries the point ids), so an EA that
+misses a post loses nothing.
+
 --inert: the plugin is installed and does (1) and the stop checks, never polls or posts (harness-matched A0).
 Without --recv/--send the plugin is inert as well. --no-plugin (calibration only, E0's "no exchange" reference): no
 plugin; the stop file is then honoured only at incumbents and SIGTERM only through SCIP's own limits.
 """
 from __future__ import annotations
 
+import collections
 import json
 import time
 
@@ -68,6 +86,17 @@ def build_parser():
                     help="static SCIP emphasis for A0* (D-002): 'default', one of "
                          f"{'|'.join(_EMPHASES)} (setEmphasis), or <area>_<setting> with area in {'|'.join(_AREAS)} "
                          f"and setting in {'|'.join(_SETTINGS)}")
+    g = ap.add_argument_group("LP stream (D-011)")
+    g.add_argument("--lp-stream", action="store_true",
+                   help="stream good infeasible node LP points to the EA (needs --send)")
+    g.add_argument("--lp-stream-share", type=float, default=0.02,
+                   help="the stream's read+post time stays under this share of the wall clock")
+    g.add_argument("--lp-stream-ring", type=int, default=3, help="points per post (the newest)")
+    g.add_argument("--lp-stream-min-gap", type=float, default=0.25, help="seconds between two reads, at least")
+    g.add_argument("--lp-stream-q", type=float, default=0.25,
+                   help="a node is good if its fractional count is at most this quantile of the last 32 LP solves")
+    g.add_argument("--lp-stream-patience", type=float, default=1.0,
+                   help="seconds a due read waits for a good node before it takes the next one")
     return ap
 
 
@@ -103,6 +132,12 @@ def validate(args) -> None:
     if args.seed < 0:
         raise BadArguments("--seed must be >= 0 (randomization/randomseedshift)")
     _parse_emphasis(args.emphasis)
+    if args.lp_stream and not args.send:
+        raise BadArguments("--lp-stream needs --send")
+    if not (0.0 < args.lp_stream_share <= 1.0 and args.lp_stream_ring >= 1 and args.lp_stream_min_gap >= 0.0
+            and 0.0 <= args.lp_stream_q <= 1.0 and args.lp_stream_patience >= 0.0):
+        raise BadArguments("--lp-stream-share in (0, 1], --lp-stream-ring >= 1, --lp-stream-min-gap >= 0, "
+                           "--lp-stream-q in [0, 1], --lp-stream-patience >= 0")
 
 
 def scip_version() -> str:
@@ -144,6 +179,22 @@ class _Exchange:
         from pyscipopt import SCIP_HEURTIMING, SCIP_LPSOLSTAT, SCIP_RESULT, SCIP_STAGE
         self.SOLVING, self.AFTERLPNODE = SCIP_STAGE.SOLVING, int(SCIP_HEURTIMING.AFTERLPNODE)
         self.SOLVED = SCIP_STAGE.SOLVED
+        self.LPS_TIMING = int(SCIP_HEURTIMING.AFTERLPNODE) | int(SCIP_HEURTIMING.DURINGLPLOOP)
+        # LP stream (D-011)
+        self.lps_on = bool(getattr(args, "lp_stream", False)) and mode == "active" and self.send
+        if self.lps_on:
+            self.lps_share, self.lps_min_gap = float(args.lp_stream_share), float(args.lp_stream_min_gap)
+            self.lps_q, self.lps_patience = float(args.lp_stream_q), float(args.lp_stream_patience)
+            self.lps_ring: collections.deque = collections.deque(maxlen=int(args.lp_stream_ring))
+        self.lps_win: collections.deque = collections.deque(maxlen=32)
+        self.lps_est = 4e-7 * self.n + 2e-3          # first estimate of one read + post (s); then measured
+        self.lps_init = 2 * self.lps_est              # start allowance: the first point leaves at once
+        self.lps_spent = 0.0
+        self.lps_last = -float("inf")
+        self.lps_wait: float | None = None
+        self.lps_id = 0
+        self.lps_stats = dict(lp_solves=0, integral=0, reads=0, early=0, quality=0, patience=0, read_s=0.0, post_s=0.0,
+                              bad=0)
         self.LP_OPTIMAL = SCIP_LPSOLSTAT.OPTIMAL
         self.DIDNOTRUN, self.DIDNOTFIND, self.FOUNDSOL = (SCIP_RESULT.DIDNOTRUN, SCIP_RESULT.DIDNOTFIND,
                                                           SCIP_RESULT.FOUNDSOL)
@@ -194,6 +245,8 @@ class _Exchange:
         if (self.mode == "active" and self.send and not self.lp_posted and timing & self.AFTERLPNODE
                 and stage == self.SOLVING and m.getDepth() == 0):
             self._post_root_lp()
+        if self.lps_on and timing & self.LPS_TIMING and stage == self.SOLVING:
+            self._lp_stream_tick(now, t)
         if now < self.next_poll:
             return {"result": self.DIDNOTRUN}
         self.next_poll = now + self.poll_s
@@ -368,6 +421,71 @@ class _Exchange:
         finally:
             self.proc.stats.seconds += time.perf_counter() - tp
 
+    def _lp_stream_tick(self, now: float, t: float) -> None:
+        """One optimal LP solve seen by the plugin: decide whether its point is read (module docstring)."""
+        m = self.m
+        if m.inProbing() or m.getLPSolstat() != self.LP_OPTIMAL:
+            return
+        st = self.lps_stats
+        st["lp_solves"] += 1
+        nfrac = int(m.getNLPBranchCands())
+        if nfrac == 0:
+            st["integral"] += 1
+            return
+        self.lps_win.append(nfrac)
+        if self.lps_spent + self.lps_est > self.lps_share * t + self.lps_init:
+            return
+        if now - self.lps_last < self.lps_min_gap:
+            return
+        if self.lps_wait is None:
+            self.lps_wait = now
+        if len(self.lps_win) < 8:
+            why = "early"
+        elif nfrac <= float(np.quantile(np.fromiter(self.lps_win, dtype=np.float64), self.lps_q)):
+            why = "quality"
+        elif now - self.lps_wait >= self.lps_patience:
+            why = "patience"
+        else:
+            return
+        self._lp_stream_read(now, t, nfrac, why)
+
+    def _lp_stream_read(self, now: float, t: float, nfrac: int, why: str) -> None:
+        m, st = self.m, self.lps_stats
+        tp = time.perf_counter()
+        x = np.fromiter((m.getSolVal(None, v) for v in self.ov), dtype=np.float64, count=self.n)
+        t_read = time.perf_counter() - tp
+        self.lps_last, self.lps_wait = now, None
+        if not np.all(np.isfinite(x)):
+            st["bad"] += 1
+            self.lps_spent += t_read
+            return
+        obj = float(self.c_local @ x + self.offset)
+        self.lps_id += 1
+        self.lps_ring.append((self.lps_id, self.proc.namemap.to_canonical(x), obj))
+        X = np.vstack([r[1] for r in self.lps_ring])
+        seq = self.proc.mailbox.lps.post(X, np.array([r[2] for r in self.lps_ring]),
+                                         origin=np.array([r[0] for r in self.lps_ring], dtype=np.int64))
+        dt = time.perf_counter() - tp
+        self.lps_spent += dt
+        self.lps_est = 0.5 * self.lps_est + 0.5 * dt
+        st["reads"] += 1
+        st[why] += 1
+        st["read_s"] += t_read
+        st["post_s"] += dt - t_read
+        self.proc.stats.add("lps_posts")
+        self.proc.stats.bytes_out += int(X.nbytes)
+        self.proc.stats.seconds += dt
+        self.proc.trace.event("lps", seq=seq, id=self.lps_id, depth=int(m.getDepth()), nodes=int(m.getNNodes()),
+                              nfrac=nfrac, obj=obj, why=why, read_s=round(t_read, 6), s=round(dt, 6))
+
+    def lp_stream_summary(self) -> dict | None:
+        if not self.lps_on:
+            return None
+        st = dict(self.lps_stats)
+        st.update(read_s=round(st["read_s"], 6), post_s=round(st["post_s"], 6), spent_s=round(self.lps_spent, 6),
+                  points=self.lps_id)
+        return st
+
     def callback_summary(self, t_end: float) -> dict:
         tail = t_end - (self.t_last if self.t_last is not None else 0.0)
         return dict(calls=self.calls, calls_by_timing={str(k): v for k, v in sorted(self.calls_by_timing.items())},
@@ -477,7 +595,8 @@ def body(proc):
                         lp_iterations_per_s=round(lpi / max(t_end, 1e-9), 3),
                         presolve_s=round(m.getPresolvingTime(), 6), n_sols_found=int(m.getNSolsFound()),
                         n_best_sols_found=int(m.getNBestSolsFound()), callbacks=cb if mode != "none" else None,
-                        received_vectors=len(ex.received), posted_keys=len(ex.posted_keys), root_lp_posted=ex.lp_posted)
+                        received_vectors=len(ex.received), posted_keys=len(ex.posted_keys), root_lp_posted=ex.lp_posted,
+                        lp_stream=ex.lp_stream_summary())
 
 
 def main(argv=None) -> int:

@@ -11,6 +11,8 @@
 # row_scan_cap, row_scan_filter (vault 10-design/Feasibility jump local search.md).
 # 2026-10-06 (hash unchanged, 9ac4a93bf93b): the `strategy` section (self-adaptive repair strategy) was added OFF; while
 # strategy.enabled is false the section is inert and is left out of the hash (EAConfig.hash).
+# 2026-10-06 (hash unchanged): the `lp_stream` section (D-011, the solver's good infeasible node LP points streamed into
+# the population) was added OFF, under the same rule.
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -114,6 +116,17 @@ strategy:
   - true
   mutation_rate: 0.1
   min_share: 0.05
+lp_stream:
+  enabled: false
+  share: 0.02
+  ring: 3
+  min_gap: 0.25
+  quantile: 0.25
+  patience: 1.0
+  roundings: 4
+  per_tick: 2
+  pool: 16
+  immigrants: true
 backend: cupy
 gpu_mem_gb: 12.0
 log_every: 10

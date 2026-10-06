@@ -7,7 +7,7 @@ Never the other Redis instances on the host (they belong to other services), nev
 
 Keys of one run (all under `itrea:<run_id>:`, deleted by the runner at the end; 1-day expiry as a backstop):
     order                       canonical variable names (JSON list)
-    ch:<name>                   stream per channel (to_solver, to_ea, lp): fields x (encoded vector), obj, seq, t,
+    ch:<name>                   stream per channel (to_solver, to_ea, lp, lps): fields x (encoded vector), obj, seq, t,
                                 origin; MAXLEN ~64 — history of every exchange, the latest entry is the "message"
     info                        JSON string (solver incumbent, dual bound, status, seq, t)
     pool                        sorted set: member = solution id, score = key (lower is better) — the shared pool
@@ -58,8 +58,9 @@ def decode(b: bytes) -> np.ndarray:
 class _Stream:
     """One channel: XADD to post, newest entry to poll (latest message wins, as in the file mailbox)."""
 
-    def __init__(self, r, key: str):
+    def __init__(self, r, key: str, maxlen: int | None = None):
         self.r, self.key = r, key
+        self.maxlen = MAXLEN if maxlen is None else int(maxlen)
         self.seq = 0
         self._last_id: bytes | None = None
 
@@ -76,7 +77,7 @@ class _Stream:
         if origin is not None:
             fields["origin"] = np.atleast_1d(np.asarray(origin, dtype=np.int64)).tobytes()
         pipe = self.r.pipeline()
-        pipe.xadd(self.key, fields, maxlen=MAXLEN, approximate=True)
+        pipe.xadd(self.key, fields, maxlen=self.maxlen, approximate=True)
         pipe.expire(self.key, EXPIRE_S)
         pipe.execute()
         return self.seq
@@ -141,6 +142,8 @@ class RedisMailbox:
         self.to_solver = _Stream(self.r, self.p + "ch:to_solver")
         self.to_ea = _Stream(self.r, self.p + "ch:to_ea")
         self.lp = _Stream(self.r, self.p + "ch:lp")
+        self.lps = _Stream(self.r, self.p + "ch:lps", maxlen=8)  # D-011 LP stream (origin = point ids); each entry
+        # is a ring of up to r full vectors, so the history is kept short
         self.info = _Info(self.r, self.p + "info")
         if create and next(iter(self.r.scan_iter(match=self.p + "*", count=100)), None) is not None:
             raise RuntimeError(f"redis key space {self.p}* is not empty (stale run?)")

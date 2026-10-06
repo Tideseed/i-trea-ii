@@ -46,3 +46,8 @@ counts as foreign. For development runs the pool is started with `--allow-servin
 servers (identified by their systemd cgroup) are recorded as `tolerated_pids` in each run's GPU-health record instead
 of voiding the run. A chat with [local LLM agent] during a run adds bandwidth noise — acceptable for descriptive development
 numbers; confirmatory and screening runs still require both servers stopped and void on any foreign process.
+
+## Addendum 2026-10-06 15:2x — yardstick
+Berk: "You are benchmarking EA but our EA shall be coupled with a solver similar to what cuopt does." §3 is amended
+by [[D-011 Solver streams good infeasible solutions to the EA]] §1: development changes are judged on the coupled arm
+A3 (against A0 and A6); A5 (the EA alone) is a diagnostic only.

@@ -223,7 +223,7 @@ def test_backend_auto_and_bad_dtype_refused():
 # ----------------------------------------------------------------------------------------------- exchange
 class SpyMailbox:
     """Records every attribute access; reading a solver channel raises (the one-way arm must not)."""
-    FORBIDDEN = ("to_ea", "info", "lp", "verdicts")
+    FORBIDDEN = ("to_ea", "info", "lp", "lps", "verdicts")
 
     def __init__(self):
         object.__setattr__(self, "accessed", [])

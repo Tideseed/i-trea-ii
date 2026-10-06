@@ -12,7 +12,7 @@ X1: a dead SCIP logged "ok"), records resources and merges the trajectories.
 | module | role in mailbox | arguments |
 |---|---|---|
 | `itrea.ea.run` | `ea` | `--instance P --config Y [--set k=v …] --seed S --budget T --run-dir D [--mailbox M] [--run-id R (default $ITREA_RUN_ID)] [--role-name N] [--no-barrier] [--barrier-timeout S] [--sol-out F] [--arm A] [--backend cupy\|numpy] [--gpu-mem-gb G]` |
-| `itrea.solvers.scip_run` | `solver` | `--instance P --seed S --budget T --run-dir D [--mailbox M] [--no-barrier] [--sol-out F] [--mem-mb MB] [--recv] [--send] [--inject-band B] [--inject-k K] [--poll-s S] [--inert] [--no-plugin] [--emphasis E] [--run-id R] [--role-name N] [--barrier-timeout S] [--arm A]` |
+| `itrea.solvers.scip_run` | `solver` | `--instance P --seed S --budget T --run-dir D [--mailbox M] [--no-barrier] [--sol-out F] [--mem-mb MB] [--recv] [--send] [--inject-band B] [--inject-k K] [--poll-s S] [--inert] [--no-plugin] [--emphasis E] [--run-id R] [--role-name N] [--barrier-timeout S] [--arm A] [--lp-stream [--lp-stream-share F] [--lp-stream-ring R] [--lp-stream-min-gap S] [--lp-stream-q Q] [--lp-stream-patience S]]` |
 | `itrea.solvers.highs_run` | `solver` | same as SCIP (`--recv` requires the user-solution callback test to pass) |
 | `itrea.solvers.cuopt_run` | `cuopt` | `--instance P --seed S --budget T --run-dir D [--mailbox M] [--run-id R] [--role-name N] [--no-barrier] [--sol-out F] [--cpu-threads N (≥ 2)] [--gpu-mem-gb G] [--send] [--no-warmup] [--arm A]` — run under `--cuopt-python` (an interpreter with cuOpt 26.08); never receives solutions (a SetSolutionCallback disables cuOpt's presolve) |
 
@@ -21,7 +21,9 @@ harness-matched control); cuOpt gets `--gpu-mem-gb <same limit as the EA pool>` 
 `--emphasis`; the EA gets `--config <run_dir>/config.yaml` (the effective configuration, no `--set`).
 `--recv`: accept the partner's solutions (SCIP: heuristic plugin + `trySol`; HiGHS: user-solution callback).
 `--send`: publish own incumbents (+ pool within `--inject-band`, at most `--inject-k`), dual bound and the root LP
-solution to the EA. Arms without exchange omit both. `--role-name` lets two solver processes share a run dir (A1:
+solution to the EA. `--lp-stream` (SCIP only, needs `--send`; D-011): also stream good infeasible node LP points to the
+EA's `lps` channel under a time budget — the runner adds it with the stream's parameters when the EA configuration has
+`lp_stream.enabled`. Arms without exchange omit both. `--role-name` lets two solver processes share a run dir (A1:
 `solver` and `solver2`).
 
 ## Files each process writes in its run directory
