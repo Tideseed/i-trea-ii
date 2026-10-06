@@ -17,7 +17,7 @@ export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"   # a transien
 LOG=~/.local/state/itrea/serving-window.log
 HOLD=~/.config/cronrestore/hold-units
 WHO="i-trea-ii (Claude Code)"
-UNITS="ornith-vllm llama-qwen38"
+UNITS="${ITREA_UNITS:-ornith-vllm llama-qwen38}"   # ITREA_UNITS=llama-qwen38: a daytime window stops [local LLM agent] only (D-010)
 CANARIES="f663edfdcbff 36f278b0ee63"   # local-model-canary, canary-hello
 RESTORE_UNIT=itrea-restore-serving     # transient timer + service made by `schedule`
 RUNNER_LOCK="${ITREA_RUNNER_LOCK:-/tmp/itrea-runner.lock}"   # gates.RunLock: held for a whole run set
