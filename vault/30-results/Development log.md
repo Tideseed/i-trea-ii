@@ -55,3 +55,29 @@ Mean bounded d (positive = coupled better): vs SCIP +0.23 (4 better, 2 worse, 3 
 - Run hygiene: 63/63 completed, every incumbent checked (0 unchecked), **compiled_on_clock False on all runs** (#4 holds on the dev set), GPU health ok, no thermal pause or rest.
 
 **Next (D-010 order):** (b) the EA's feasibility search — probe 1 (EA alone, 6 instances): longer FJ budget (c01), + rhs row scale + an LP point after t0 (c02); then (c) an EA back-off when it is not contributing (interference); then operators and the exchange.
+
+## Feasibility probe 1 (2026-10-06 11:54–13:02) — EA alone, seed 0, 120 s
+Variants (overrides on `9ac4a93bf93b`): **c01** longer feasibility jump (max_steps 20,000, stall 1,000); **c02** c01 +
+`ranks.viol_norm: rhs` + an LP point after t0 (`seeding.lp_source: highs_async`); **c03** c01 + LP point only;
+**c04** c01 + rhs only. P(120) (1.0 = never feasible):
+
+| instance | default | c01 | c02 | c03 | c04 | SCIP alone | cuOpt alone |
+|---|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 1.000 | 1.000 | 0.255 | **0.229** | 1.000 | 1.000 | 0.643 |
+| sing44 | 1.000 | 0.975 | 1.000 | **0.415** | 1.000 | 0.518 | 0.726 |
+| glass4 | 1.000 | 1.000 | 0.300 | 1.000 | **0.277** (opt.) | 0.332 | 0.308 |
+| fhnw-binpack4-48 | 1.000 | 1.000 | **0.196** (opt.) | 1.000 | 0.253 (opt.) | 1.000 | 0.005 |
+| radiationm18-12-05 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.154 | 0.009 |
+| rail01 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.927 |
+
+Coupled with c04 (A3@c04, seed 0) vs coupled default: glass4 0.218 vs 0.257; sing44 0.566 vs 0.656 (SCIP alone 0.518);
+neos-3024952-loue 0.417 vs 0.375; fhnw-binpack4-48 0.635 (optimum found at 76 s, vs 30 s for the EA alone — in coupled
+mode the EA also gets SCIP's root LP, which c03 shows hurts fhnw; plus interference).
+
+**Reading.** No single repair setting wins: the **LP point** unlocks the UC case and sing44 (the EA alone then beats SCIP
+alone and cuOpt alone on both); **rhs row scaling** unlocks glass4 and fhnw-binpack4-48 (proven optima in seconds);
+each hurts where the other helps. radiationm18-12-05 and rail01 stay out of reach (cuOpt: 0.009 / 0.927).
+**Next idea (to test):** self-adaptive repair strategy — every individual carries its row scale (l2 / rhs) and LP
+guidance (on / off) as inherited, mutable genes; the local search runs per strategy group; the strategy that produces
+survivors spreads, so the population acts as a portfolio on every instance. Then the EA back-off (interference) and the
+FJ moves for general integers (radiationm).
