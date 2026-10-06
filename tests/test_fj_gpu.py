@@ -25,8 +25,8 @@ cp = pytest.importorskip("cupy")
 from itrea.benchmarks import toy  # noqa: E402
 from itrea.config import RepairCfg  # noqa: E402
 from itrea.ea.evaluate import to_device  # noqa: E402
-from itrea.ea.ls_fj_gpu import (FJGpu, ST_BUDGET, ST_FEASIBLE, ST_STALL, VT_BIN, VT_CONT,  # noqa: E402
-                                VT_FIXED, VT_INT)
+from itrea.ea.ls_fj_gpu import (FJGpu, ST_ACTIVE, ST_BUDGET, ST_FEASIBLE, ST_HORIZON, ST_STALL,  # noqa: E402
+                                VT_BIN, VT_CONT, VT_FIXED, VT_INT)
 from itrea.problem import from_arrays  # noqa: E402
 
 pytestmark = pytest.mark.gpu
@@ -106,9 +106,10 @@ def check_invariants(fj, prob, X):
 
 # ----------------------------------------------------------------------- NumPy reference (one individual)
 def ref_fj(prob, x0, max_steps=2000, stall_steps=100, bump=1.0, cut_rhs=None, max_cand=16, seed=0,
-           tol=1e-9, cap=1e-7, obj_weight=None):
+           tol=1e-9, cap=1e-7, obj_weight=None, max_lane_steps=None):
     """Plain NumPy feasibility jump with the kernel's move rule. Returns (x, status, moves).
-    obj_weight: `weighted` mode (score += obj_weight * cmin_j * d / max|cmin|); None = no objective term."""
+    obj_weight: `weighted` mode (score += obj_weight * cmin_j * d / max|cmin|); None = no objective term.
+    max_lane_steps: the repair clock's horizon (ST_HORIZON after that many steps, checked after the other rules)."""
     rng = np.random.default_rng(seed)
     A = sps.csr_matrix(prob.A)
     rl, ru, sc = prob.rl.astype(float).copy(), prob.ru.astype(float).copy(), prob.row_norm.astype(float).copy()
@@ -140,7 +141,7 @@ def ref_fj(prob, x0, max_steps=2000, stall_steps=100, bump=1.0, cut_rhs=None, ma
             return (np.where(a < lo, lo - a, 0.0) + np.where(a > hi, a - hi, 0.0)) / sc[idx]
 
     F = float(vv(act, rows_all).sum())
-    Fbest, since, moves = F, 0, 0
+    Fbest, since, moves, steps = F, 0, 0, 0
     while True:
         V = np.flatnonzero(host_isviol(act, rl, ru, tol, cap))
         if V.size == 0:
@@ -149,6 +150,9 @@ def ref_fj(prob, x0, max_steps=2000, stall_steps=100, bump=1.0, cut_rhs=None, ma
             return x, ST_BUDGET, moves
         if since >= stall_steps:
             return x, ST_STALL, moves
+        if max_lane_steps is not None and steps >= max_lane_steps:
+            return x, ST_HORIZON, moves
+        steps += 1
         wv = w[V] * vv(act[V], V)
         r = int(rng.choice(V, p=wv / wv.sum()))
         best = (math.inf, 0.0, -1, 0.0)
@@ -470,3 +474,164 @@ def test_setcover_throughput(bk, capsys):
                      f"/{P}, mean key {keys.mean():,.0f} -> {keys2.mean():,.0f}")
     with capsys.disabled():
         print("\n" + "\n".join(lines))
+
+
+# ------------------------------------------------------------------- the repair clock's horizon (host side only)
+class _Countdown:
+    """should_stop that answers False `n` times, then True (FJGpu polls it before a chunk and after every launch)."""
+
+    def __init__(self, n: int):
+        self.n, self.calls = n, 0
+
+    def __call__(self) -> bool:
+        self.calls += 1
+        return self.calls > self.n
+
+
+def _armed(name, bk, seed=5, **kw):
+    """(problem, starts, an FJGpu with the cutoff armed so that some lanes beat it at varied step counts and others
+    stall) — the GPU twin of tests/test_repair_clock.py's armed cases."""
+    if name == "set_cover":
+        prob = toy.set_cover(40, 25, seed=0)
+        X0 = random_starts(prob, 64, seed=4, p_one=0.3)
+        cut = 30.0
+    else:
+        prob = toy.mixed(seed=0)
+        X0 = random_starts(prob, 64, seed=4)
+        pre = make_fj(prob, bk, max_steps=20000, stall_steps=300, seed=3)
+        Xp = cp.asarray(X0)
+        pre.run(Xp)
+        keys = [prob.key(x) for x in cp.asnumpy(Xp) if prob.check(x).feasible]
+        cut = float(np.quantile(keys, 0.05))
+    fj = make_fj(prob, bk, max_steps=20000, stall_steps=300, seed=seed, **kw)
+    fj.set_cutoff(cut)
+    return prob, X0, fj
+
+
+@pytest.mark.parametrize("name", ["set_cover", "mixed"])
+def test_horizon_counterfactual_identity(bk, name):
+    """A horizon-h call is a prefix of the unbounded call on the GPU too: every lane that stopped within h steps is
+    identical (x, status, steps, moves); every other lane has ST_HORIZON and exactly h steps."""
+    prob, X0, fu = _armed(name, bk)
+    XU = cp.asarray(X0)
+    fu.run(XU)
+    XU = cp.asnumpy(XU)
+    su, stu, mu = fu.last_steps.copy(), fu.last_status.copy(), fu.last_moves.copy()
+    assert np.any(stu == ST_FEASIBLE) and np.any(stu != ST_FEASIBLE)
+    for h in sorted({0, 1, 7, 8, 9, 33, int(np.median(su)), int(su.max()) - 1, int(su.max())} - {-1}):
+        _, _, fh = _armed(name, bk)
+        X = cp.asarray(X0)
+        out = fh.run(X, horizon=h)
+        X = cp.asnumpy(X)
+        within = su <= h
+        np.testing.assert_array_equal(X[within], XU[within])
+        np.testing.assert_array_equal(fh.last_status[within], stu[within])
+        np.testing.assert_array_equal(fh.last_steps[within], su[within])
+        np.testing.assert_array_equal(fh.last_moves[within], mu[within])
+        assert np.all(fh.last_status[~within] == ST_HORIZON) and np.all(fh.last_steps[~within] == h)
+        assert out["finished_horizon"] == int((~within).sum()) and out["cap_hits"] == 0
+        assert out["finished_feasible"] + out["finished_stall"] + out["finished_budget"] == X0.shape[0]
+        ch = fh.last_profile["chunks"]
+        assert all(c["cum"][-1] <= h for c in ch)
+
+
+def test_equal_steps_after_every_launch(bk):
+    """The invariant the horizon rests on: after EVERY launch all still-active lanes have the same step count — the
+    cumulative iterations of the launches so far. A stop after launch i leaves them ACTIVE with that count; a horizon
+    at that count gives them ST_HORIZON with it."""
+    prob, X0, fu = _armed("set_cover", bk)
+    X = cp.asarray(X0)
+    out = fu.run(X)
+    cums = fu.last_profile["chunks"][0]["cum"]
+    assert out["launches"] == len(cums) - 1 >= 3 and cums[0] == 0 and all(np.diff(cums) > 0)
+    seen = 0
+    for i in range(1, len(cums) - 1):
+        _, _, fi = _armed("set_cover", bk)
+        fi.run(cp.asarray(X0), should_stop=_Countdown(i))
+        ci = int(fi.last_profile["chunks"][0]["cum"][-1])      # its own launches (their sizes adapt to time)
+        act = fi.last_status == ST_ACTIVE
+        assert np.all(fi.last_steps[act] == ci) and np.all(fi.last_steps <= ci)
+        seen += int(act.any())
+        _, _, fh = _armed("set_cover", bk)
+        fh.run(cp.asarray(X0), horizon=ci)
+        np.testing.assert_array_equal(fh.last_status == ST_HORIZON, act)
+        np.testing.assert_array_equal(fh.last_steps, fi.last_steps)
+    assert seen >= 1
+
+
+def test_horizon_unset_is_the_old_loop(bk):
+    """Without horizon / cap_s nothing changes (no new counter); a horizon never reached and a deadline never reached
+    give the same rows, statuses, steps and moves."""
+    prob = toy.set_cover(200, 120, density=0.05, seed=1)
+    X0 = random_starts(prob, 32, seed=2, p_one=0.02)
+    res = []
+    for kw in ({}, {"horizon": 1 << 40}, {"cap_s": 3600.0}):
+        fj = make_fj(prob, bk, seed=5)
+        X = cp.asarray(X0)
+        out = fj.run(X, **kw)
+        res.append((cp.asnumpy(X), fj.last_status.copy(), fj.last_steps.copy(), fj.last_moves.copy(), out))
+    assert "finished_horizon" not in res[0][4] and "cap_hits" not in res[0][4]
+    for r in res[1:]:
+        for a, b in zip(res[0][:4], r[:4]):
+            np.testing.assert_array_equal(a, b)
+        assert r[4]["finished_horizon"] == 0 and r[4]["cap_hits"] == 0 and r[4]["launches"] == res[0][4]["launches"]
+
+
+def test_horizon_semantics_agree_with_the_cpu_and_the_reference(bk):
+    """x0 + x1 >= 3 on binaries (infeasible: every lane stalls at the same step s): under horizon h the GPU kernel,
+    the CPU reference (ls_fj_cpu) and ref_fj give the same status — ST_HORIZON below s, the stall rule at h = s and
+    above (the horizon is checked last) — and the GPU and CPU the same step counts."""
+    from itrea.backend import get_backend
+    from itrea.ea.ls_fj_cpu import FJCpu
+    prob = from_arrays(sps.csr_matrix(np.array([[1.0, 1.0]])), [3.0], [np.inf], [0, 0], [1, 1], [1.0, 1.0],
+                       [True, True])
+    X0 = np.zeros((4, 2))
+    nbk = get_backend("numpy")
+    cpu0 = FJCpu(to_device(prob, nbk), RepairCfg(max_steps=2000, stall_steps=50), 1e-9, 64 << 20, 1)
+    cpu0.run(X0.copy())
+    s = int(cpu0.last_steps[0])
+    assert np.all(cpu0.last_status == ST_STALL) and np.all(cpu0.last_steps == s)
+    for h in (0, 1, 20, s - 1, s, s + 1, 1000):
+        g = make_fj(prob, bk, max_steps=2000, stall_steps=50, seed=1)
+        g.run(cp.asarray(X0), horizon=h)
+        c = FJCpu(to_device(prob, nbk), RepairCfg(max_steps=2000, stall_steps=50), 1e-9, 64 << 20, 1)
+        c.run(X0.copy(), horizon=h)
+        want = ST_HORIZON if h < s else ST_STALL
+        assert np.all(g.last_status == want) and np.all(c.last_status == want)
+        np.testing.assert_array_equal(g.last_steps, c.last_steps)
+        _, st, _ = ref_fj(prob, X0[0], max_steps=2000, stall_steps=50, max_lane_steps=h)
+        assert st == want
+
+
+def test_horizon_does_not_depend_on_chunking(bk):
+    prob = toy.set_cover(200, 120, density=0.05, seed=1)
+    X0 = random_starts(prob, 40, seed=2, p_one=0.02)
+    big = make_fj(prob, bk, seed=5)
+    Xa = cp.asarray(X0)
+    big.run(Xa, horizon=24)
+    small = make_fj(prob, bk, seed=5, budget=7 * (24 * big.m_aug + 80))
+    Xb = cp.asarray(X0)
+    out = small.run(Xb, horizon=24)
+    assert out["chunk"] == 7 and len(small.last_profile["chunks"]) == 6
+    np.testing.assert_array_equal(cp.asnumpy(Xa), cp.asnumpy(Xb))
+    np.testing.assert_array_equal(big.last_status, small.last_status)
+    np.testing.assert_array_equal(big.last_steps, small.last_steps)
+
+
+def test_deadline_projects_every_chunk_it_did_not_reach(bk):
+    """A deadline already passed: no chunk is left raw — each is projected (prep, fj_init and one launch of 0 steps,
+    which applies the stop rules), no step is made, the still-violated lanes get ST_HORIZON, every chunk counts as a
+    cap hit. (Before the clock, a run-level stop left later chunks untouched; that path is unchanged.)"""
+    prob = toy.set_cover(200, 120, density=0.05, seed=1)
+    X0 = random_starts(prob, 24, seed=3, p_one=0.02) + 0.4          # fractional: the projection must round them
+    proj = np.clip(np.rint(X0), prob.lb, prob.ub)
+    fj = make_fj(prob, bk, seed=5, budget=6 * (24 * (prob.m + 1) + 80))   # float64 C-contiguous X: 4 chunks of 6
+    X = cp.asarray(X0)
+    out = fj.run(X, cap_s=1e-9)
+    n_chunks = len(fj.last_profile["chunks"])
+    assert n_chunks == 4 and out["cap_hits"] == n_chunks and out["launches"] == n_chunks and out["moves"] == 0
+    np.testing.assert_array_equal(cp.asnumpy(X), proj)
+    assert np.all(fj.last_steps == 0) and set(fj.last_status.tolist()) <= {ST_FEASIBLE, ST_HORIZON}
+    feas = np.array([prob.check(x).feasible for x in proj])
+    np.testing.assert_array_equal(fj.last_status == ST_FEASIBLE, feas)
+    assert all(c["cap_hit"] and c["H_eff"] == 0 for c in fj.last_profile["chunks"])

@@ -16,6 +16,10 @@ are unchanged.
 
 `lp_stream` (`LpStreamCfg`, off by default, D-011) streams the solver's good infeasible node LP points into the
 population (Berk 2026-10-06). Same hash rule: left out while disabled.
+
+`repair_clock` (`RepairClockCfg`, off by default) gives every repair call of a generation a lane-step horizon chosen
+from the measured gain per second of each horizon (vault `80-reviews/2026-10-06 Repair-depth design (workflow).md`);
+mode `shadow` only measures and logs. Same hash rule: left out while disabled.
 """
 from __future__ import annotations
 
@@ -234,6 +238,34 @@ class LpStreamCfg:
                                        # four, round robin (else always the first LP point)
 
 
+@dataclass
+class RepairClockCfg:
+    """The repair clock (2026-10-06 repair-depth design, staged: instrumentation and shadow mode first). One level per
+    generation applies to every repair call of it: a horizon h = 2^j lane steps (j = level_min_log2 .. level_max_log2)
+    or "none" (the repair settings as configured). Lanes still active at h stop with status 4 (`ls_fj_*.ST_HORIZON`)
+    and keep their projected x; on the GPU the host truncates the launches, so the cut is the same for every lane.
+    Until the population holds a feasible member of the EA's own (a feasible member that is not an unchanged solver
+    solution; neither a finite solver incumbent nor an injected feasible solver row counts) every call is played at
+    "none" without a cap. After it, the controller (`ea.repair_clock`) reads each level's gain from the call it just
+    ran — a horizon-h call is a prefix of the unbounded call — and its cost from the measured per-launch (steps, time)
+    profile, and switches only on evidence. `shadow` plays "none" with no cap (no local-search call changes) and logs
+    what it would choose; `active` plays it. Off by default:
+    with `enabled: false` the section is inert and is left out of the configuration hash (`EAConfig.hash`)."""
+    enabled: bool = False
+    mode: str = "shadow"               # "shadow": play "none", log the choice | "active": play the choice
+    level_min_log2: int = 7            # the ladder: h = 2^7 .. 2^16 lane steps, plus "none"
+    level_max_log2: int = 16
+    min_gens: int = 5                  # a level is eligible after this many observed post-feasible generations ...
+    min_events: int = 2                # ... with at least this many material gains
+    materiality: float = 1e-3          # a generation's gain below this (gap units) counts as zero
+    half_life_s: float = 20.0          # gains and times decay with this half-life (seconds of wall time)
+    hysteresis: float = 0.25           # switch only to a level whose rate is above (1 + hysteresis) x the current one's
+    probe_share: float = 0.10          # away from "none": at most this share of post-feasible time re-measures "none"
+    cap_s: float = 10.0                # per-call wall-clock cap (active, after the first feasible): min(cap_s,
+    cap_factor: float = 3.0            # cap_factor x the level's median children-call time); "none": cap_s alone
+    pin_lp: bool = True                # the one-shot LP batch is always repaired at "none", uncapped
+
+
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
 _LATE_DEFAULTS = {"ranks.feas_alt_scale": "none"}
 
@@ -253,7 +285,8 @@ class EAConfig:
     frontier: FrontierCfg = field(default_factory=FrontierCfg)
     strategy: StrategyCfg = field(default_factory=StrategyCfg)
     lp_stream: LpStreamCfg = field(default_factory=LpStreamCfg)
-    backend: str = "cupy"             # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
+    repair_clock: RepairClockCfg = field(default_factory=RepairClockCfg)
+    backend: str = "cupy"            # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
     gpu_mem_gb: float = 12.0           # CuPy pool limit (the only GPU memory cap on GB10) = cuOpt's RMM limit in A2:
                                        # equal GPU memory for both partners; cuOpt needs ~10.5 GB (measured 2026-10-06)
     log_every: int = 10                # generations between generation-log records
@@ -264,16 +297,18 @@ class EAConfig:
         return dataclasses.asdict(self)
 
     def hash(self) -> str:
-        """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy` and
-        `lp_stream` sections while disabled, and the fields in `_LATE_DEFAULTS` while at their default: they are
-        inert then, so every configuration written before a section or field existed keeps its hash (the default's
-        `9ac4a93bf93b` among them)."""
+        """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy`,
+        `lp_stream` and `repair_clock` sections while disabled, and the fields in `_LATE_DEFAULTS` while at their
+        default: they are inert then, so every configuration written before a section or field existed keeps its hash
+        (the default's `9ac4a93bf93b` among them)."""
         d = self.to_dict()
         d.pop("name", None)
         if not self.strategy.enabled:
             d.pop("strategy", None)
         if not self.lp_stream.enabled:
             d.pop("lp_stream", None)
+        if not self.repair_clock.enabled:
+            d.pop("repair_clock", None)
         for dotted, default in _LATE_DEFAULTS.items():     # fields added after a hash was recorded: out while default
             sec, _, k = dotted.partition(".")
             if d.get(sec, {}).get(k, object()) == default:
@@ -389,6 +424,21 @@ class EAConfig:
                "lp_stream: ring, roundings, per_tick, pool are integers >= 1")
         _check(not ls.enabled or (self.exchange.enabled and self.exchange.from_solver),
                "lp_stream.enabled needs exchange.enabled and exchange.from_solver")
+        rc = self.repair_clock
+        _check(isinstance(rc.enabled, bool) and isinstance(rc.pin_lp, bool), "repair_clock.enabled/pin_lp are bools")
+        _check(rc.mode in ("shadow", "active"), "repair_clock.mode in shadow|active")
+        _check(all(isinstance(v, int) and not isinstance(v, bool)
+                   for v in (rc.level_min_log2, rc.level_max_log2, rc.min_gens, rc.min_events))
+               and 0 <= rc.level_min_log2 <= rc.level_max_log2 <= 20 and rc.min_gens >= 1 and rc.min_events >= 1,
+               "repair_clock: integers 0 <= level_min_log2 <= level_max_log2 <= 20 (the launch cap), min_gens >= 1, "
+               "min_events >= 1")
+        _check(rc.materiality >= 0 and rc.half_life_s > 0 and rc.hysteresis >= 0 and 0.0 < rc.probe_share < 1.0
+               and rc.cap_s > 0 and rc.cap_factor > 0,
+               "repair_clock: materiality >= 0, half_life_s > 0, hysteresis >= 0, probe_share in (0, 1), cap_s > 0, "
+               "cap_factor > 0")
+        # the gain signal relies on FEASIBLE => strictly below the cutoff (the cutoff row of the feasibility jump)
+        _check(not rc.enabled or (rp.method == "fj" and rp.objective_mode == "cutoff_row"),
+               "repair_clock.enabled needs repair.method fj and repair.objective_mode cutoff_row")
         _check(self.backend in ("cupy", "numpy", "auto"), "backend in cupy|numpy|auto")
         _check(self.gpu_mem_gb > 0, "gpu_mem_gb > 0")
         _check(self.log_every >= 1 and self.lineage_depth >= 0, "logging parameters")

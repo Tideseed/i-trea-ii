@@ -14,7 +14,9 @@ therefore selected, weighted, bumped and updated exactly like a constraint row.
 
 One step (rules shared with the GPU kernel):
   0. stop if no row is violated (feasible), else if `max_steps` moves were made (budget), else if `stall_steps`
-     consecutive steps did not lower the best F of this call by more than 1e-12 relative (stall);
+     consecutive steps did not lower the best F of this call by more than 1e-12 relative (stall), else if the call's
+     lane-step horizon is reached (`run(horizon=h)`, the repair clock: status 4 = ST_HORIZON, the current x is kept —
+     checked last, as the GPU kernel's end-of-slice re-check does before the host cuts the remaining lanes);
   1. pick a violated row: all of them when there are <= 32, else 32 sampled uniformly with replacement; then one of the
      sample with probability proportional to w_i·v_i (the spec's "bounded sample" option, exact when nviol <= 32);
   2. score every variable of that row (optionally a random cyclic window of `row_scan_cap` of them — off by default,
@@ -65,7 +67,8 @@ from itrea.ea.evaluate import DeviceProblem, own_row_scale, row_scale_table
 # variable classes (same codes as ls_fj_gpu)
 VT_CONT, VT_BIN, VT_INT, VT_FIXED = 0, 1, 2, 3
 # finishing status per individual (same codes as ls_fj_gpu; 0 = still active, never returned)
-ST_FEASIBLE, ST_STALL, ST_BUDGET = 1, 2, 3
+ST_FEASIBLE, ST_STALL, ST_BUDGET, ST_HORIZON = 1, 2, 3, 4
+NO_HORIZON = 1 << 62   # max_lane_steps without a horizon (never reached)
 
 MAX_CAND = 32          # capacity of the candidate arrays (runtime max_candidates is clipped to [4, MAX_CAND])
 MAX_K = MAX_CAND - 2   # capacity of the tightening-row list
@@ -73,6 +76,8 @@ SAMPLE = 32            # violated rows sampled per step
 IMPROVING = -1e-12     # a move is improving if its score is below this
 VIOL_TOL = 1e-9        # violated-set membership: miss > min(VIOL_TOL * max(1, |side|), VIOL_CAP)
 VIOL_CAP = 1e-7
+
+_clock = time.perf_counter   # the call deadline's clock (`run(cap_s=...)`; tests replace it)
 
 
 # ---------------------------------------------------------------------------------------------------- host side
@@ -322,7 +327,7 @@ def _move_dviol(j, d, col_ptr, row_idx, col_val, rl, ru, rs, act, w):
 
 @njit(cache=True)
 def _fj_batch(X, seeds, row_ptr, col_idx, row_val, col_ptr, row_idx, col_val, rl, ru, rs, lb, ub, isint, vtype,
-              cobj, use_obj, max_moves, stall_steps, max_cand, bump, p_rw, vtol, vcap, row_cap,
+              cobj, use_obj, max_moves, stall_steps, max_cand, bump, p_rw, vtol, vcap, row_cap, max_lane_steps,
               status, lane_moves, lane_steps, lane_lmin, lane_drift, keep, ACT, WGT, NVIOL):
     k, n = X.shape
     m = rl.shape[0]
@@ -381,6 +386,9 @@ def _fj_batch(X, seeds, row_ptr, col_idx, row_val, col_ptr, row_idx, col_val, rl
                 break
             if since >= stall_steps:
                 stt = ST_STALL
+                break
+            if steps >= max_lane_steps:
+                stt = ST_HORIZON
                 break
             # 1. pick a violated row (sample <= SAMPLE, proportional to w * v)
             S = nv if nv < SAMPLE else SAMPLE
@@ -496,7 +504,8 @@ class FJCpu:
     returns counters {moves, local_minima, steps, finished_feasible, finished_stall, finished_budget, interrupted,
     seconds, act_drift, state_bytes}. `set_cutoff(inc_key)` arms the objective cutoff row (`objective_mode: cutoff_row`); call
     it whenever the incumbent key improves. `last_status` / `last_moves` / `last_steps` hold per-individual results of
-    the last call (ST_* codes).
+    the last call (ST_* codes); `last_profile` = {kind: "sequential", seconds, H, cap_s, cap_hit, cut_rows} (the repair
+    clock reads a call's time at horizon h as seconds · Σ min(steps, h) / Σ steps).
 
     Keyword knobs (not in RepairCfg yet; read from it when present): `max_candidates` (16), `p_random_walk` (0.0);
     `row_scan_cap` (0 = score the whole chosen row, as the GPU kernel does; > 0 = a random cyclic window of that many
@@ -527,6 +536,7 @@ class FJCpu:
         self.last_status: np.ndarray | None = None
         self.last_moves: np.ndarray | None = None
         self.last_steps: np.ndarray | None = None
+        self.last_profile: dict | None = None
         self.state: dict | None = None
 
         prob = dp.prob
@@ -578,7 +588,8 @@ class FJCpu:
         base = int(np.random.SeedSequence([self.seed & 0xFFFFFFFF, self._calls]).generate_state(1)[0])
         return ((base + np.arange(k, dtype=np.uint64) * np.uint64(2654435761)) % np.uint64(1 << 32)).astype(np.uint32)
 
-    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None) -> dict:
+    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None, horizon: int | None = None,
+            cap_s: float | None = None) -> dict:
         """Improve every row of X in place; see the class docstring for the counters. keep_state=True also stores the
         final per-individual activities, weights and violated-row counts in `self.state` (tests). `scale_idx` (k,):
         each row's index into `row_scales` (None: 0).
@@ -587,7 +598,17 @@ class FJCpu:
         slices (1 row first, doubling while a call takes less than half of `slice_ms`) and `should_stop()` is polled
         before every slice; when it returns True the remaining rows are left untouched (counted in `finished_budget`
         and `interrupted`). Every row has its own seed, drawn for the whole call, so the result of a row does not
-        depend on the slicing. Without it: one call over all rows."""
+        depend on the slicing. Without it: one call over all rows.
+
+        The repair clock (both None: the call above, unchanged). `horizon` = h: a row still searching after h steps
+        stops with ST_HORIZON and keeps its current x (the stop rules feasible / budget / stall are checked first, so
+        a row that would stop at step s <= h stops exactly as without the horizon — a horizon-h call is a prefix of
+        the unbounded one). `cap_s`: a deadline for the whole call; the rows are processed in slices as with
+        should_stop, and the rows NOT STARTED when it passes are only projected (horizon 0: ST_HORIZON with 0 steps,
+        or ST_FEASIBLE if the projection is feasible) — a row in progress cannot be cut on one core. This is the
+        sequential meaning of the GPU's call deadline (where the chunk in progress is cut at an equal step count).
+        The counters then add `finished_horizon` (rows with ST_HORIZON, also counted in `finished_budget`, so the
+        three finish counters still add up to k) and `cap_hits` (1 if the deadline cut the call)."""
         t0 = time.perf_counter()
         if not isinstance(X, np.ndarray) or X.ndim != 2:
             raise TypeError("FJCpu.run needs a 2-D NumPy array (use FJGpu for device arrays)")
@@ -596,9 +617,16 @@ class FJCpu:
             raise ValueError(f"X has {n} columns, the problem has {self.n}")
         if np.issubdtype(X.dtype, np.integer) and self.has_cont:
             raise TypeError("integer gene dtype with continuous variables in the problem")
+        if horizon is not None and int(horizon) < 0:
+            raise ValueError("horizon must be >= 0")
+        if cap_s is not None and not float(cap_s) > 0:
+            raise ValueError("cap_s must be > 0")
+        clock = horizon is not None or cap_s is not None
+        mls = NO_HORIZON if horizon is None else int(horizon)
         self._calls += 1
         out = dict(moves=0, local_minima=0, steps=0, finished_feasible=0, finished_stall=0, finished_budget=0,
                    interrupted=0, seconds=0.0, act_drift=0.0, state_bytes=self.state_bytes)
+        cut_rows = 0
         status = np.zeros(k, np.int8)                   # 0 = not finished (a row a stop left unreached)
         lmoves = np.zeros(k, np.int64)
         lsteps = np.zeros(k, np.int64)
@@ -615,28 +643,33 @@ class FJCpu:
             r = self.rows
             seeds = self._seeds(k)
 
-            def batch(a: int, b: int, rs) -> None:
+            def batch(a: int, b: int, rs, h: int) -> None:
                 # row slices of C-contiguous arrays keep the Numba signature of the whole call (no new compile)
                 kept = (ACT[a:b], WGT[a:b], NVIOL[a:b]) if keep_state else (ACT, WGT, NVIOL)
                 _fj_batch(X[a:b], seeds[a:b], self._row_ptr, self._col_idx, self._row_val, self._col_ptr,
                           self._row_idx, self._col_val, r.rl, r.ru, rs, self.lb, self.ub, self.isint, self.vtype,
                           self.cobj, self.use_obj, int(c.max_steps), int(c.stall_steps), self.max_candidates,
-                          float(c.weight_bump), self.p_random_walk, VIOL_TOL, VIOL_CAP, self.row_scan_cap,
+                          float(c.weight_bump), self.p_random_walk, VIOL_TOL, VIOL_CAP, self.row_scan_cap, h,
                           status[a:b], lmoves[a:b], lsteps[a:b], llmin[a:b], ldrift[a:b], keep_state, *kept)
 
-            def call(a: int, b: int) -> None:
+            def call(a: int, b: int, h: int = mls) -> None:
                 if sidx is None:
-                    batch(a, b, r.rs)
+                    batch(a, b, r.rs, h)
                     return
                 cut = a + 1 + np.flatnonzero(sidx[a + 1:b] != sidx[a:b - 1])     # runs of equal scale index
                 for u, v in zip(np.r_[a, cut], np.r_[cut, b]):
-                    batch(int(u), int(v), r.rs_tab[int(sidx[u])])
+                    batch(int(u), int(v), r.rs_tab[int(sidx[u])], h)
 
-            if should_stop is None:
+            if should_stop is None and cap_s is None:
                 call(0, k)
             else:
+                deadline = None if cap_s is None else _clock() + float(cap_s)
                 a, size, target = 0, 1, self.slice_ms / 1000.0
-                while a < k and not should_stop():
+                while a < k and not (should_stop is not None and should_stop()):
+                    if deadline is not None and _clock() >= deadline:
+                        call(a, k, 0)                       # rows not started: projected only (horizon 0)
+                        cut_rows = k - a
+                        break
                     b = min(k, a + size)
                     t = time.perf_counter()
                     call(a, b)
@@ -650,9 +683,15 @@ class FJCpu:
         out["finished_stall"] = int(np.sum(status == ST_STALL))
         out["interrupted"] = int(np.sum(status == 0))
         out["finished_budget"] = int(np.sum(status == ST_BUDGET)) + out["interrupted"]
+        if clock:
+            out["finished_horizon"] = int(np.sum(status == ST_HORIZON))
+            out["finished_budget"] += out["finished_horizon"]
+            out["cap_hits"] = int(cut_rows > 0)
         out["act_drift"] = float(ldrift.max(initial=0.0))
         out["seconds"] = time.perf_counter() - t0
         self.last_status, self.last_moves, self.last_steps = status, lmoves, lsteps
+        self.last_profile = dict(kind="sequential", seconds=out["seconds"], H=None if horizon is None else int(horizon),
+                                 cap_s=cap_s, cap_hit=cut_rows > 0, cut_rows=int(cut_rows))
         if keep_state:
             self.state = {"act": ACT[:, :self.m_aug], "w": WGT[:, :self.m_aug], "nviol": NVIOL}
         return out

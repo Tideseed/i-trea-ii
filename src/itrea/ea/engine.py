@@ -112,6 +112,25 @@ no extra random number is drawn — the run is the one without the feature). A s
     `repaired_feasible` the rows it finished feasible (0 under `repair: none`, which reports no per-row status).
     `ls_calls` counts local-search calls (one per repair, whatever the number of scales).
 
+Repair clock (`repair_clock.enabled`, `RepairClockCfg`, `ea.repair_clock`; off by default, and then nothing below
+happens: no argument is added to a local-search call, no counter, no event field, no random number). One level per
+generation — a lane-step horizon 2^j or "none" — for every repair call of it.
+  - begin: generation 0 is decided "none" (no feasible member yet) and recorded like every later one.
+  - step: right after the exchange tick `RepairClock.decide(now, has_feasible)`, has_feasible = a feasible member of
+    the EA's own (`_rc_own_feasible`: an unchanged solver solution — `_is_solver_find` — does not count). `_ls_run`
+    passes `horizon` / `cap_s` only in active mode, after the population first held such a member, and never for the
+    one-shot LP batch (`pin_lp`); shadow mode never passes them, so no local-search call changes.
+  - every repair call (initial population "init", children, each repaired pending batch "lp" / "lps", `_admit`'s
+    seeded rows "admit") is kept with its lanes' steps, status and launch profile, and `_rc_pair` — the one pairing
+    helper — hands it to the clock with the evaluated keys and feasibility of the same rows (lane i = row i, or row
+    rep[i] in `_admit`, which repairs only the seeded rows but evaluates all). A call left unpaired by a generation cut
+    short is dropped at the next decision. The calls made after the survival (`_after_survival`: shortfall fill,
+    stagnation immigrants) are marked `counterfactual=False`: whether they happen at all depends on the generation's
+    earlier calls, so the clock leaves them out of the gain.
+  - end of the generation: `end_generation` (the measured generation seconds) and one `rclock` event per generation;
+    `gen` events add the `rc_*` fields, the summary a `repair_clock` block, the counters `ls_finished_horizon` and
+    `ls_cap_hits` (vault `10-design/Trace format and metrics.md`).
+
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
 archive members), evaluated, de-duplicated against the population and admitted with the survival's rules: an
 infeasible immigrant better than the incumbent takes a Rank 0 slot only while the quota floor(x·P) has room (and not
@@ -160,6 +179,7 @@ from itrea.ea.population import (NO_RANK, ORIGIN_IMMIGRANT, ORIGIN_INJECTED, ORI
                                   child_ancestry, gene_dtype_for, origin_names, src_bits_of_origin)
 from itrea.ea.ranks import Survival, three_rank_survival
 from itrea.ea.repair import LocalSearch
+from itrea.ea.repair_clock import RepairClock
 from itrea.ea.seeding import LPWorker, immigrants, lp_round, seed_population
 from itrea.ea.selection import select_parents
 from itrea.problem import Problem, from_arrays
@@ -498,6 +518,11 @@ class Engine:
         self.stop_reason: str | None = None
         self.part = None                         # crash-safe incumbent log (incumbent_log)
         self.part_paths: tuple[Path, Path] | None = None
+        self.rclock: RepairClock | None = None   # the repair clock (repair_clock.enabled; made in begin)
+        self.rc_dec = None                       # its decision for the current generation
+        self.rc_site = ""                        # the repair call site, set before every `_repair`
+        self._rc_last: dict | None = None        # the last local-search call, waiting for its evaluated rows
+        self._rc_cf = True                       # False for the repair calls made after the survival
 
     def incumbent_log(self, run_dir: str | os.PathLike, role: str = "ea") -> None:
         """Append every incumbent to `<role>.incumbents.part` as it is found (with `<role>.names.json`), in the solver
@@ -610,6 +635,8 @@ class Engine:
                                  for i, ((sc, lp), nm) in enumerate(zip(self.strat_list, self.strat_names))]
             rec["local_search_row_scales"] = list(self.ls.row_scales)
             rec["local_search_static_bytes"] = getattr(self.ls.impl, "static_bytes", None)
+        if cfg.repair_clock.enabled:
+            rec["repair_clock"] = RepairClock(cfg.repair_clock).describe()
         # -------------------------------------------------------------------------------- warm-up
         t = time.monotonic()
         if self.warmup_enabled:
@@ -894,18 +921,27 @@ class Engine:
         if cfg.seeding.lp_source == "highs_async":
             self.lp_worker = LPWorker(prob.path, cfg.seeding.lp_time_limit, cpus=None, names=prob.names).start()
             self.lp_info["state"] = "running"
+        # repair clock (module docstring): generation 0 is before any feasible member, so it plays "none"
+        self.rclock = RepairClock(cfg.repair_clock) if cfg.repair_clock.enabled else None
+        self.rc_dec, self._rc_last = None, None
+        if self.rclock is not None:
+            self.c.update(ls_finished_horizon=0, ls_cap_hits=0)
+            self._rc_t_gen = time.monotonic()
+            self._rc_decide(False)
         # ------------------------------------------------------------------------- initial population
         with self.phase("seed"):
             X, origin = seed_population(bk, self.dp, self.P, cfg.seeding, self.rng_dev, self.rng_host,
                                         gene_dtype=self.gene_dtype.name, mem_budget_bytes=self.budgets["operators"])
         k = X.shape[0]
         strat0 = (np.arange(k) % self.S).astype(np.uint8)       # round robin (all 0 while the strategy is off)
+        self.rc_site = "init"
         with self.phase("repair"):
             moved = self._repair(X, strat0)
         if moved is not None:
             origin = origin | np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
         with self.phase("evaluate"):
             ev = self._evaluate(X)
+        self._rc_pair(ev[0], ev[2])
         now = self.trace.now()
         pop0 = self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), self.idc.take(k),
                               np.full((k, 2), -1, np.int64), origin, 0, strat=strat0)
@@ -915,6 +951,7 @@ class Engine:
         with self.phase("survival"):
             self._survive(cand, 0, meta)
         self._after_survival()
+        self._rc_end()
         self._gen_record()
 
     # -------------------------------------------------------------------------------------------------- step
@@ -931,9 +968,13 @@ class Engine:
     def _step(self) -> None:
         cfg, bk, dp, pop = self.cfg, self.bk, self.dp, self.pop
         self.gen += 1
+        if self.rclock is not None:
+            self._rc_t_gen = time.monotonic()
         if time.monotonic() >= self.next_poll:
             with self.phase("exchange"):
                 self._exchange_in()
+        if self.rclock is not None:                          # the level of this generation, after the exchange tick
+            self._rc_decide(self._rc_own_feasible())
         if self.pop.size == 0:                               # every candidate died (duplicates / non-finite)
             Xn, on, sn = self._immigrants(self.P, lp_share=cfg.seeding.lp_rounding)
             if self._admit(Xn, on, replace=None, strat=sn) == 0:
@@ -959,6 +1000,7 @@ class Engine:
             mo = mutate(bk, dp, C, cfg.mutation, self.rng_dev, self.rng_host, lp_x=self.lp_x,
                         mem_budget_bytes=self.budgets["operators"], lp_rows=lp_rows)
         origin = (xo | mo).astype(np.uint16)
+        self.rc_site = "children"
         with self.phase("repair"):
             moved = self._repair(C, cs)
         if not self._continue(None):                         # budget / stop during the repair: drop this generation
@@ -970,6 +1012,7 @@ class Engine:
             origin |= np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
         with self.phase("evaluate"):
             ev = self._evaluate(C)
+        self._rc_pair(ev[0], ev[2])
         k = C.shape[0]
         self.c["children"] += k
         ar, ao = child_ancestry(self.depth, pop.rank[ia], pop.rank[pb], pop.origin[ia], pop.origin[pb],
@@ -990,6 +1033,7 @@ class Engine:
         with self.phase("survival"):
             self._survive(cand, Np, meta)
         self._after_survival()
+        self._rc_end()
         if self.gen % cfg.log_every == 0:
             self._gen_record()
 
@@ -1122,12 +1166,17 @@ class Engine:
         return moved
 
     def _ls_run(self, X, scale_idx: np.ndarray | None = None) -> np.ndarray | None:
-        """One local-search call with the out-of-memory retries; counters into `self.c`; the moved flags."""
+        """One local-search call with the out-of-memory retries; counters into `self.c`; the moved flags. With the
+        repair clock the call also gets the generation's horizon / cap (active mode, after the first feasible member
+        only — otherwise no argument is added, so the call is the one without the clock) and is kept, with its per-lane
+        steps, status and launch profile, until `_rc_pair` pairs it with the evaluated rows."""
         ls = self.ls
+        args = {} if scale_idx is None else {"scale_idx": scale_idx}
+        if self.rclock is not None:
+            args.update(self._rc_call_args())
         for attempt in range(OOM_RETRIES + 1):
             try:
-                st = (ls.run(X, should_stop=self._should_stop) if scale_idx is None
-                      else ls.run(X, should_stop=self._should_stop, scale_idx=scale_idx))
+                st = ls.run(X, should_stop=self._should_stop, **args)
                 break
             except Exception as e:  # noqa: BLE001
                 if not _is_oom(e) or attempt == OOM_RETRIES:
@@ -1137,10 +1186,76 @@ class Engine:
         self.c["ls_calls"] += 1
         for k in ("local_minima", "finished_feasible", "finished_stall", "finished_budget", "interrupted"):
             self.c[f"ls_{k}"] = self.c.get(f"ls_{k}", 0) + int(st.get(k, 0))
+        if self.rclock is not None:
+            self.c["ls_finished_horizon"] += int(st.get("finished_horizon", 0))
+            self.c["ls_cap_hits"] += int(st.get("cap_hits", 0))
+            impl = ls.impl
+            self._rc_last = dict(steps=np.asarray(impl.last_steps).copy(), status=np.asarray(impl.last_status).copy(),
+                                 profile=impl.last_profile, site=self.rc_site, pinned=self._rc_pinned(),
+                                 horizon=args.get("horizon"), cap_s=args.get("cap_s"),
+                                 cap_hits=int(st.get("cap_hits", 0)), counterfactual=self._rc_cf)
         lm = getattr(ls.impl, "last_moves", None)
         if lm is not None and len(lm) == X.shape[0]:
             return np.asarray(lm) > 0
         return None
+
+    # ---------------------------------------------------------------------------------------------- repair clock
+    def _rc_decide(self, has_feasible: bool) -> None:
+        """The repair clock's level for the generation that starts now (after the exchange tick); an unpaired call
+        left by a generation cut short is dropped."""
+        self._rc_last, self._rc_cf = None, True
+        self.rc_dec = self.rclock.decide(time.monotonic() - self.t0, has_feasible, gen=self.gen)
+
+    def _rc_own_feasible(self) -> bool:
+        """The repair clock's phase test: a feasible member that is not an unchanged solver solution (origin INJECTED
+        and no other bit, `_is_solver_find`), so an injected solver row alone does not end the pre-feasible phase."""
+        o = self.pop.origin
+        solver = ((o & np.uint16(ORIGIN_INJECTED)) != 0) & ((o & _GENE_BITS_EA) == 0)
+        return bool((self.h_feas & ~solver).any())
+
+    def _rc_pinned(self) -> bool:
+        """The one-shot LP batch is repaired at "none", uncapped (`repair_clock.pin_lp`); LP-stream batches are not."""
+        return self.rc_site == "lp" and self.cfg.repair_clock.pin_lp
+
+    def _rc_call_args(self) -> dict:
+        """horizon / cap_s for the next local-search call: only in active mode, after the first feasible member, and
+        never for the pinned LP batch. Empty otherwise (shadow mode plays "none" with no cap)."""
+        d = self.rc_dec
+        if d is None or not self.rclock.active or d.phase != "post" or self._rc_pinned():
+            return {}
+        out = {}
+        if d.horizon is not None:
+            out["horizon"] = int(d.horizon)
+        if d.cap_s is not None:
+            out["cap_s"] = float(d.cap_s)
+        return out
+
+    def _rc_pair(self, key, feasible, rows: np.ndarray | None = None) -> None:
+        """THE pairing of a repair call's lanes with their evaluated rows, at every call site: lane i of the last
+        local-search call is row i of the evaluation (`rows` = None: children, the initial population, a pending
+        batch) or row rows[i] (`_admit`, which repairs only its seeded rows but evaluates all). `key` / `feasible` are
+        the evaluation's arrays (device or host). No-op without the clock or without an unpaired call."""
+        rec, self._rc_last = self._rc_last, None
+        if rec is None or self.rclock is None:
+            return
+        key = np.asarray(self.bk.asnumpy(key), np.float64).reshape(-1)
+        feasible = np.asarray(self.bk.asnumpy(feasible)).reshape(-1).astype(bool)
+        if rows is not None:
+            rows = np.asarray(rows, np.int64)
+            key, feasible = key[rows], feasible[rows]
+        if key.shape[0] != rec["steps"].shape[0]:
+            raise RuntimeError(f"repair clock: {rec['steps'].shape[0]} lanes in the {rec['site']} call but "
+                               f"{key.shape[0]} evaluated rows paired with them")
+        self.rclock.add_call(keys=key, feasible=feasible, cutoff=self.cutoff, dual_key=self.dual_key, **rec)
+
+    def _rc_end(self) -> None:
+        """Close the generation in the repair clock and write its `rclock` event."""
+        if self.rclock is None:
+            return
+        now = time.monotonic()
+        ev = self.rclock.end_generation(now - self.t0, now - self._rc_t_gen)
+        if ev is not None:
+            self.trace.event("rclock", **ev)
 
     def _should_stop(self) -> bool:
         """Polled by the local search between kernel launches / row slices / steps, so the EA's work inside one
@@ -1170,12 +1285,15 @@ class Engine:
         for b in self.pending:
             X = b.X
             if b.repair:
+                self.rc_site = b.src
                 with self.phase("repair"):
                     moved = self._repair(X, b.strat)
                 if moved is not None:
                     b.origin = b.origin | np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
             with self.phase("evaluate"):
                 ev = self._evaluate(X)
+            if b.repair:
+                self._rc_pair(ev[0], ev[2])
             k = X.shape[0]
             if b.src == "solver":
                 feas = self.bk.asnumpy(ev[2])
@@ -1263,6 +1381,8 @@ class Engine:
 
     def _after_survival(self) -> None:
         """Shortfall fill, incumbent / posts, stagnation, cutoff, memory peaks."""
+        if self.rclock is not None:
+            self._rc_cf = False                              # these repair calls depend on the earlier ones
         surv = self.last_surv
         if surv is not None and self.pop.size < self.P:
             k = self.P - self.pop.size
@@ -1462,6 +1582,7 @@ class Engine:
         if rep.size:
             drep = bk.xp.asarray(rep)
             Xr = Xn[drep]
+            self.rc_site = "admit"
             moved = self._repair(Xr, strat[rep])
             Xn[drep] = Xr
             if moved is not None:
@@ -1469,6 +1590,8 @@ class Engine:
         ev = self._evaluate(Xn)
         nk, nv, nf = (bk.asnumpy(bk.xp.stack([ev[0], ev[1], ev[2].astype(bk.xp.float64)])))
         nf = nf > 0.5
+        if rep.size:
+            self._rc_pair(nk, nf, rows=rep)                  # lane i of the call = row rep[i] of the evaluation
         pop = self.pop
         keep = np.ones(pop.size, bool)
         if replace is not None and len(replace):
@@ -1849,6 +1972,8 @@ class Engine:
             both = ORIGIN_SEED_LP | ORIGIN_INJECTED
             extra.update(rank0_stream=int(np.sum((pop.rank == R0) & ((pop.origin & both) == both))),
                          lps_pool=len(self.lps_pool), lps_unused=sum(1 for q in self.lps_pool if not q["used"]))
+        if self.rclock is not None:
+            extra.update(self.rclock.gen_fields())
         self.trace.event(
             "gen", gen=self.gen, best_key=float(hk[hf].min()) if hf.any() else None,
             median_key=float(np.median(fin)) if fin.size else None, feas_share=float(hf.mean()) if hf.size else 0.0,
@@ -1900,6 +2025,8 @@ class Engine:
                 best=dict(V=self.lps_pool[0]["V"], key=self.lps_pool[0]["key"]) if self.lps_pool else None,
                 final_rank0_stream=int(np.sum((pop.rank == R0) & ((pop.origin & both) == both))),
                 final_stream=int(np.sum((pop.origin & both) == both)))
+        if self.rclock is not None:
+            out["repair_clock"] = self.rclock.record()
         out["best_x"] = self.best_x
         return out
 

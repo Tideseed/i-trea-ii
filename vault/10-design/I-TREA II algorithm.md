@@ -137,6 +137,56 @@ demes were its first, kept for later together with region islands). Costs one ex
 per generation, in the feasibility phase only; outside it the option does nothing. Left out of the configuration hash
 while `none` (`_LATE_DEFAULTS`).
 
+## Repair clock (2026-10-06, development; `repair_clock`, off by default; built to Stage 1 = shadow mode)
+**Why.** The repair depth is an instance-dependent trade-off: deep repair (`lps1`) won on 6 of 9 development instances,
+the default depth only on item_placement, where many fast generations pay ([[Development log]]); and a GPU repair call
+waits for its slowest lane, so mixing depths inside one call would not make a generation faster. Design, judges and
+plan: [[2026-10-06 Repair-depth design (workflow)]].
+
+**What.** One level per generation for every repair call of it: a horizon h = 2^7 … 2^16 lane steps, or "none" (the
+configured repair). A lane still searching at h stops with status 4 and keeps its x ([[Feasibility jump local
+search]], "Horizon"); on the GPU the host truncates the launches, so the cut is the same step count for every lane and
+every call can be replayed from its logged H_eff. Until the population holds a feasible member of the EA's own (a
+feasible member that is not an unchanged solver solution) every call is played at "none" without a cap (deep repair
+keeps its earlier first feasible solutions); neither a finite solver incumbent nor an injected feasible solver row
+ends this phase. After it, the controller (`ea/repair_clock.py`, no random numbers) reads each level's value from the
+calls it just ran: a horizon-h call is a prefix of the unbounded call, so one call reveals the gain of every shallower
+level (the largest improvement over the cutoff among the lanes that finished feasible within h steps, dg = min((cutoff
+− key) / max(|cutoff|, |key|, |dual| if finite), 1) — in [0, 1] like P(T)'s gap; below 1e-3 it counts as
+zero) and its cost from the measured per-launch (steps, seconds) profile. This is exact for the children, the pending
+batches and an admit before the children; the immigrant calls after the survival (shortfall fill, stagnation) exist
+only because of the generation's earlier calls, so their gain is logged apart and their time counts as overhead.
+Gains and times decay with a 20 s half-life; the controller switches only after 5 observed generations and 2 material
+gains, to a rate above 1.25 × the current level's, plays "none" with no evidence, re-measures "none" in probes (at most
+10 % of the time), always repairs the one-shot LP batch at "none", and caps each call at min(10 s, 3 × the level's
+median children-call time) (10 s at "none"); a children call the cap cut enters that median as a censored time, so the
+cap can rise when the calls become slower.
+
+**Deviations from the synthesis plan (review of 2026-10-06 evening; D-012 must carry them).** (1) The gain unit: the
+plan's max(|cutoff|, |dual|, 1e-9) gave one improvement over an incumbent near 0 without a dual bound a weight of
+~1e9 (neos-960392 has key 0 and no dual at generation 0); the point itself is now in the denominator and dg ≤ 1. (2)
+The phase test is a feasible member of the EA's own, not `h_feas.any()`, which an injected solver row satisfies. (3)
+The immigrant calls after the survival are left out of the gain (the plan claimed exactness only for the children and
+the pending batches). (4) The cap's median takes censored times from cut calls. (5) Shadow mode accumulates only what
+its decision would have revealed (below).
+
+**Stages.** Stage 0 (built 2026-10-06, tested on the CPU only; not yet run on an instance): the horizon in both
+feasibility-jump implementations (the GPU wrapper's tests are written, marker `gpu`, and wait for a GPU window), the
+controller, the engine wiring and their tests. Stage 1: **shadow mode** (`mode: shadow`,
+`configs/itrea2-adaptive-lps-rc.yaml` = lps1 + the clock in shadow) plays "none" with no cap — the search is lps1's:
+no argument is added to a local-search call and no random number is drawn, so the genealogy is identical for the same
+generation count (tested on NumPy, also with the controller held at a shallow level). In a timed run the extra host
+work (the key copy-back, one `rclock` event per generation) can shift generation counts and exchange timing, which
+Stage 1 criterion (c) checks, and its configuration hash differs from lps1's: its runs are not lps1 runs. It logs per
+generation what it would play, every call's profile and each lane's steps and status (`rclock` events, [[Trace format
+and metrics]]). The played calls show every level, but shadow mode accumulates only what its decision would have
+revealed (the levels ≤ its level, or every level if no lane ran beyond it), so its probes and its evidence are the
+active controller's; the event keeps the full information and marks the levels used. The active controller (Stage 2,
+`mode: active`) only if the shadow signal passes the criteria stated in the design note. Before Stage 2: the
+`rclock` event carries every lane's steps and status every generation (about 5.5 KB per generation at P = O = 256,
+~24 MB per 300 s item_placement run) — thin the per-lane payload in active mode if long runs need it. Off by default
+and left out of the configuration hash while disabled.
+
 ## Seeding
 `seed_mix`: random in bounds (integer-rounded), LP-relaxation rounding (HiGHS root LP on the CPU, before the clock,
 counted in the start-up record), and the solver's incumbents as they arrive.

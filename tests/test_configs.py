@@ -40,7 +40,8 @@ def _changed(cfg: EAConfig) -> set[str]:
 
 def test_the_expected_files_exist():
     names = {p.relative_to(CONFIGS).as_posix() for p in ALL}
-    assert {"itrea2-default.yaml", "itrea1-faithful.yaml", "itrea2-adaptive.yaml", "ablations/x0.yaml",
+    assert {"itrea2-default.yaml", "itrea1-faithful.yaml", "itrea2-adaptive.yaml", "itrea2-adaptive-lps.yaml",
+            "itrea2-adaptive-lps-rc.yaml", "ablations/x0.yaml",
             "ablations/y0.yaml", "ablations/no_bound_demote.yaml", "ablations/one_way_ea_to_solver.yaml",
             "ablations/one_way_solver_to_ea.yaml", "ablations/post_frontier.yaml"} <= names
 
@@ -109,3 +110,37 @@ def test_disabled_strategy_section_is_outside_the_hash():
     on = base.with_overrides({"strategy.enabled": True})
     assert on.hash() != base.hash()
     assert on.with_overrides({"strategy.mutation_rate": 0.5}).hash() != on.hash()
+
+
+# the hashes recorded in run records and the Development log before the `repair_clock` section existed
+LPS1 = {"repair.max_steps": 20000, "repair.stall_steps": 1000}
+
+
+def test_recorded_hashes_are_unchanged():
+    """Every section and field added later is left out of the hash while inert, so the recorded hashes stand: the
+    default 9ac4a93bf93b, itrea2-adaptive 584ddee83747, itrea2-adaptive-lps a2ad94e9188d and lps1 (adaptive-lps + the
+    c01 repair budget) 4a96b872ffdc."""
+    assert EAConfig().hash() == "9ac4a93bf93b"
+    assert EAConfig.from_yaml(CONFIGS / "itrea2-adaptive.yaml").hash() == "584ddee83747"
+    lps = EAConfig.from_yaml(CONFIGS / "itrea2-adaptive-lps.yaml")
+    assert lps.hash() == "a2ad94e9188d"
+    assert lps.with_overrides(LPS1).hash() == "4a96b872ffdc"
+
+
+def test_disabled_repair_clock_is_outside_the_hash():
+    base = EAConfig()
+    assert base.with_overrides({"repair_clock.mode": "active", "repair_clock.cap_s": 3.0,
+                                "repair_clock.level_min_log2": 9}).hash() == base.hash()
+    on = base.with_overrides({"repair_clock.enabled": True})
+    assert on.hash() != base.hash()
+    assert on.with_overrides({"repair_clock.mode": "active"}).hash() != on.hash()
+
+
+def test_repair_clock_config_is_lps1_plus_the_clock_in_shadow_mode():
+    """itrea2-adaptive-lps-rc = itrea2-adaptive-lps + the c01 repair budget (lps1) + repair_clock enabled, shadow."""
+    cfg = EAConfig.from_yaml(CONFIGS / "itrea2-adaptive-lps-rc.yaml")
+    assert _changed(cfg) == {"strategy.enabled", "seeding.lp_source", "lp_stream.enabled", "repair.max_steps",
+                             "repair.stall_steps", "repair_clock.enabled"}
+    assert cfg.repair_clock.enabled and cfg.repair_clock.mode == "shadow"
+    lps1 = EAConfig.from_yaml(CONFIGS / "itrea2-adaptive-lps.yaml").with_overrides(LPS1)
+    assert cfg.hash() == lps1.with_overrides({"repair_clock.enabled": True}).hash() != "4a96b872ffdc"

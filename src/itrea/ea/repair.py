@@ -3,11 +3,13 @@
     LocalSearch(bk, dp, cfg: RepairCfg, imp_tol, mem_budget_bytes, seed, row_scales=None)
         set_cutoff(inc_key)   arm / refresh / disarm the objective cutoff row (`objective_mode: cutoff_row`); the
                               engine calls it whenever the incumbent key improves (None = no incumbent yet)
-        run(X, should_stop=None, scale_idx=None) -> dict
+        run(X, should_stop=None, scale_idx=None, horizon=None, cap_s=None) -> dict
                               improve every row of X (k, n) in place; returns counters. `should_stop()` (optional) is
                               polled between kernel launches / row slices / steps; when it returns True the search
                               returns early (rows not reached stay as they were, rows in progress keep their last move).
-                              `scale_idx` (k,): each row's index into `row_scales` (None: index 0)
+                              `scale_idx` (k,): each row's index into `row_scales` (None: index 0). `horizon` /
+                              `cap_s`: the repair clock's lane-step horizon and per-call deadline ("fj" only; passed
+                              on only when given, so a call without them is exactly the call before they existed)
 
 Methods (vault `10-design/Feasibility jump local search.md`):
     "fj"     feasibility jump. On the CuPy backend: `ls_fj_gpu.FJGpu` (one thread block per individual). On NumPy:
@@ -130,10 +132,13 @@ class LocalSearch:
     def set_cutoff(self, inc_key: float | None) -> None:
         self.impl.set_cutoff(inc_key)
 
-    def run(self, X, should_stop=None, scale_idx=None) -> dict:
+    def run(self, X, should_stop=None, scale_idx=None, horizon=None, cap_s=None) -> dict:
+        clock = {k: v for k, v in (("horizon", horizon), ("cap_s", cap_s)) if v is not None}
+        if clock and self.method != "fj":
+            raise ValueError(f"horizon / cap_s need repair.method 'fj', not {self.method!r}")
         if self.method == "none":
             out = self.impl.run(X, should_stop=should_stop)
         else:
-            out = self.impl.run(X, should_stop=should_stop, scale_idx=scale_idx)
+            out = self.impl.run(X, should_stop=should_stop, scale_idx=scale_idx, **clock)
         out["method"] = self.impl_name
         return out

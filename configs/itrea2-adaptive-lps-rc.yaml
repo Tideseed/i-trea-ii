@@ -1,0 +1,27 @@
+# I-TREA II -- lps1 (itrea2-adaptive-lps + the c01 repair budget) + the repair clock in SHADOW mode (development,
+# Stage 1 of the 2026-10-06 repair-depth design: vault 80-reviews/2026-10-06 Repair-depth design (workflow).md).
+# Shadow mode plays the horizon "none" with no cap: the search is lps1's (no argument reaches a local-search call, no
+# random number is drawn; identical genealogy for the same generation count, tested on NumPy). In a timed run its host
+# work (key copy-back, one `rclock` event per generation) can shift generation counts and exchange timing, and its
+# configuration hash differs from lps1's: do not pool its runs with lps1's (Stage 1 criterion (c) compares the
+# generation counts). It logs, per generation, the level the controller would choose, every repair call's per-launch
+# (steps, time) profile, each lane's steps and status, and per horizon level the gain and the time of the generation
+# (`rclock` events). Switch to the active controller (Stage 2) only if the shadow signal passes the criteria stated in
+# the design note, with `repair_clock.mode: active`.
+#
+# Partial file over the defaults. Equivalent overrides:
+#   --set strategy.enabled=true seeding.lp_source=highs_async lp_stream.enabled=true repair.max_steps=20000
+#         repair.stall_steps=1000 repair_clock.enabled=true repair_clock.mode=shadow
+name: itrea2-adaptive-lps-rc
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: shadow

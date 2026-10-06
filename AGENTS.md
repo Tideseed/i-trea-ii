@@ -101,6 +101,7 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/ea/ls_fj_gpu.py` | feasibility jump as a CuPy `RawKernel`, one thread block per individual | built |
 | `src/itrea/ea/ls_dense.py` | vectorised full rescore (baseline only) | built |
 | `src/itrea/ea/continuous.py` | closed-form decoding of singleton continuous columns (`repair.continuous: auto`) | built |
+| `src/itrea/ea/repair_clock.py` | the repair clock's controller: one lane-step horizon per generation from each horizon's measured gain per second (`repair_clock`, off by default; shadow mode logs only) — 2026-10-06, CPU-tested, not yet run on an instance | built |
 | `src/itrea/ea/engine.py` | the generation loop, exchange in/out, genealogy, frontier updates | built |
 | `src/itrea/ea/run.py` | EA process: `python -m itrea.ea.run …` | built |
 | `src/itrea/exchange/mailbox.py` | file mailbox on `/dev/shm` (fallback transport) | core |

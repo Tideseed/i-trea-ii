@@ -42,6 +42,16 @@ loop state of every individual (counters, RNG, weighted violation) lives in glob
 `iters` steps per launch, and the host relaunches until every individual is finished — one tiny device→host read per
 launch. `iters` adapts so that a launch takes about `launch_ms`.
 
+Repair clock (`run(horizon=..., cap_s=...)`, host side only — the kernel source is unchanged). An active block runs
+exactly `iters` steps per launch or stops on its own rule, so after every launch all still-active blocks have the same
+step count (the sum of the launches' `iters`). A horizon h is therefore enforced between launches: the host truncates
+the next launch to min(iters, h − steps so far) and stops relaunching at h; blocks still active get ST_HORIZON on the
+host (never written to STI) and keep their current x. A per-call deadline `cap_s`, split over the chunks (chunk c of C
+gets t0 + cap·(c+1)/C), stops relaunching the same way, at the equal step count reached (H_eff); a chunk reached after
+its deadline is still projected (prep, fj_init and a launch of 0 steps, which only applies the stop rules) instead of
+being left untouched. Every call records its per-launch (steps, seconds) profile (`last_profile`) and each block's
+step count (`last_steps`), whatever the arguments.
+
 Determinism: the per-block RNG is seeded from (seed, global individual index, call counter), list updates use scans
 instead of atomics, and reductions run in a fixed tree order — so a run is reproducible, and an individual's result
 does not depend on how the population is chunked.
@@ -80,10 +90,11 @@ N_SI = 8
 # per-individual float state (float64 columns of STD)
 D_F, D_FBEST = 0, 1
 N_SD = 2
-# finishing status
-ST_ACTIVE, ST_FEASIBLE, ST_STALL, ST_BUDGET = 0, 1, 2, 3
+# finishing status (ST_HORIZON: set on the host only, for blocks still active at the repair clock's horizon or deadline)
+ST_ACTIVE, ST_FEASIBLE, ST_STALL, ST_BUDGET, ST_HORIZON = 0, 1, 2, 3, 4
 
 ITERS_START = 8        # steps per block in the first launch of every call (then x4 per launch towards launch_ms)
+LAUNCH_MS_MIN = 5.0    # with a call deadline: launches target clamp(cap / 8, LAUNCH_MS_MIN, launch_ms)
 MAX_CAND = 32          # compile-time capacity of the per-thread candidate array (runtime max_candidates <= this)
 SAMPLE = 32            # violated rows sampled per step (one warp)
 LONG_ROW = 1024        # rows longer than this get their initial activity from the whole block (not one thread)
@@ -629,6 +640,8 @@ class FJGpu:
         self._iters = ITERS_START
         self.last_status: np.ndarray | None = None      # (k,) int8 — ST_* per individual of the last run
         self.last_moves: np.ndarray | None = None       # (k,) int64
+        self.last_steps: np.ndarray | None = None       # (k,) int64 — steps per individual (S_STEPS)
+        self.last_profile: dict | None = None           # per-chunk launch profile of the last run (`run`)
         self.state: dict | None = None                  # filled by run(keep_state=True)
 
         prob = dp.prob
@@ -746,7 +759,8 @@ class FJGpu:
         per_ind = (0 if X_is_work else 8 * self.n) + 24 * self.m_aug + 8 * (N_SI + N_SD)
         return max(1, min(k, int(self.mem_budget_bytes // max(per_ind, 1))))
 
-    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None) -> dict:
+    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None, horizon: int | None = None,
+            cap_s: float | None = None) -> dict:
         """Improve every row of X (k, n; int8 / int32 / float32 / float64) in place. Integers stay integral and inside
         [ceil(lb), floor(ub)]; every gene is clipped to its bounds first. `scale_idx` (k,): each row's index into
         `row_scales` (None: 0 for every row; one scale: ignored). Returns the counters
@@ -754,7 +768,18 @@ class FJGpu:
         peak_bytes, launches, max_launch_s}. keep_state=True also stores per-individual act / w / violated list in
         `self.state` (tests). `should_stop()` (optional) is polled before every chunk and after every launch; when it
         returns True the search ends: the chunk in progress is written back as it stands (its unfinished rows keep
-        ST_ACTIVE), later chunks are left untouched; unfinished rows count in `finished_budget` and `interrupted`."""
+        ST_ACTIVE), later chunks are left untouched; unfinished rows count in `finished_budget` and `interrupted`.
+
+        The repair clock (module docstring; both None: the loop above, unchanged). `horizon` = h lane steps: no block
+        runs more than h steps, blocks still active at h get ST_HORIZON. `cap_s`: the call's deadline, split over the
+        chunks; a chunk cut by it gets ST_HORIZON at the equal step count reached, a chunk reached after it is
+        projected only. The counters then add `finished_horizon` (rows with ST_HORIZON, also counted in
+        `finished_budget`, so the three finish counters still add up to k) and `cap_hits` (chunks cut by the deadline).
+        `last_steps` (k,) and `last_profile` = {kind: "launches", seconds, H, cap_s, chunks: [{k, cum, t, end, H_eff,
+        done, cut, cap_hit}]} — per chunk the cumulative steps after every launch (starting at 0) with the seconds
+        since the call started (`t[0]` = the chunk's start), the chunk's end, the step count it ended at, whether
+        every block stopped by itself (`done`) and whether the horizon or the deadline cut it — are kept for every
+        call."""
         import cupy as cp
 
         t0 = time.perf_counter()
@@ -763,6 +788,12 @@ class FJGpu:
         k, n = int(X.shape[0]), int(X.shape[1])
         if n != self.n:
             raise ValueError(f"X has {n} columns, the problem has {self.n}")
+        if horizon is not None and int(horizon) < 0:
+            raise ValueError("horizon must be >= 0")
+        if cap_s is not None and not float(cap_s) > 0:
+            raise ValueError("cap_s must be > 0")
+        clock = horizon is not None or cap_s is not None
+        hz = None if horizon is None else int(horizon)
         out = dict(moves=0, local_minima=0, steps=0, finished_feasible=0, finished_stall=0, finished_budget=0,
                    interrupted=0, seconds=0.0, chunk=0, peak_bytes=0, launches=0, max_launch_s=0.0)
         d_sidx = None
@@ -773,9 +804,14 @@ class FJGpu:
             if len(self.row_scales) > 1 and k:
                 d_sidx = cp.asarray(sidx.astype(np.int32))
         self._calls += 1
+        prof_chunks: list[dict] = []
+        self.last_profile = dict(kind="launches", seconds=0.0, H=hz, cap_s=cap_s, chunks=prof_chunks)
         if k == 0:
             self.last_status = np.zeros(0, np.int8)
             self.last_moves = np.zeros(0, np.int64)
+            self.last_steps = np.zeros(0, np.int64)
+            if clock:
+                out.update(finished_horizon=0, cap_hits=0)
             return out
         ew = _elementwise()
         direct = X.dtype == np.float64 and X.flags.c_contiguous
@@ -794,20 +830,30 @@ class FJGpu:
         peak = pool.used_bytes() - used0
         status_all = np.zeros(k, np.int8)                # ST_ACTIVE (0) for rows a stop leaves unfinished / unreached
         moves_all = np.zeros(k, np.int64)
+        steps_all = np.zeros(k, np.int64)
         kept: dict[str, list] = {"act": [], "w": [], "vlist": [], "vpos": [], "nviol": [], "F": []}
         bd = self.threads
         is_int_dtype = np.issubdtype(X.dtype, np.integer)
         launches = 0
         max_launch = 0.0
+        cap_hits = 0
+        n_chunks = -(-k // chunk)
+        # with a deadline, launches are kept to about 1/8 of it, so the overshoot past a deadline is bounded likewise
+        launch_ms = self.launch_ms if cap_s is None else min(self.launch_ms, max(float(cap_s) * 125.0, LAUNCH_MS_MIN))
         # every call starts with a short slice: the step cost can change by orders of magnitude between calls (an armed
         # cutoff row spans the whole objective), and a slice calibrated on cheap steps could outlive the watchdog
         self._iters = min(self._iters, ITERS_START)
         stopped = False
-        for s in range(0, k, chunk):
+        for ci, s in enumerate(range(0, k, chunk)):
             if should_stop is not None and should_stop():
                 stopped = True
                 break
             kc = min(chunk, k - s)
+            tc = time.perf_counter()
+            deadline = None if cap_s is None else t0 + float(cap_s) * (ci + 1) / n_chunks
+            late = deadline is not None and tc >= deadline       # reached after its deadline: projected only
+            prof = dict(k=kc, cum=[0], t=[tc - t0], end=0.0, H_eff=0, done=False, cut=False, cap_hit=False)
+            prof_chunks.append(prof)
             if direct:
                 Xc = X[s:s + kc]
             else:
@@ -821,15 +867,22 @@ class FJGpu:
             if self.m_aug == 0:
                 st = np.zeros((kc, N_SI), np.int64)
                 st[:, S_STATUS] = ST_FEASIBLE
+                prof["done"] = True
             else:
                 self._k_init((kc,), (bd,), (
                     np.int32(n), np.int32(self.m_aug), self.d_row_ptr, self.d_col_idx, self.d_row_val,
                     self.d_rl, self.d_ru, self.d_rs, sx, use_sx, self.d_long, np.int32(self.n_long), np.int32(LONG_ROW),
                     Xc, ACT, W, VLIST, VPOS, STI, STD, np.uint64(self.seed), np.int64(s), np.uint64(self._calls),
                     np.float64(self.viol_tol), np.float64(self.viol_cap)))
+                cum = 0
+                cut = False
                 while True:
                     tl = time.perf_counter()
                     iters = int(self._iters)
+                    if hz is not None:
+                        iters = min(iters, hz - cum)                 # never past the horizon (0: stop rules only)
+                    if late:
+                        iters = 0
                     self._k_steps((kc,), (bd,), (
                         np.int32(n), np.int32(self.m_aug), self.d_row_ptr, self.d_col_idx, self.d_row_val,
                         self.d_col_ptr, self.d_row_idx, self.d_col_val, self.d_rl, self.d_ru, self.d_rs,
@@ -841,22 +894,41 @@ class FJGpu:
                         np.int32(1 if self.row_scan_filter else 0), np.int32(iters)))
                     active = int(cp.count_nonzero(STI[:kc, S_STATUS] == ST_ACTIVE))
                     launches += 1
-                    dt = time.perf_counter() - tl
+                    cum += iters
+                    tn = time.perf_counter()
+                    dt = tn - tl
                     max_launch = max(max_launch, dt)
+                    prof["cum"].append(cum)
+                    prof["t"].append(tn - t0)
                     if active == 0:
+                        prof["done"] = True
+                        break
+                    if hz is not None and cum >= hz:                 # the horizon: every active block has hz steps
+                        cut = True
+                        break
+                    if late or (deadline is not None and tn >= deadline):
+                        cut = True                                   # the deadline: cut at the equal count reached
+                        prof["cap_hit"] = True
+                        cap_hits += 1
                         break
                     if should_stop is not None and should_stop():
                         stopped = True
                         break
                     # aim each launch at ~launch_ms (watchdog); grow at most 4x per launch
-                    target = self.launch_ms / 1000.0
+                    target = launch_ms / 1000.0
                     scale = target / dt if dt > 0 else 4.0
                     self._iters = int(min(max(iters * min(scale, 4.0), 1), 1 << 20))
                 st = cp.asnumpy(STI[:kc])
+                if cut:
+                    stc = st[:, S_STATUS]
+                    stc[stc == ST_ACTIVE] = ST_HORIZON               # host-side status only (STI is not rewritten)
+                prof["cut"] = cut
+                prof["H_eff"] = cum
             if not direct:
                 (ew["wb_int"] if is_int_dtype else ew["wb_float"])(Xc, X[s:s + kc])
             status_all[s:s + kc] = st[:, S_STATUS]
             moves_all[s:s + kc] = st[:, S_MOVES]
+            steps_all[s:s + kc] = st[:, S_STEPS]
             out["moves"] += int(st[:, S_MOVES].sum())
             out["local_minima"] += int(st[:, S_LMIN].sum())
             out["steps"] += int(st[:, S_STEPS].sum())
@@ -868,6 +940,7 @@ class FJGpu:
                 kept["nviol"].append(st[:, S_NVIOL].copy())
                 kept["F"].append(cp.asnumpy(STD[:kc, D_F]))
             peak = max(peak, pool.used_bytes() - used0)
+            prof["end"] = time.perf_counter() - t0
             if stopped:
                 break
         cp.cuda.Stream.null.synchronize()
@@ -876,11 +949,16 @@ class FJGpu:
         out["finished_stall"] = int(np.sum(status_all == ST_STALL))
         out["interrupted"] = int(np.sum(status_all == ST_ACTIVE))
         out["finished_budget"] = int(np.sum(status_all == ST_BUDGET)) + out["interrupted"]
+        if clock:
+            out["finished_horizon"] = int(np.sum(status_all == ST_HORIZON))
+            out["finished_budget"] += out["finished_horizon"]
+            out["cap_hits"] = cap_hits
         out["launches"] = launches
         out["max_launch_s"] = max_launch
         out["peak_bytes"] = int(peak)
         out["seconds"] = time.perf_counter() - t0
-        self.last_status, self.last_moves = status_all, moves_all
+        self.last_status, self.last_moves, self.last_steps = status_all, moves_all, steps_all
+        self.last_profile["seconds"] = out["seconds"]
         if keep_state:
             self.state = {kk: (np.concatenate(v) if v else None) for kk, v in kept.items()}
         return out
