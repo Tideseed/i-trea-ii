@@ -34,3 +34,10 @@ stopped (SIGTERM; its in-flight blocks were voided and requeued) and restarted o
   lane time (~1 pause per hour ≈ 8 runs).
 - Not changed mid-pass (a restart voids the 8 in-flight runs, the same as one more pause). **For the next CPU-only
   window:** 7 lanes, or a CPU start gate of 86 °C, to keep the box below the 92 °C pause; decide on the stage-1 tail data.
+
+## Addendum 2026-10-06 07:5x — stage 2 hit a pause storm
+- Stage 2 (234 jobs: 142 MIPLIB by the rule + all 92 PGLib/ML4CO; larger, harder instances) on the same 8 lanes and
+  88 °C CPU start gate: **8 thermal pauses between 06:08 and 06:32**, **64 runs voided**, 34 completed in 53 min before
+  the 07:10 deadline. Stage 1 had 2 pauses in 3 h.
+- **Next window (decided):** stage 2's remainder on **6 lanes**, CPU start gate 86 °C; if pauses still exceed one per
+  hour, make the lane count adaptive (open a lane only while the box is below 86 °C, close one above 90 °C) before E1.
