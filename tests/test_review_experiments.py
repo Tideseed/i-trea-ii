@@ -647,3 +647,28 @@ def test_thermal_start_gate_depends_on_gpu_use():
     assert pool._arm_uses_gpu({"arm": "A3"}) is True
     assert pool._arm_uses_gpu({"arm": "A2"}) is True
     assert pool._arm_uses_gpu({"arm": "nope"}) is True
+
+
+def test_rest_flag_holds_launches_until_it_clears(tmp_path, monkeypatch):
+    """D-009: while fan-governor's rest flag exists no run starts; once it is gone the run launches."""
+    from itrea.experiments import record_env
+    record_env.static_env()
+    flag = tmp_path / "rest"
+    flag.write_text("rest_seconds=600\n")
+    monkeypatch.setattr(gates, "REST_FLAG", flag)
+    monkeypatch.setattr(gates, "acpi_max_c", lambda *a: 50.0)
+    t_clear = time.monotonic() + 1.5
+
+    def due(f=None):                      # reads the flag file itself (conftest stubs gates.rest_due to False)
+        if time.monotonic() >= t_clear and flag.exists():
+            flag.unlink()
+        return flag.exists()
+    monkeypatch.setattr(gates, "rest_due", due)
+    calls: list = []
+    run_pair, _ = _stub_run_pair(0.1, calls)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    o = poolopts(tmp_path, require_lease=False, thermal_poll_s=0.1, est_overhead_s=0.0, open_margin_s=0.0)
+    t0 = time.monotonic()
+    p = pool.Pool(_jobs(_toys(tmp_path, 1), ["A0"]), o)
+    assert p.run() == 0
+    assert len(calls) == 1 and time.monotonic() - t0 >= 1.4          # launched only after the flag cleared

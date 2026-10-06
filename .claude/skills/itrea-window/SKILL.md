@@ -19,6 +19,9 @@ Berk usually does not coordinate the sessions — the lease does.
    processes), MemAvailable, the ACPI maximum (`gates.acpi_max_c()`); a GPU arm must not start above 80 °C.
 3. Claim, with the exact `who` string the runner checks:
    ```bash
+   # Before claiming: is it night (00:00–07:00)? The host's night rest applies — run through it only with Berk's yes
+   # for that night (D-009). Check `tail ~/.local/state/thermal/fan-governor.log` and `ls ~/.local/state/thermal/rest`:
+   # the runner waits while the rest flag exists; plan ~30 min work / 10–30 min rest cycles.
    box-window claim --who "i-trea-ii (Claude Code)" --why "<experiment id and what runs>" --until HH:MM \
      [--stops ornith-vllm,llama-qwen38] [--mem <GB>]
    ```

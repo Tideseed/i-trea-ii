@@ -38,6 +38,10 @@ THERMAL_WAIT_C_CPU = 88.0  # CPU-only runs (no GPU process) may start below this
 THERMAL_PAUSE_C = 92.0     # pause the run set at or above this ...
 THERMAL_RESUME_C = 80.0    # ... until below this
 SERVING_UNITS = ("ornith-vllm", "llama-qwen38")
+# fan-governor's rest flag (host convention since 2026-10-02, Berk: "allow the spark to recover some … fans should not
+# go max for prolonged periods"): written after 30 min of continuous fan MAX, removed once the fan is back on AUTO (idle
+# and cool) and the rest has lasted its length (escalating 10–30 min). Launchers start nothing new while it exists.
+REST_FLAG = Path.home() / ".local/state/thermal/rest"
 
 
 class GateError(RuntimeError):
@@ -106,6 +110,11 @@ def acpi_max_c(root: str | os.PathLike | None = None) -> float | None:
     """Hottest ACPI thermal zone in °C (None if unreadable)."""
     vals = acpi_temps_c(root)
     return max(vals) if vals else None
+
+
+def rest_due(flag: str | os.PathLike | None = None) -> bool:
+    """True while fan-governor's rest flag exists (D-009): start no new run; in-flight runs finish."""
+    return Path(flag if flag is not None else REST_FLAG).exists()
 
 
 def wait_cool(start_below: float = THERMAL_WAIT_C, timeout_s: float = 3600.0, poll_s: float = 30.0,

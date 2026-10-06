@@ -17,7 +17,8 @@ model servers stopped; ten lanes (110 GB) never could.
 
 Gates before EVERY run, re-evaluated together in one loop until a single pass clears them all (a long thermal or memory
 wait never releases a run on a stale lease or serving check): the box-window lease (`i-trea-ii (Claude Code)`), the
-local model servers stopped for test and screening jobs, the thermal start gate (< 80 °C), and D-003's memory formula
+local model servers stopped for test and screening jobs, fan-governor's rest flag (D-009), the thermal start gate
+(< 80 °C GPU arms, < 88 °C CPU-only arms, D-008), and D-003's memory formula
 over the run plus every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the
 admitted runs already use is credited back, since MemAvailable no longer contains it). Admission is atomic. A memory
 wait that times out voids and requeues its block while other runs are in flight, and halts only when nothing is. A live
@@ -796,6 +797,10 @@ class Pool:
             except gates.GateError as e:
                 return ("halt", str(e))
             now = time.monotonic()
+            if gates.rest_due():                   # D-009: honour fan-governor's rest — no new run until it clears
+                wait_log("fan-governor rest flag: starting nothing until the box has rested")
+                self.abort.wait(min(o.thermal_poll_s, 10.0))
+                continue
             t = gates.acpi_max_c()
             start_c = o.thermal_start_c if _arm_uses_gpu(r.job) else o.thermal_start_c_cpu
             if t is not None and t >= start_c:

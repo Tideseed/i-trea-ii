@@ -186,7 +186,11 @@ def test_freeze_check_needs_frozen_file(repo):
 
 # ------------------------------------------------------------------------------------------------- end to end
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    # The pool's gates must not read the real box (free memory changes when the model servers are up; a real rest flag
+    # or a hot box would stall the tests): plenty of memory, no fan-governor rest.
+    monkeypatch.setattr(gates, "mem_available_gb", lambda *a, **k: 500.0)
+    monkeypatch.setattr(gates, "rest_due", lambda *a, **k: False)
     fake = tmp_path / "fake_proc.py"
     fake.write_text(FAKE_PROC)
     insts = [write_mps(set_cover(20, 12, seed=i), tmp_path / f"toy{i}.mps") for i in range(2)]
@@ -199,7 +203,7 @@ def popts(tmp_path, fake, **kw) -> pool.PoolOptions:
                           ea_mem_gb=1.0, cuopt_mem_gb=1.0, cupy_cache_dir=tmp_path / "cupy",
                           module_override={k: fake for k in ("scip", "highs", "cuopt", "ea")})
     d = dict(require_lease=False, logs_dir=tmp_path / "logs", lock_path=tmp_path / "runner.lock",
-             thermal_start_c=500.0, watchdog=False, root=tmp_path, pair_opts=po)
+             thermal_start_c=500.0, thermal_start_c_cpu=500.0, watchdog=False, root=tmp_path, pair_opts=po)
     d.update(kw)
     return pool.PoolOptions(**d)
 

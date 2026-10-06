@@ -15,6 +15,8 @@ is not a control.**
 | **GPU health per run:** sample SM clock, GPU temperature and per-process GPU utilisation every second; a GPU run whose median SM clock is below 2,000 MHz (the stuck-low-clock fault) or with foreign GPU activity above 2 % of its budget **voids its whole block** (all arms of that instance × seed) and halts the run set for a look | runner |
 | cuOpt: an RMM `LimitingResourceAdaptor` with the same limit as the EA's pool; its measured peak recorded | cuOpt process |
 | `OMP_NUM_THREADS = OPENBLAS_NUM_THREADS = MKL_NUM_THREADS = 1` in every EA and solver process | runner |
+| **fan-governor rest flag** (`~/.local/state/thermal/rest`, written after 30 min of fan MAX): start nothing new while it exists; in-flight runs finish ([[D-009 Honour the fan governor's rest breaks and the night rest]]) | runner (`gates.rest_due`) |
+| **Night rest** (host night-rest timer 00:00–07:00): no window through the night without Berk's yes for that night (D-009) | operator |
 | Confirmatory windows run with **both local model servers stopped** (Berk's yes, 2026-10-05 23:2x: "You can deactivate agent fast and agent think llms"); hold-units + `box-window --stops`; a restore timer and the session itself restore them; `local-model-canary` / `canary-hello` paused inside the window | operator; the runner records the units' state per run and refuses a confirmatory run while either is active |
 | No downloads (instances, wheels) without Berk's explicit ask | operator |
 | Single-instance lock (`flock`) per run set | runner |
