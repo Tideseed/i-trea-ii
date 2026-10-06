@@ -190,3 +190,35 @@ objective cutoff: **0/32 better-and-feasible** on the original and on the aggreg
 end with V ≈ 0.003 — stuck just short). The objective is ONE integer variable (a min-max structure): lowering it by 1
 tightens every row it bounds at once, which no single or chain move does. radiationm needs a non-local operator
 (fix-and-propagate around the incumbent, or a residual sub-MIP), not better local moves; parked.
+
+## Repair budget, one variable (2026-10-06 16:55–17:30) — A3@lps0 vs A3@lps1, 9 instances × seeds 0–1, 120 s
+`lps0` = `itrea2-adaptive-lps` at the DEFAULT repair budget (hash `a2ad94e9188d`, code f8adb63); `lps1` = the same +
+the c01 budget (`repair.max_steps 20000, repair.stall_steps 1000`). P(120), seeds averaged:
+
+| instance | SCIP alone | coupled default | lps1 (deep repair) | **lps0 (default repair)** | generations lps1 → lps0 | cuOpt alone |
+|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 1.000 | 1.000 | 0.297 | 0.395 | — → 67–79 | 0.645 |
+| fhnw-binpack4-48 | 1.000 | 1.000 | 0.651 | 1.000 | 37 → 183–308 | 0.005 |
+| glass4 | 0.344 | 0.247 | 0.228 | 0.323 | 27 → 220–224 | 0.308 |
+| item_placement_9903 | 0.660 | 0.400 | 0.569 | **0.358** | 371 → 1770–1840 | 0.666 |
+| neos-3024952-loue | 1.000 | 0.344 | 0.369 | 0.440 | 48 → 429–436 | 0.760 |
+| neos-960392 | 1.000 | 0.042 | 0.032 | 0.039 | — → 99–365 | 0.571 |
+| radiationm18-12-05 | 0.229 | 0.237 | 0.234 | 0.235 | — → 508–512 | 0.009 |
+| rail01 | 1.000 | 1.000 | 1.000 | 1.000 | — → 854–855 | 0.927 |
+| sing44 | 0.525 | 0.651 | 0.362 | 0.551 | — → 448–451 | 0.726 |
+
+lps0 vs lps1: mean bounded d **−0.13** (1 better: item_placement +0.37; 6 worse: fhnw −0.35, sing44 −0.34, glass4
+−0.29, ca −0.25, neos-960392 −0.18, loue −0.16; 2 equal). lps0 vs SCIP alone +0.29 (5 better, 2 worse: sing44 −0.05,
+radiationm −0.02). Hygiene: 18/18 completed, every incumbent checked, GPU health ok. Stream: with fast generations the
+EA misses almost nothing (0–17 ids, was 95–358).
+
+**Correction to the 16:3x finding.** I read "6–9× fewer generations" as "the EA hardly evolved, so the gains came despite
+the budget" and expected the default budget to do as well or better. Measured, the deep repair wins on 6 of 9: on
+these instances the repair, not the number of generations, does most of the work (sing44 and ca need it to turn LP
+roundings feasible; glass4's 209 posts at the default budget improved SCIP less than lps1's 22). Only item_placement —
+many small improvements, 1,700+ posts — gains from fast generations. **The repair depth is an instance-dependent
+trade-off**, the same kind the self-adaptive strategy was built for; but the GPU repair call waits for its slowest
+individual, so mixing depths inside one call would not make a generation faster. Candidates: a time budget per repair
+call instead of a step budget; alternating deep and shallow generations; or depth as a strategy gene with the
+generation time charged to the strategy. **Development baseline for now: lps1** (deep repair + adaptive + HiGHS LP +
+stream), the best measured configuration.
