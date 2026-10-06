@@ -1,0 +1,10 @@
+instance,name,stratum,split,why,stage1_p300,stage1_feasible,stage1_t_first
+data/miplib/inst/glass4.mps.gz,glass4,miplib_opt,dev,"small (322 vars), binary + continuous",0.2845,True,0.022
+data/miplib/inst/sing44.mps.gz,sing44,miplib_opt,dev,"mixed binary + continuous, 60k vars",0.2275,True,4.043
+data/miplib/inst/radiationm18-12-05.mps.gz,radiationm18-12-05,miplib_opt,dev,"general integers + continuous, 41k vars",0.3319,True,0.312
+data/miplib/inst/neos-960392.mps.gz,neos-960392,miplib_opt,dev,"pure binary, 59k vars",0.555,True,0.082
+data/miplib/inst/neos-3024952-loue.mps.gz,neos-3024952-loue,miplib_feas,dev,"pure general integer, no solution in 300 s",1.0,False,300.0
+data/miplib/inst/fhnw-binpack4-48.mps.gz,fhnw-binpack4-48,miplib_feas,dev,"bin packing, no solution in 300 s",1.0,False,300.0
+data/miplib/inst/rail01.mps.gz,rail01,miplib_feas,dev,"set partitioning/covering, 117k binaries, no solution in 300 s",1.0,False,300.0
+data/pglib_uc/mps/ca__Scenario400_reserves_1.mps.gz,ca__Scenario400_reserves_1,pglib,dev,"unit commitment (continuous-heavy), no solution in 300 s",1.0,False,300.0
+data/ml4co/instances/1_item_placement/valid/item_placement_9903.mps.gz,item_placement_9903,ml4co,dev,"ML4CO item placement, highest stage-1 P",0.652,True,0.025

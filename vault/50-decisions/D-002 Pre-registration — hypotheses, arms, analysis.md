@@ -61,7 +61,11 @@ A three-lens design critique followed ([[2026-10-05 design critique — response
 `supportcase22` (open) is used only in E5. Hardness is measured on **SCIP alone** in the screening pass. It is never
 taken from cuOpt or from the optopt grid, which mixes cuOpt into "best strategy" and would bias H1.
 
-**Strata and quotas (test / tuning):**
+**Amended after the tag by [[D-010 Develop the algorithm first on a small development set]] (2026-10-06, Berk:
+"fewer test problems … improving the algorithm first"):** the tuning side is replaced by a frozen 9-instance development
+set, excluded from the test set; the confirmatory test set is proposed at 16 (8 / 2 / 3 / 3), MDE ≈ 0.3.
+
+**Strata and quotas (test / tuning) — as tagged:**
 
 | stratum | rule (screening, both seeds) | test | tuning |
 |---|---|---|---|
