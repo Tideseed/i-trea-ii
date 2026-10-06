@@ -222,3 +222,24 @@ individual, so mixing depths inside one call would not make a generation faster.
 call instead of a step budget; alternating deep and shallow generations; or depth as a strategy gene with the
 generation time charged to the strategy. **Development baseline for now: lps1** (deep repair + adaptive + HiGHS LP +
 stream), the best measured configuration.
+
+## fhnw two-scale survival (2026-10-06 17:5x–18:08) — alt1 = lps0 + `ranks.feas_alt_scale: rhs`, fhnw-binpack4-48, seeds 0–1
+| arm | seed 0 | seed 1 | rhs-repaired members at the end (of 256) |
+|---|---|---|---|
+| A3@alt1 (coupled) | 1.000 | 1.000 | 136 / 223 |
+| A5@alt1 (EA alone, diagnostic) | 1.000 | 1.000 | 245 / 139 |
+| A3@lps0 (same, one scale) | 1.000 | 1.000 | 0 / 0 |
+| A3@lps1 (deep repair, one scale) | **0.302** | 1.000 | 36 / 13 |
+| A5@c04 (deep repair, rhs on repair AND survival) | **0.253** | — | — |
+**Reading.** The two-scale survival does what it was built for — the rhs-repaired individuals survive (136–245 of 256,
+against 0 under one scale) — but at the default repair depth no feasible point appears in 120 s. Both fhnw finds so
+far had deep repair (c04 at 30 s, lps1 at 36 s). Next: `lps1 + feas_alt_scale rhs` (deep repair + two scales).
+`lp1` (LP source alone) got 1 of 18 runs before the window closed (neos-3024952-loue s1 0.355); the rest waits.
+
+## Repair-depth design (2026-10-06 17:36–18:40)
+A design workflow (code map, run-data analysis, literature, three designs, two adversarial judges) chose a **repair
+clock**: a lane-step horizon per repair call enforced between GPU launches, chosen per generation from the measured
+gain per second of each horizon, with deep repair kept until the EA's own first feasible point, a materiality floor,
+and the LP batch always repaired deep. Staged: instrumentation + shadow mode first (no behaviour change; pass criteria
+stated in advance), the active controller only if the shadow signal separates item_placement from glass4/loue.
+Full record: [[2026-10-06 Repair-depth design (workflow)]].
