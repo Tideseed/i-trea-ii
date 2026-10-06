@@ -23,11 +23,12 @@ lp_round(bk, dp, lp_x, k, rng_dev, rng_host, gene_dtype="auto") -> (X, origin)
     k randomised roundings of an LP point: an integer variable takes floor(x) or ceil(x) with probability = the
     fractional part, then its bounds; continuous variables take the LP value clipped to their bounds. A non-finite LP
     entry is replaced by the zero-ish value. Origin ORIGIN_SEED_LP.
-immigrants(bk, dp, k, rng_dev, rng_host, lp_x=None, frontier_rows=None, lp_share=0.5, gene_dtype="auto") -> (X, origin)
+immigrants(bk, dp, k, rng_dev, rng_host, lp_x=None, frontier_rows=None, lp_share=0.5, gene_dtype="auto",
+           lp_count=None) -> (X, origin)
     Up to k rows of `frontier_rows` first (rows of the frontier archive, D-005; integer genes rounded, cast to the gene
-    dtype), then of the rest round(lp_share · rest) LP roundings when lp_x is given, and uniform random points for the
-    remainder. Every row carries ORIGIN_IMMIGRANT, plus SEED_LP / SEED_RANDOM for the generated ones (frontier rows:
-    IMMIGRANT alone).
+    dtype), then of the rest round(lp_share · rest) LP roundings when lp_x is given (exactly `lp_count` if set), and
+    uniform random points for the remainder. Every row carries ORIGIN_IMMIGRANT, plus SEED_LP / SEED_RANDOM for the
+    generated ones (frontier rows: IMMIGRANT alone).
 
 All generation is batched on the device in chunks of rows under `mem_budget_bytes`.
 """
@@ -172,8 +173,10 @@ def lp_round(bk: Backend, dp: DeviceProblem, lp_x, k: int, rng_dev, rng_host: np
 
 def immigrants(bk: Backend, dp: DeviceProblem, k: int, rng_dev, rng_host: np.random.Generator, lp_x=None,
                frontier_rows=None, lp_share: float = 0.5, gene_dtype: str = "auto",
-               mem_budget_bytes: int = DEFAULT_MEM_BUDGET):
-    """k immigrants: frontier rows first, then LP roundings (lp_share of the rest, if lp_x), then uniform random."""
+               mem_budget_bytes: int = DEFAULT_MEM_BUDGET, lp_count: int | None = None):
+    """k immigrants: frontier rows first, then LP roundings (lp_share of the rest, if lp_x), then uniform random.
+    `lp_count` (if given, with lp_x) replaces round(lp_share · rest) by that exact number, clipped to the rest — the
+    self-adaptive repair strategy gives LP roundings only to immigrants whose strategy has LP guidance."""
     xp = bk.xp
     k = int(k)
     dt = _gene_dtype(dp, gene_dtype)
@@ -185,7 +188,12 @@ def immigrants(bk: Backend, dp: DeviceProblem, k: int, rng_dev, rng_host: np.ran
         parts.append(_cast(bk, R, dt))
         origins.append(np.full(R.shape[0], ORIGIN_IMMIGRANT, dtype=np.uint16))
     rest = k - sum(p.shape[0] for p in parts)
-    k_lp = int(round(lp_share * rest)) if lp_x is not None else 0
+    if lp_x is None:
+        k_lp = 0
+    elif lp_count is not None:
+        k_lp = max(0, min(int(lp_count), rest))
+    else:
+        k_lp = int(round(lp_share * rest))
     if k_lp:
         X, o = lp_round(bk, dp, lp_x, k_lp, rng_dev, rng_host, gene_dtype, mem_budget_bytes)
         parts.append(X)

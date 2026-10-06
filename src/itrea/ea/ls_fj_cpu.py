@@ -30,7 +30,8 @@ One step (rules shared with the GPU kernel):
   4. otherwise a local minimum: every violated row's weight grows by `weight_bump`; with probability `p_random_walk`
      (default 0, a knob not yet in RepairCfg) the least-bad move is applied anyway.
 Row violation v_i(a) = (max(rl_i - a, 0) + max(a - ru_i, 0)) / s_i with s_i the `viol_norm` divisor of the population's
-V (row 2-norm or max(1,|rhs|); 1 for "count"). A row is in the violated set when it misses a side by more than
+V (row 2-norm or max(1,|rhs|); 1 for "count") — or, with `row_scales` (the self-adaptive repair strategy), the row of
+the individual's own scale in `AugmentedRows.rs_tab`. A row is in the violated set when it misses a side by more than
 min(viol_tol·max(1, |side|), viol_cap) = min(1e-9·max(1,|side|), 1e-7): far inside the 1e-6 test of every partner
 mode (SCIP relative, HiGHS absolute), so "finished feasible" here implies `evaluate`-feasible.
 
@@ -59,7 +60,7 @@ import scipy.sparse as sps
 from numba import njit
 
 from itrea.config import RepairCfg
-from itrea.ea.evaluate import DeviceProblem
+from itrea.ea.evaluate import DeviceProblem, own_row_scale, row_scale_table
 
 # variable classes (same codes as ls_fj_gpu)
 VT_CONT, VT_BIN, VT_INT, VT_FIXED = 0, 1, 2, 3
@@ -97,12 +98,8 @@ def var_types(prob) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def viol_norm_mode(dp: DeviceProblem) -> tuple[str, np.ndarray]:
-    """("l2" | "rhs" | "count", per-row divisor s_i) as used by the population's V."""
-    m = dp.prob.m
-    if dp.count_rows:
-        return "count", np.ones(m)
-    vn = np.asarray(dp.bk.asnumpy(dp.viol_norm_vec), dtype=np.float64)
-    return ("l2" if np.allclose(vn, dp.prob.row_norm) else "rhs"), vn.copy()
+    """("l2" | "rhs" | "count", per-row divisor s_i) as used by the population's V (`evaluate.own_row_scale`)."""
+    return own_row_scale(dp)
 
 
 def objective_is_integral(prob) -> bool:
@@ -128,14 +125,20 @@ def cutoff_side(inc_key: float | None, key_offset: float, imp_tol: float, integr
 
 class AugmentedRows:
     """A with the objective cutoff row appended (row m) when `objective_mode == "cutoff_row"` and some cost is
-    non-zero; host arrays (CSR and CSC), row sides and the row divisors s_i. `set_cutoff_side` rewrites row m."""
+    non-zero; host arrays (CSR and CSC), row sides and the row divisors s_i. `set_cutoff_side` rewrites row m.
 
-    def __init__(self, dp: DeviceProblem, cfg: RepairCfg):
+    Row scales (`scales`, default: `dp`'s own — the self-adaptive repair strategy passes several): `rs_tab` (R, m_aug)
+    holds one row of divisors per scale, in the order of `scales` (`evaluate.row_scale_table`; the cutoff row's entry
+    is ||cmin||_2 for "l2", max(1, |side|) for "rhs" once armed, 1 otherwise); `rs` is `rs_tab[0]` (a view) and
+    `viol_norm` its mode. The sides `rl` / `ru` are the same for every scale."""
+
+    def __init__(self, dp: DeviceProblem, cfg: RepairCfg, scales=None):
         prob = dp.prob
         cmin = np.asarray(prob.cmin, dtype=np.float64)
         self.m = prob.m
         self.has_cut = cfg.objective_mode == "cutoff_row" and bool(np.any(cmin != 0))
-        self.viol_norm, rs = viol_norm_mode(dp)
+        self.scales, tab = row_scale_table(dp, scales)
+        self.viol_norm = self.scales[0]
         A = sps.csr_matrix(prob.A, dtype=np.float64)
         rl = np.asarray(prob.rl, dtype=np.float64).copy()
         ru = np.asarray(prob.ru, dtype=np.float64).copy()
@@ -145,12 +148,15 @@ class AugmentedRows:
             ru = np.append(ru, np.inf)
             cn = float(np.linalg.norm(cmin))
             self.cut_l2 = cn if cn > 0 else 1.0
-            rs = np.append(rs, self.cut_l2 if self.viol_norm == "l2" else 1.0)
+            cut = np.array([[self.cut_l2 if md == "l2" else 1.0] for md in self.scales])
+            tab = np.hstack([tab, cut])
         A.sort_indices()
         C = A.tocsc()
         C.sort_indices()
         self.A, self.C = A, C
-        self.rl, self.ru, self.rs = rl, ru, np.asarray(rs, dtype=np.float64)
+        self.rl, self.ru = rl, ru
+        self.rs_tab = np.ascontiguousarray(tab, dtype=np.float64)
+        self.rs = self.rs_tab[0]
         self.m_aug = A.shape[0]
         self.integral = objective_is_integral(prob) if self.has_cut else False
 
@@ -158,8 +164,9 @@ class AugmentedRows:
         if not self.has_cut:
             return
         self.ru[self.m] = side
-        if self.viol_norm == "rhs":
-            self.rs[self.m] = max(1.0, abs(side)) if math.isfinite(side) else 1.0
+        for r, md in enumerate(self.scales):
+            if md == "rhs":
+                self.rs_tab[r, self.m] = max(1.0, abs(side)) if math.isfinite(side) else 1.0
 
 
 def weighted_objective(prob, cfg: RepairCfg) -> tuple[np.ndarray, int]:
@@ -495,11 +502,17 @@ class FJCpu:
     `row_scan_cap` (0 = score the whole chosen row, as the GPU kernel does; > 0 = a random cyclic window of that many
     variables — a speed knob for very long rows such as the cutoff row on large n). `mem_budget_bytes` is checked
     against the per-call state (x, act, w, violated list: O(n + m) — one individual at a time).
+
+    `row_scales` (default: `dp`'s own scale) = the row scales s_i one call can use (`AugmentedRows.rs_tab`, the
+    self-adaptive repair strategy); `run(X, scale_idx=...)` gives each row its index into that list (None: index 0
+    for every row). The Numba kernel takes ONE scale vector, so a call is split into runs of rows with equal index —
+    no cost on one core, where individuals are searched one after another anyway, and no recompile (a row of the
+    C-contiguous table has the signature of a vector).
     """
 
     def __init__(self, dp: DeviceProblem, cfg: RepairCfg, imp_tol: float = 1e-9, mem_budget_bytes: int = 256 << 20,
                  seed: int = 0, *, max_candidates: int | None = None, p_random_walk: float | None = None,
-                 row_scan_cap: int = 0, slice_ms: float = 50.0):
+                 row_scan_cap: int = 0, slice_ms: float = 50.0, row_scales=None):
         self.dp, self.cfg = dp, cfg
         self.slice_ms = float(slice_ms)   # with should_stop: target seconds per Numba call (one slice of rows)
         self.imp_tol = float(imp_tol)
@@ -519,7 +532,8 @@ class FJCpu:
         prob = dp.prob
         self.n, self.m = prob.n, prob.m
         self.key_offset = float(dp.key_offset)
-        self.rows = AugmentedRows(dp, cfg)
+        self.rows = AugmentedRows(dp, cfg, scales=row_scales)
+        self.row_scales = list(self.rows.scales)
         self.m_aug = self.rows.m_aug
         self.vtype, self.lb, self.ub = var_types(prob)
         self.isint = np.asarray(prob.isint, dtype=np.bool_)
@@ -549,13 +563,25 @@ class FJCpu:
         self.cut_active, self.cut_rhs = math.isfinite(rhs), rhs
         self.rows.set_cutoff_side(rhs)
 
+    def _scale_index(self, scale_idx, k: int):
+        """The validated (k,) int64 scale index, or None when every row uses scale 0 (also with one scale)."""
+        if scale_idx is None:
+            return None
+        sidx = np.asarray(scale_idx).astype(np.int64, copy=False).reshape(-1)
+        if sidx.shape[0] != k:
+            raise ValueError(f"scale_idx has {sidx.shape[0]} entries for {k} rows")
+        if k and (sidx.min() < 0 or sidx.max() >= len(self.row_scales)):
+            raise ValueError(f"scale_idx outside [0, {len(self.row_scales)})")
+        return sidx if len(self.row_scales) > 1 else None
+
     def _seeds(self, k: int) -> np.ndarray:
         base = int(np.random.SeedSequence([self.seed & 0xFFFFFFFF, self._calls]).generate_state(1)[0])
         return ((base + np.arange(k, dtype=np.uint64) * np.uint64(2654435761)) % np.uint64(1 << 32)).astype(np.uint32)
 
-    def run(self, X, keep_state: bool = False, should_stop=None) -> dict:
+    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None) -> dict:
         """Improve every row of X in place; see the class docstring for the counters. keep_state=True also stores the
-        final per-individual activities, weights and violated-row counts in `self.state` (tests).
+        final per-individual activities, weights and violated-row counts in `self.state` (tests). `scale_idx` (k,):
+        each row's index into `row_scales` (None: 0).
 
         should_stop: optional callable. A Numba call cannot be interrupted, so with it the rows are processed in
         slices (1 row first, doubling while a call takes less than half of `slice_ms`) and `should_stop()` is polled
@@ -583,19 +609,28 @@ class FJCpu:
             ACT, WGT, NVIOL = np.zeros((k, ma)), np.zeros((k, ma)), np.zeros(k, np.int64)
         else:
             ACT, WGT, NVIOL = np.zeros((1, 1)), np.zeros((1, 1)), np.zeros(1, np.int64)
+        sidx = self._scale_index(scale_idx, k)
         if k > 0:
             c = self.cfg
             r = self.rows
             seeds = self._seeds(k)
 
-            def call(a: int, b: int) -> None:
+            def batch(a: int, b: int, rs) -> None:
                 # row slices of C-contiguous arrays keep the Numba signature of the whole call (no new compile)
                 kept = (ACT[a:b], WGT[a:b], NVIOL[a:b]) if keep_state else (ACT, WGT, NVIOL)
                 _fj_batch(X[a:b], seeds[a:b], self._row_ptr, self._col_idx, self._row_val, self._col_ptr,
-                          self._row_idx, self._col_val, r.rl, r.ru, r.rs, self.lb, self.ub, self.isint, self.vtype,
+                          self._row_idx, self._col_val, r.rl, r.ru, rs, self.lb, self.ub, self.isint, self.vtype,
                           self.cobj, self.use_obj, int(c.max_steps), int(c.stall_steps), self.max_candidates,
                           float(c.weight_bump), self.p_random_walk, VIOL_TOL, VIOL_CAP, self.row_scan_cap,
                           status[a:b], lmoves[a:b], lsteps[a:b], llmin[a:b], ldrift[a:b], keep_state, *kept)
+
+            def call(a: int, b: int) -> None:
+                if sidx is None:
+                    batch(a, b, r.rs)
+                    return
+                cut = a + 1 + np.flatnonzero(sidx[a + 1:b] != sidx[a:b - 1])     # runs of equal scale index
+                for u, v in zip(np.r_[a, cut], np.r_[cut, b]):
+                    batch(int(u), int(v), r.rs_tab[int(sidx[u])])
 
             if should_stop is None:
                 call(0, k)

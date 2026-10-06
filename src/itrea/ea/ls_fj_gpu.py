@@ -50,7 +50,16 @@ Memory. Per individual in global memory: working x (n float64; skipped when X is
 then the kernel works on X in place), activities, weights, violated list and positions (m_aug each: 8+8+4+4 bytes),
 plus 80 bytes of loop state. Individuals are processed in chunks sized from `mem_budget_bytes`. Not in the CuPy pool
 (known, unaccounted): NVRTC's compile-time memory, the CUDA context, and the driver's local-memory reservation for the
-per-thread candidate arrays (~1 KB × resident threads, ≤ ~75 MB on 48 SMs).
+per-thread candidate arrays (~1 KB × resident threads, ≤ ~75 MB on 48 SMs). Static: the device copy of A_aug (CSR and
+CSC, ~24·nnz_aug bytes) and the row / column vectors, among them the row-scale table (R × m_aug float64, R = 1 unless
+`row_scales` lists several).
+
+Row scales (the self-adaptive repair strategy, `StrategyCfg`). `row_scales` = the scales s_i one call can use; the
+kernels read row `sidx[b]` of the stacked (R, m_aug) table for block b — the only difference between scales — so
+individuals of every scale are repaired in ONE call: their blocks run side by side, the slowest individual's tail is
+paid once per call, and the launch ramp (`ITERS_START`) restarts once. One call per scale would serialise those tails
+(measured 2026-10-06: +13–39 % per generation with two scales). Without a scale index (`use_sidx` = 0) every block
+reads row 0, the kernel's arithmetic is unchanged.
 """
 from __future__ import annotations
 
@@ -61,7 +70,7 @@ import numpy as np
 import scipy.sparse as sps
 
 from itrea.config import RepairCfg
-from itrea.ea.evaluate import DeviceProblem
+from itrea.ea.evaluate import DeviceProblem, row_scale_table
 
 # column (variable) classes in the kernel
 VT_CONT, VT_BIN, VT_INT, VT_FIXED = 0, 1, 2, 3
@@ -266,7 +275,8 @@ __device__ void eval_var(const int j, const int r, const double* __restrict__ x,
 extern "C" __global__ void __launch_bounds__(BD)
 fj_init(const int n, const int m,
         const int* __restrict__ row_ptr, const int* __restrict__ col_idx, const double* __restrict__ row_val,
-        const double* __restrict__ rl, const double* __restrict__ ru, const double* __restrict__ rs,
+        const double* __restrict__ rl, const double* __restrict__ ru, const double* __restrict__ rs_all,
+        const int* __restrict__ sidx, const int use_sidx,
         const int* __restrict__ long_rows, const int n_long, const int long_len,
         const double* X, double* ACT, double* W, int* VLIST, int* VPOS, long long* STI, double* STD,
         const unsigned long long seed, const long long idx0, const unsigned long long call,
@@ -274,6 +284,8 @@ fj_init(const int n, const int m,
     __shared__ double sh_d[NW + 1];
     __shared__ int sh_i[NW + 1];
     const int b = blockIdx.x, tid = threadIdx.x;
+    // this individual's row scale: row sidx[b] of the (R, m) table (row 0 without a scale index)
+    const double* __restrict__ rs = rs_all + (use_sidx ? (long long)sidx[b] * m : 0LL);
     const double* x = X + (long long)b * n;
     double* act = ACT + (long long)b * m;
     double* w = W + (long long)b * m;
@@ -325,7 +337,8 @@ extern "C" __global__ void __launch_bounds__(BD)
 fj_steps(const int n, const int m,
          const int* __restrict__ row_ptr, const int* __restrict__ col_idx, const double* __restrict__ row_val,
          const int* __restrict__ col_ptr, const int* __restrict__ row_idx, const double* __restrict__ col_val,
-         const double* __restrict__ rl, const double* __restrict__ ru, const double* __restrict__ rs,
+         const double* __restrict__ rl, const double* __restrict__ ru, const double* __restrict__ rs_all,
+         const int* __restrict__ sidx, const int use_sidx,
          const double* __restrict__ lb, const double* __restrict__ ub, const signed char* __restrict__ vtype,
          const double* __restrict__ cobj, const int use_obj,
          double* X, double* ACT, double* W, int* VLIST, int* VPOS, long long* STI, double* STD,
@@ -335,6 +348,7 @@ fj_steps(const int n, const int m,
     const int b = blockIdx.x, tid = threadIdx.x, lane = tid & 31, wid = tid >> 5;
     long long* st = STI + (long long)b * N_SI;
     if (st[S_STATUS] != 0) return;               // finished in an earlier launch (same value for every thread)
+    const double* __restrict__ rs = rs_all + (use_sidx ? (long long)sidx[b] * m : 0LL);   // this individual's scale
     double* x = X + (long long)b * n;
     double* act = ACT + (long long)b * m;
     double* w = W + (long long)b * m;
@@ -577,12 +591,19 @@ class FJGpu:
     states; > 0 = rows longer than this are scored on a random cyclic window of this many entries — the same knob and
     rule as `ls_fj_cpu`); `row_scan_filter` (GPU only, default off) additionally skips window variables that cannot
     move in the direction reducing the row's violation; `launch_ms` = target time per kernel launch.
+
+    `row_scales` (default: `dp`'s own scale; the self-adaptive repair strategy passes several) = the row scales one
+    call can use: `d_rs` is the stacked (R, m_aug) table (`evaluate.row_scale_table` plus the cutoff row's entry), and
+    `run(X, scale_idx=...)` gives each individual its index (None: 0) — one call for every scale (module docstring).
+    `set_cutoff` writes the cutoff row's upper side once and its divisor in every "rhs" row of the table.
+    `static_bytes` counts the device arrays this instance owns.
     """
 
     def __init__(self, dp: DeviceProblem, cfg: RepairCfg, imp_tol: float = 1e-9, mem_budget_bytes: int = 256 << 20,
                  seed: int = 0, *, threads: int = DEFAULT_THREADS, max_candidates: int | None = None,
                  p_random_walk: float | None = None, viol_tol: float = 1e-9, viol_cap: float = 1e-7,
-                 row_scan_cap: int | None = None, row_scan_filter: bool | None = None, launch_ms: float = 50.0):
+                 row_scan_cap: int | None = None, row_scan_filter: bool | None = None, launch_ms: float = 50.0,
+                 row_scales=None):
         import cupy as cp
 
         if not dp.bk.is_gpu:
@@ -616,23 +637,20 @@ class FJGpu:
         self.key_offset = float(dp.key_offset)
         mode = cfg.objective_mode
         self.has_cut = mode == "cutoff_row" and bool(np.any(cmin != 0))
-        A = sps.csr_matrix(prob.A, dtype=np.float64)
         rl = np.asarray(prob.rl, dtype=np.float64)
         ru = np.asarray(prob.ru, dtype=np.float64)
-        # row scale s_i = the viol_norm divisor (1 for "count")
-        vn = np.asarray(dp.bk.asnumpy(dp.viol_norm_vec), dtype=np.float64)
-        if dp.count_rows:
-            rs, self._viol_norm = np.ones(m), "count"
-        else:
-            rs = vn.copy()
-            self._viol_norm = "l2" if np.allclose(vn, prob.row_norm) else "rhs"
+        # row scales s_i: one row of divisors per scale (the viol_norm divisor; 1 for "count"); row 0 = dp's own
+        # scale unless `row_scales` says otherwise
+        self.row_scales, rs = row_scale_table(dp, row_scales)
+        self._viol_norm = self.row_scales[0]
+        A = sps.csr_matrix(prob.A, dtype=np.float64)
         if self.has_cut:
             A = sps.vstack([A, sps.csr_matrix(cmin.reshape(1, -1))], format="csr")
             rl = np.append(rl, -np.inf)
             ru = np.append(ru, np.inf)
             cn = float(np.linalg.norm(cmin))
             self._cut_l2 = cn if cn > 0 else 1.0
-            rs = np.append(rs, self._cut_l2 if self._viol_norm == "l2" else 1.0)
+            rs = np.hstack([rs, np.array([[self._cut_l2 if md == "l2" else 1.0] for md in self.row_scales])])
             ci = cmin != 0
             # g = 1: every cost on an integer variable with an integer coefficient -> the objective is integral
             self.obj_integral = bool(np.all(prob.isint[ci]) and np.all(cmin[ci] == np.round(cmin[ci])))
@@ -675,7 +693,8 @@ class FJGpu:
         self.d_col_val = cp.asarray(C.data.astype(f64))
         self.d_rl = cp.asarray(rl)
         self.d_ru = cp.asarray(ru)
-        self.d_rs = cp.asarray(rs)
+        self.d_rs = cp.asarray(np.ascontiguousarray(rs, dtype=f64))       # (R, m_aug)
+        self.d_sidx0 = cp.zeros(1, dtype=i32)                            # placeholder scale index (use_sidx = 0)
         self.d_lb = cp.asarray(lb)
         self.d_ub = cp.asarray(ub)
         self.d_isint = cp.asarray(isint)
@@ -718,17 +737,19 @@ class FJGpu:
         self.cut_active = math.isfinite(rhs)
         self.cut_rhs = rhs
         self.d_ru[self.m] = rhs
-        if self._viol_norm == "rhs":
-            self.d_rs[self.m] = max(1.0, abs(rhs)) if math.isfinite(rhs) else 1.0
+        for r, md in enumerate(self.row_scales):
+            if md == "rhs":
+                self.d_rs[r, self.m] = max(1.0, abs(rhs)) if math.isfinite(rhs) else 1.0
 
     # ------------------------------------------------------------------- run
     def chunk_size(self, k: int, X_is_work: bool) -> int:
         per_ind = (0 if X_is_work else 8 * self.n) + 24 * self.m_aug + 8 * (N_SI + N_SD)
         return max(1, min(k, int(self.mem_budget_bytes // max(per_ind, 1))))
 
-    def run(self, X, keep_state: bool = False, should_stop=None) -> dict:
+    def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None) -> dict:
         """Improve every row of X (k, n; int8 / int32 / float32 / float64) in place. Integers stay integral and inside
-        [ceil(lb), floor(ub)]; every gene is clipped to its bounds first. Returns the counters
+        [ceil(lb), floor(ub)]; every gene is clipped to its bounds first. `scale_idx` (k,): each row's index into
+        `row_scales` (None: 0 for every row; one scale: ignored). Returns the counters
         {moves, local_minima, steps, finished_feasible, finished_stall, finished_budget, interrupted, seconds, chunk,
         peak_bytes, launches, max_launch_s}. keep_state=True also stores per-individual act / w / violated list in
         `self.state` (tests). `should_stop()` (optional) is polled before every chunk and after every launch; when it
@@ -744,6 +765,13 @@ class FJGpu:
             raise ValueError(f"X has {n} columns, the problem has {self.n}")
         out = dict(moves=0, local_minima=0, steps=0, finished_feasible=0, finished_stall=0, finished_budget=0,
                    interrupted=0, seconds=0.0, chunk=0, peak_bytes=0, launches=0, max_launch_s=0.0)
+        d_sidx = None
+        if scale_idx is not None:
+            sidx = np.asarray(scale_idx).astype(np.int64, copy=False).reshape(-1)
+            if sidx.shape[0] != k or (k and (sidx.min() < 0 or sidx.max() >= len(self.row_scales))):
+                raise ValueError(f"scale_idx must hold {k} indices in [0, {len(self.row_scales)})")
+            if len(self.row_scales) > 1 and k:
+                d_sidx = cp.asarray(sidx.astype(np.int32))
         self._calls += 1
         if k == 0:
             self.last_status = np.zeros(0, np.int8)
@@ -786,13 +814,17 @@ class FJGpu:
                 Xc = Xw[:kc]
                 cp.copyto(Xc, X[s:s + kc], casting="unsafe")
             ew["prep"](self.d_lb, self.d_ub, self.d_isint, Xc)
+            if d_sidx is None:
+                sx, use_sx = self.d_sidx0, np.int32(0)
+            else:
+                sx, use_sx = d_sidx[s:s + kc], np.int32(1)
             if self.m_aug == 0:
                 st = np.zeros((kc, N_SI), np.int64)
                 st[:, S_STATUS] = ST_FEASIBLE
             else:
                 self._k_init((kc,), (bd,), (
                     np.int32(n), np.int32(self.m_aug), self.d_row_ptr, self.d_col_idx, self.d_row_val,
-                    self.d_rl, self.d_ru, self.d_rs, self.d_long, np.int32(self.n_long), np.int32(LONG_ROW),
+                    self.d_rl, self.d_ru, self.d_rs, sx, use_sx, self.d_long, np.int32(self.n_long), np.int32(LONG_ROW),
                     Xc, ACT, W, VLIST, VPOS, STI, STD, np.uint64(self.seed), np.int64(s), np.uint64(self._calls),
                     np.float64(self.viol_tol), np.float64(self.viol_cap)))
                 while True:
@@ -801,7 +833,7 @@ class FJGpu:
                     self._k_steps((kc,), (bd,), (
                         np.int32(n), np.int32(self.m_aug), self.d_row_ptr, self.d_col_idx, self.d_row_val,
                         self.d_col_ptr, self.d_row_idx, self.d_col_val, self.d_rl, self.d_ru, self.d_rs,
-                        self.d_lb, self.d_ub, self.d_vtype, self.d_cobj, np.int32(self.use_obj),
+                        sx, use_sx, self.d_lb, self.d_ub, self.d_vtype, self.d_cobj, np.int32(self.use_obj),
                         Xc, ACT, W, VLIST, VPOS, STI, STD,
                         np.int64(self.cfg.max_steps), np.int64(self.cfg.stall_steps), np.int32(self.max_candidates),
                         np.float64(self.cfg.weight_bump), np.float64(self.p_random_walk),
@@ -839,7 +871,7 @@ class FJGpu:
             if stopped:
                 break
         cp.cuda.Stream.null.synchronize()
-        del Xw, ACT, W, VLIST, VPOS, STI, STD
+        del Xw, ACT, W, VLIST, VPOS, STI, STD, d_sidx
         out["finished_feasible"] = int(np.sum(status_all == ST_FEASIBLE))
         out["finished_stall"] = int(np.sum(status_all == ST_STALL))
         out["interrupted"] = int(np.sum(status_all == ST_ACTIVE))

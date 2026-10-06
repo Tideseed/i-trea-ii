@@ -7,6 +7,9 @@ contribute to new incumbents?) without an unbounded lineage store:
 - `anc_ops`  (P, depth) uint16 — the operators that made its ancestors d generations back.
 A child's row d (d >= 2) is the OR of its parents' rows d-1; row 1 holds the parents' own rank bits at mating time
 and their origin bits.
+
+`strat` (P,) uint8 — the individual's repair strategy, an index into `StrategyCfg.strategies()` (the self-adaptive
+repair strategy; 0 for everyone while `strategy.enabled` is false). Carried through `take` / `concat` like the ids.
 """
 from __future__ import annotations
 
@@ -71,6 +74,15 @@ class Population:
     birth: np.ndarray    # (P,) int32 host — generation of birth
     anc_rank: np.ndarray  # (P, depth) uint8 host
     anc_ops: np.ndarray   # (P, depth) uint16 host
+    strat: np.ndarray | None = None  # (P,) uint8 host — repair strategy index (None = all 0)
+
+    def __post_init__(self):
+        if self.strat is None:
+            self.strat = np.zeros(self.ids.shape[0], dtype=np.uint8)
+        else:
+            self.strat = np.asarray(self.strat, dtype=np.uint8)
+            if self.strat.shape != self.ids.shape:
+                raise ValueError(f"strat has shape {self.strat.shape}, ids {self.ids.shape}")
 
     @property
     def size(self) -> int:
@@ -83,7 +95,7 @@ class Population:
                           rank=(self.rank[idx] if rank is None else np.asarray(rank, dtype=np.int8)),
                           ids=self.ids[idx], parents=self.parents[idx],
                           origin=self.origin[idx], birth=self.birth[idx], anc_rank=self.anc_rank[idx],
-                          anc_ops=self.anc_ops[idx])
+                          anc_ops=self.anc_ops[idx], strat=self.strat[idx])
 
     @staticmethod
     def concat(bk: Backend, parts: list["Population"]) -> "Population":
@@ -95,7 +107,7 @@ class Population:
             rank=np.concatenate([p.rank for p in parts]), ids=np.concatenate([p.ids for p in parts]),
             parents=np.concatenate([p.parents for p in parts]), origin=np.concatenate([p.origin for p in parts]),
             birth=np.concatenate([p.birth for p in parts]), anc_rank=np.concatenate([p.anc_rank for p in parts]),
-            anc_ops=np.concatenate([p.anc_ops for p in parts]))
+            anc_ops=np.concatenate([p.anc_ops for p in parts]), strat=np.concatenate([p.strat for p in parts]))
 
     def host_scores(self, bk: Backend) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(key, viol, feasible) on the host — what survival needs; one stacked device-to-host copy."""

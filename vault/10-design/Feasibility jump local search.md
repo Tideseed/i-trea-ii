@@ -10,6 +10,12 @@ adapted to a population and to an objective cutoff (critique 2026-10-05).
 `x` (n), activities `act = A x` (m), row weights `w` (m, init 1.0; per individual), the set of violated rows (kept
 incrementally: an index list + position array), counters. Problem arrays shared: CSR (row_ptr, col_idx, val), CSC
 (col_ptr, row_idx, val), rl, ru, lb, ub, isint, cmin, row scale `s_i` (the `viol_norm` divisor; 1 for "count").
+With the self-adaptive repair strategy ([[I-TREA II algorithm]]) the one search keeps `s_i` for every row scale of
+`strategy.row_scales` — an (R, m_aug) table, the cutoff row's entry included — and each individual of a call reads its
+own row (a per-individual scale index; the GPU kernel offsets its `s` pointer per block). Everything else is shared, so
+individuals of every scale are repaired in ONE call: on the GPU their blocks run side by side and the slowest
+individual's tail is paid once. (Review 2026-10-06: one call per scale, one after another, cost +13–39 % per
+generation with two scales; with one call the strategy-on generation time is within a few % of the strategy-off one.)
 
 ## Violation and objective cutoff
 Row violation `v_i(a) = (max(rl_i − a, 0) + max(a − ru_i, 0)) / s_i` (infinite sides contribute 0). With

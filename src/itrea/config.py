@@ -8,6 +8,11 @@ The rank parameters follow Berk's brief (2026-10-05) and the original I-TREA (Or
 most `x` of the population reserved for Rank 0 (infeasible individuals better than the best feasible one), and the best
 `y` of the feasible individuals (Rank 1) protected in every generation. See vault `10-design/I-TREA II algorithm.md`
 and `50-decisions/D-004 Mapping I-TREA (2015) to I-TREA II.md`.
+
+`strategy` (`StrategyCfg`, off by default) makes the repair self-adaptive: every individual carries a (row scale, LP
+guidance) strategy that children inherit and occasionally redraw (vault `10-design/I-TREA II algorithm.md`,
+"Self-adaptive repair strategy"). While it is off the section is left out of the hash, so existing configuration hashes
+are unchanged.
 """
 from __future__ import annotations
 
@@ -174,6 +179,29 @@ class FrontierCfg:
 
 
 @dataclass
+class StrategyCfg:
+    """Self-adaptive repair strategy (development finding 2026-10-06, vault `30-results/Development log.md`: the LP
+    point unlocks some instances, rhs row scaling others, and each hurts where the other helps). Every individual
+    carries a strategy — an index into the Cartesian product row_scales x lp_guidance, in that order (scale-major) —
+    inherited from its first parent, redrawn with probability `mutation_rate`; selection decides per instance which
+    strategy spreads. A strategy changes only the REPAIR (the row scale s_i of the feasibility-jump violation) and the
+    MUTATION (whether toward_lp may use the LP point); the survival's V keeps the one scale `ranks.viol_norm` for every
+    individual, so ranks stay comparable. Off by default: with `enabled: false` the section is inert and is left out of
+    the configuration hash (`EAConfig.hash`)."""
+    enabled: bool = False
+    row_scales: list[str] = field(default_factory=lambda: ["l2", "rhs"])   # repair row scale: l2 | rhs | count
+    lp_guidance: list[bool] = field(default_factory=lambda: [False, True])  # mutation may use the LP point (toward_lp
+                                       # with its configured weight, and LP-rounding immigrants) once one exists
+    mutation_rate: float = 0.1         # probability that a child's strategy is redrawn uniformly (else parent A's)
+    min_share: float = 0.05            # each strategy gets at least min(ceil(min_share * O), O // S) of the O children
+                                       # (re-assigned from strategies above that floor), so one can come back later
+
+    def strategies(self) -> list[tuple[str, bool]]:
+        """The strategy space, index = position: [(row_scale, lp_guidance), ...] (scale-major)."""
+        return [(s, bool(g)) for s in self.row_scales for g in self.lp_guidance]
+
+
+@dataclass
 class EAConfig:
     name: str = "default"
     population: PopulationCfg = field(default_factory=PopulationCfg)
@@ -186,7 +214,8 @@ class EAConfig:
     seeding: SeedingCfg = field(default_factory=SeedingCfg)
     stagnation: StagnationCfg = field(default_factory=StagnationCfg)
     frontier: FrontierCfg = field(default_factory=FrontierCfg)
-    backend: str = "cupy"              # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
+    strategy: StrategyCfg = field(default_factory=StrategyCfg)
+    backend: str = "cupy"             # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
     gpu_mem_gb: float = 12.0           # CuPy pool limit (the only GPU memory cap on GB10) = cuOpt's RMM limit in A2:
                                        # equal GPU memory for both partners; cuOpt needs ~10.5 GB (measured 2026-10-06)
     log_every: int = 10                # generations between generation-log records
@@ -197,9 +226,13 @@ class EAConfig:
         return dataclasses.asdict(self)
 
     def hash(self) -> str:
-        """12-hex digest of the canonical JSON of every parameter except `name`."""
+        """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy` section
+        while `strategy.enabled` is false: it is inert then, so every configuration written before the section existed
+        keeps its hash (the default's `9ac4a93bf93b` among them)."""
         d = self.to_dict()
         d.pop("name", None)
+        if not self.strategy.enabled:
+            d.pop("strategy", None)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
     @classmethod
@@ -284,6 +317,22 @@ class EAConfig:
         _check(fr.distance in ("hamming", "l1"), "frontier.distance in hamming|l1")
         _check(fr.band >= 0 and fr.max_size >= 1 and fr.update_every >= 1 and 0.0 <= fr.reinject <= 1.0,
                "frontier parameters")
+        sg = self.strategy
+        _check(isinstance(sg.enabled, bool), "strategy.enabled is a bool")
+        _check(isinstance(sg.row_scales, list) and len(sg.row_scales) >= 1
+               and all(isinstance(v, str) and v in ("l2", "rhs", "count") for v in sg.row_scales)
+               and len(set(sg.row_scales)) == len(sg.row_scales),
+               "strategy.row_scales: a non-empty list of distinct values in l2|rhs|count")
+        _check(isinstance(sg.lp_guidance, list) and len(sg.lp_guidance) >= 1
+               and all(isinstance(v, bool) for v in sg.lp_guidance)
+               and len(set(sg.lp_guidance)) == len(sg.lp_guidance),
+               "strategy.lp_guidance: a non-empty list of distinct booleans")
+        _check(isinstance(sg.mutation_rate, (int, float)) and not isinstance(sg.mutation_rate, bool)
+               and 0.0 <= sg.mutation_rate <= 1.0, "strategy.mutation_rate in [0, 1]")
+        n_strat = len(sg.row_scales) * len(sg.lp_guidance)
+        _check(isinstance(sg.min_share, (int, float)) and not isinstance(sg.min_share, bool)
+               and 0.0 <= sg.min_share and sg.min_share * n_strat <= 1.0 + 1e-12,
+               "strategy.min_share >= 0 and min_share * (number of strategies) <= 1")
         _check(self.backend in ("cupy", "numpy", "auto"), "backend in cupy|numpy|auto")
         _check(self.gpu_mem_gb > 0, "gpu_mem_gb > 0")
         _check(self.log_every >= 1 and self.lineage_depth >= 0, "logging parameters")

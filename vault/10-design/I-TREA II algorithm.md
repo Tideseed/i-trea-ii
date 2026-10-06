@@ -74,11 +74,57 @@ marked infeasible in the population (it moves to Rank 2) and counted — part I'
 9. **Stagnation (trigger):** after `stagnation.gens` without a new best, replace `immigrant_frac` of Rank 2 with
    immigrants (random or LP-rounded); Rank 0 and Rank 1 are untouched (part I called itself "overly elitist").
 
+## Self-adaptive repair strategy (2026-10-06, development; `strategy`, off by default)
+**Why.** Feasibility probe 1 ([[Development log]], 2026-10-06): an LP point after t0 made the EA alone feasible on the
+UC case and sing44, the rhs row scale did so on glass4 and fhnw-binpack4-48, and each setting hurt where the other
+helped. Instead of choosing one per instance, the population carries both and selection decides — self-adaptation of a
+strategy parameter as in evolution strategies, applied to the repair. Untested on the development set so far.
+
+**What an individual carries.** A strategy index into `row_scales × lp_guidance` (default `[l2, rhs] × [off, on]`, 4
+strategies, scale-major order). The row scale is the divisor s_i of the feasibility-jump violation in the repair
+([[Feasibility jump local search]]); LP guidance decides whether its mutation may use the LP point (`toward_lp` with its
+configured weight) once one exists. Nothing else differs: evaluation, the three ranks, selection, crossover, the
+exchange and the frontier are the same for every strategy, and **V stays on the one scale `ranks.viol_norm`** for
+everyone, so violations remain comparable across strategies and the survival is not biased towards a scale.
+
+**Inheritance.** The initial population gets the strategies round robin. A child takes its first parent's strategy;
+with probability `mutation_rate` (0.1) it is redrawn uniformly. Every strategy keeps at least
+min(⌈`min_share`·O⌉, ⌊O/S⌋) of the O children (`min_share` 0.05): a strategy below that floor is topped up with
+children drawn at random from the strategies above it, so a strategy that lost the population can return when the
+instance enters another phase (e.g. after the first feasible solution, when the objective cutoff row is armed).
+Immigrants and injected solver solutions draw uniform random strategies, each row independently (injected rows arrive
+best first; a sorted draw — the first implementation — gave the best solver row the smallest of k draws, strategy 0
+about 90 % of the time, review 2026-10-06); LP-rounded individuals (stagnation immigrants, the batch made when the LP
+point arrives) are given only to strategies with LP guidance — none if no strategy has it.
+
+**Per generation.** After parent selection the children's strategies are drawn; nothing is sorted or grouped. ONE
+mutation call serves every child: a child whose strategy has no LP guidance draws its operator from the weights without
+`toward_lp` (also when `violation_guided` re-draws it). ONE local-search call repairs every child, each with its own
+row scale: the search keeps a row of divisors per scale (R × (m + 1) floats — the only per-scale data; the memory plan
+counts the extra rows, `local_search_strategies`) and reads the row of each individual's scale. On the GPU this keeps
+the individuals of all scales side by side, so a generation pays one slowest-individual tail; a call per scale, one
+after the other, cost +13–39 % per generation with two scales (review 2026-10-06), which would have biased a
+fixed-budget comparison of the adaptive arm against fixed-strategy arms. The objective cutoff is shared by all scales.
+
+**Records.** Genealogy column `strat`; `best` events carry `strat` and `strat_credited`; `gen` events add survivors,
+credited new bests and children per strategy; the summary holds the cumulative counts per strategy (children, best
+events, incumbents, rows repaired and rows the repair finished feasible) — [[Trace format and metrics]]. A solver
+solution that becomes the population best (injected, no EA operator bit — the incumbent's source "solver") is not
+credited to the strategy its row was given: it is counted separately (`incumbents_solver`, `best_events_solver`), so
+the per-strategy counts show what the EA's own strategies found. **Analyses of LP guidance must key on `strat`, not on
+origin bits:** a genealogy row's `origin` is OR-merged over exact duplicates, so a row whose strategy has no LP
+guidance can carry the `toward_lp` bit of a duplicate made by an LP-guided child (no such bit is ever made in a no-LP
+child itself). With `strategy.enabled: false` the run is identical to one without the feature (regression test against
+a run recorded before it) and the configuration hash is unchanged.
+Configuration: `configs/itrea2-adaptive.yaml` = the defaults + `strategy.enabled` + `seeding.lp_source: highs_async`
+(the EA alone gets an LP point too).
+
 ## Seeding
 `seed_mix`: random in bounds (integer-rounded), LP-relaxation rounding (HiGHS root LP on the CPU, before the clock,
 counted in the start-up record), and the solver's incumbents as they arrive.
 
 ## What is logged
 Per generation (every `log_every`): best/median key, feasible share, |Rank 0|, |Rank 1|, |Rank 2|, inc,
-offspring/s, GPU memory peak, Rank 0 candidates and demotions. Per event: every new population best with its lineage; every post and verdict; every injection received.
+offspring/s, GPU memory peak, Rank 0 candidates and demotions (with the self-adaptive repair strategy also the counts
+per strategy). Per event: every new population best with its lineage; every post and verdict; every injection received.
 Trace = JSON lines + a summary JSON (schema in [[Trace format and metrics]]).

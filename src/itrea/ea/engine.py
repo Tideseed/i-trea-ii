@@ -29,6 +29,10 @@ frontier archive are budgeted whether or not the arm uses them — so A3, A4, A5
 A P whose Rank 0 quota floor(x·P) is 0 while x > 0 is refused afterwards (it would silently be the x = 0 ablation):
 the instance does not fit.
 "fixed": exactly `size`; refused if it does not fit.
+With `strategy.enabled` the plan adds `local_search_strategies` (`strategy_ls_bytes`): the one local search keeps a
+row of divisors per row scale, so every scale beyond the first costs 8 bytes per augmented row (m + 1 with the cutoff
+row); the per-call (k,) scale index and the dense baseline's gathered divisors live inside the local search's transient
+budget. No peak term changes; P may still differ from the disabled arm's by that term.
 
 One generation (`step`, vault `10-design/I-TREA II algorithm.md`):
   1. exchange in, every `exchange.poll_s`. Only when `exchange.enabled and from_solver` (and a mailbox exists) are the
@@ -80,6 +84,34 @@ One generation (`step`, vault `10-design/I-TREA II algorithm.md`):
      metrics.md`, incl. `superopt_survivors`, the manipulation check of the Rank 0 cap, and per-phase seconds timed with
      CUDA events on the GPU).
 
+Self-adaptive repair strategy (`strategy.enabled`, `StrategyCfg`; off by default, and then nothing below happens and
+no extra random number is drawn — the run is the one without the feature). A strategy is an index into
+`StrategyCfg.strategies()` = row_scales x lp_guidance (scale-major), carried per individual (`Population.strat`).
+  - prepare: ONE LocalSearch with `row_scales=strategy.row_scales` (one row of divisors per scale; `repair: none` has
+    no row scale and ignores it); the strategy -> row-scale index and strategy -> LP-guidance tables.
+  - begin: the initial population gets the strategies round robin (row i -> i mod S).
+  - step: after parent selection each child takes parent A's strategy, redrawn uniformly with probability
+    `mutation_rate`; then every strategy below min(ceil(min_share·O), O // S) children is topped up with children drawn
+    at random from the strategies above that floor (`strategy_reassigned`). Nothing is sorted or grouped: ONE mutate
+    call with `lp_rows` = the children whose strategy has LP guidance (the others never draw toward_lp), and ONE
+    LocalSearch call with `scale_idx` = each child's row-scale index, so all scales' individuals are repaired side by
+    side (one GPU tail per generation; `ls_fj_gpu`). Evaluation, survival (V on `ranks.viol_norm` for everyone),
+    exchange and the frontier are unchanged.
+  - immigrants (shortfall, stagnation, empty population) and injected solver rows draw uniform random strategies (each
+    row independently, in the order the rows come); LP roundings go only to immigrants whose strategy has LP guidance
+    (lp_share of those), and the LP-rounded batch made when the LP point arrives gets random LP-guided strategies
+    (none at all if no strategy has LP guidance). Every repair (children, initial population, immigrants, the LP
+    batch) is one call with a scale index.
+  - records: genealogy column `strat` (always written; 0 when off); `best` events carry `strat` and `strat_credited`;
+    `gen` events add `strat_pop` (survivors per strategy), `strat_best` (credited best events per strategy since the
+    previous gen record) and `strat_children`; the start-up record lists the strategies and the local search's row
+    scales; the summary's `strategy` holds the cumulative counts per strategy. A new population best that is a solver
+    solution — injected and carrying no EA operator bit, the rule of the incumbent's source "solver" — is NOT credited
+    to the strategy the injected row was given: it is counted in `incumbents_solver` / `best_events_solver` instead of
+    `incumbents` / `best_events` / `strat_best`. `repaired` counts rows given to the local search per strategy,
+    `repaired_feasible` the rows it finished feasible (0 under `repair: none`, which reports no per-row status).
+    `ls_calls` counts local-search calls (one per repair, whatever the number of scales).
+
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
 archive members), evaluated, de-duplicated against the population and admitted with the survival's rules: an
 infeasible immigrant better than the incumbent takes a Rank 0 slot only while the quota floor(x·P) has room (and not
@@ -92,7 +124,10 @@ this implementation; the design note's step list starts at the first generation.
 Genealogy (`ea.genealogy.npz`, D-002 §4, read by `itrea.analysis.lineage`): one row per individual that entered the
 population — id, pa, pb, rank_pa, rank_pb (at mating; -1 for seeds, immigrants and injected), origin (OR-merged over
 exact duplicates, also after entry), birth, key, V, feasible (at entry), t_first (seconds since t0 when it was made),
-is_new_best, is_accepted_post (written explicitly, so the analysis does not have to derive them).
+is_new_best, is_accepted_post (written explicitly, so the analysis does not have to derive them), strat (the repair
+strategy index; 0 while the strategy is off). Because origin is OR-merged over duplicates, a row whose strategy has no
+LP guidance can carry ORIGIN_M_TOWARD_LP (a duplicate made by an LP-guided child): analyses of LP guidance must key on
+`strat`, not on origin bits.
 
 Every incumbent vector of the EA goes to `ea.incumbents.npz` (`trace.save_incumbents`; vectors in the canonical order
 `prob.names`) — P(T) is built only from checked incumbents (D-002). The frontier archive goes to `ea.frontier.npz`.
@@ -100,6 +135,7 @@ Every incumbent vector of the EA goes to `ea.incumbents.npz` (`trace.save_incumb
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import math
 import os
@@ -117,6 +153,7 @@ from itrea.ea.continuous import SingletonDecoder
 from itrea.ea.crossover import crossover
 from itrea.ea.evaluate import DeviceProblem, evaluate, to_device
 from itrea.ea.frontier import Frontier
+from itrea.ea.mutation import VIOL_TOL as VG_VIOL_TOL
 from itrea.ea.mutation import mutate
 from itrea.ea.population import (NO_RANK, ORIGIN_IMMIGRANT, ORIGIN_INJECTED, ORIGIN_REPAIR,
                                   ORIGIN_SEED_LP, ORIGIN_SEED_RANDOM, R0, R1, R2, DupHasher, IdCounter, Population,
@@ -201,6 +238,9 @@ def plan_memory(prob: Problem, cfg: EAConfig, gene_dtype: np.dtype) -> MemoryPla
                   immigrants=5 * P * n * g + 2 * P * n * dd + op)
         return ph
 
+    if cfg.strategy.enabled:
+        fixed["local_search_strategies"] = strategy_ls_bytes(prob, cfg)
+
     def total(P: int) -> tuple[int, dict]:
         ph = terms(P)
         t = sum(fixed.values()) + max(ph.values())
@@ -225,6 +265,17 @@ def plan_memory(prob: Problem, cfg: EAConfig, gene_dtype: np.dtype) -> MemoryPla
     t, tm = total(P)
     return MemoryPlan(P=P, offspring=_offspring(cfg, P), limit_bytes=limit, total_bytes=int(t), terms=tm,
                       budgets=budgets, fits=bool(t <= usable))
+
+
+def strategy_ls_bytes(prob: Problem, cfg: EAConfig) -> int:
+    """Device bytes the self-adaptive repair strategy adds to the local search (0 when it is off or the repair is
+    "none", which has no row scale): the one LocalSearch keeps a float64 row of divisors per row scale (the stacked
+    (R, m_aug) table of `ls_fj_gpu` / `ls_dense`, host arrays in `ls_fj_cpu`), so every scale beyond the first costs
+    8 bytes per augmented row (m + 1 with the cutoff row). Nothing else is per scale."""
+    sg = cfg.strategy
+    if not sg.enabled or cfg.repair.method == "none":
+        return 0
+    return int((len(sg.row_scales) - 1) * 8 * (prob.m + 1))
 
 
 # --------------------------------------------------------------------------------------------- synthetic problem
@@ -406,6 +457,13 @@ class _Batch:
     repair: bool
     src: str
     t: float
+    strat: np.ndarray | None = None      # (k,) uint8 repair strategies, row order (None = all 0)
+
+
+def _is_solver_find(bits: int) -> bool:
+    """An individual that came from the solver and was not changed by the EA: ORIGIN_INJECTED and no other origin bit
+    (the rule behind an incumbent's source "solver")."""
+    return bool((bits & ORIGIN_INJECTED) and not (bits & int(_GENE_BITS_EA)))
 
 
 def _mem_available_gb() -> float | None:
@@ -531,7 +589,7 @@ class Engine:
             from itrea.paths import resolve
             if not resolve(str(prob.path)).is_file():
                 raise ValueError("seeding.lp_source='highs_async' needs the instance file (the LP worker reads it)")
-        self.ls = LocalSearch(bk, self.dp, rp, cfg.ranks.imp_tol, self.budgets["local_search"], self.seed)
+        self._build_local_searches()
         self.decoder = None
         if rp.continuous == "auto" and prob.conts.size:
             dec = SingletonDecoder(self.dp, self.budgets["operators"])
@@ -541,6 +599,11 @@ class Engine:
         rec["operators_s"] = time.monotonic() - t
         rec["local_search"] = self.ls.impl_name
         rec["decoded_columns"] = len(self.decoder) if self.decoder is not None else 0
+        if self.strat_on:
+            rec["strategies"] = [dict(index=i, name=nm, row_scale=sc, lp_guidance=lp)
+                                 for i, ((sc, lp), nm) in enumerate(zip(self.strat_list, self.strat_names))]
+            rec["local_search_row_scales"] = list(self.ls.row_scales)
+            rec["local_search_static_bytes"] = getattr(self.ls.impl, "static_bytes", None)
         # -------------------------------------------------------------------------------- warm-up
         t = time.monotonic()
         if self.warmup_enabled:
@@ -550,6 +613,31 @@ class Engine:
         self.startup = rec
         self.prepared = True
         return rec
+
+    def _build_local_searches(self) -> None:
+        """`self.ls` — with the strategy, one LocalSearch over every row scale of `strategy.row_scales` — and the
+        strategy tables (module docstring)."""
+        cfg, bk = self.cfg, self.bk
+        rp, budget = cfg.repair, self.budgets["local_search"]
+        sg = cfg.strategy
+        self.strat_on = bool(sg.enabled)
+        if not self.strat_on:
+            self.ls = LocalSearch(bk, self.dp, rp, cfg.ranks.imp_tol, budget, self.seed)
+            self.strat_list = [(cfg.ranks.viol_norm, True)]
+            self.strat_names = ["default"]
+            self.S = 1
+            return
+        self.strat_list = sg.strategies()
+        self.strat_names = [f"{sc}/{'lp' if lp else 'nolp'}" for sc, lp in self.strat_list]
+        self.S = len(self.strat_list)
+        scales = None if rp.method == "none" else list(sg.row_scales)
+        self.ls = LocalSearch(bk, self.dp, rp, cfg.ranks.imp_tol, budget, self.seed, row_scales=scales)
+        if scales is not None and self.ls.row_scales != scales:
+            raise RuntimeError(f"local search row scales {self.ls.row_scales} != strategy.row_scales {scales}")
+        # strategy -> index into strategy.row_scales (= the local search's table); "none": every index 0
+        self.strat_scale = np.array([sg.row_scales.index(sc) if scales is not None else 0 for sc, _ in self.strat_list],
+                                    np.int64)
+        self.strat_lp = np.array([lp for _, lp in self.strat_list], bool)
 
     def _warmup(self) -> dict:
         """Run every code path on `synthetic_problem` with the same backend, dtypes and operators, then discard it.
@@ -583,7 +671,8 @@ class Engine:
             w.step()
             res = w.finish()
             out[name] = dict(generations=res["generations"], feasible_found=res["feasible_found"],
-                             posts=res["posts"], immigrants=res["immigrants_admitted"])
+                             posts=res["posts"], immigrants=res["immigrants_admitted"],
+                             violation_guided_forced=int(getattr(w, "vg_warm", 0)))
         if self.bk.is_gpu:
             out["scan_ladder_max"] = self._warm_scans()
         self.bk.synchronize()
@@ -612,8 +701,10 @@ class Engine:
         return last
 
     def _warm_paths(self, one: bool) -> None:
-        """Warm-up only: force the stagnation, shortfall and immigrant paths (with batches of one row if `one`)."""
+        """Warm-up only: force the stagnation, shortfall and immigrant paths (with batches of one row if `one`), and
+        violation_guided's draw over violated rows (`_warm_violation_guided`)."""
         bk = self.bk
+        self.vg_warm = getattr(self, "vg_warm", 0) + self._warm_violation_guided()
         self.since_best = self.cfg.stagnation.gens
         self._stagnation()
         keep = max(1, self.pop.size - (1 if one else 2))
@@ -640,6 +731,54 @@ class Engine:
         for copies in (1, 2):                                   # duplicate groups of two and of three
             Xn = bk.xp.concatenate([self.pop.X[:1]] * copies)
             self._admit(Xn, np.full(copies, ORIGIN_IMMIGRANT, np.uint16), replace=None)
+
+    def _warm_violation_guided(self) -> int:
+        """Warm-up only. violation_guided draws "the r-th violated row of a child" with cumsum / searchsorted / take
+        kernels that run only when some child HAS a violated row — which the random warm-up children need not have:
+        on 2026-10-06 one seed in eight left 14 kernels to NVRTC at the first generation, on the clock. So mutate,
+        with weights {violation_guided: 1}, copies of a point built to violate a row: the synthetic problem's feasible
+        `toy_point` with ONE variable moved (integers first; to a bound or ±1000 within the bounds) until a row is
+        violated beyond the operator's tolerance — one child, then three. Returns the number of children mutated (0
+        when the operator cannot apply: no row, no integer variable, or no single move violates a row)."""
+        prob = self.prob
+        x0 = getattr(prob, "toy_point", None)
+        if x0 is None or prob.m == 0 or prob.nnz == 0:
+            return 0
+        isint = np.asarray(prob.isint, bool)
+        lb, ub = np.asarray(prob.lb, float), np.asarray(prob.ub, float)
+        lo = np.where(isint, np.ceil(lb - 1e-9), lb)
+        hi = np.where(isint, np.floor(ub + 1e-9), ub)
+        if not np.any(isint & (hi > lo)):
+            return 0
+        A = sps.csc_matrix(prob.A)
+        rl, ru = np.asarray(prob.rl, float), np.asarray(prob.ru, float)
+        tl = VG_VIOL_TOL * np.where(np.isfinite(rl), np.maximum(1.0, np.abs(rl)), 1.0)
+        tu = VG_VIOL_TOL * np.where(np.isfinite(ru), np.maximum(1.0, np.abs(ru)), 1.0)
+        x0 = np.asarray(x0, float)
+        act0 = A @ x0
+        xv = None
+        for j in np.r_[np.flatnonzero(isint), np.flatnonzero(~isint)]:
+            col = A[:, [j]].toarray().ravel()
+            for v in (lo[j], hi[j], x0[j] - 1000.0, x0[j] + 1000.0):
+                v = float(np.clip(v, lo[j], hi[j]))
+                if not np.isfinite(v) or v == x0[j]:
+                    continue
+                a = act0 + col * (v - x0[j])
+                if np.any((rl - a > tl) | (a - ru > tu)):
+                    xv = x0.copy()
+                    xv[j] = v
+                    break
+            if xv is not None:
+                break
+        if xv is None:
+            return 0
+        mcfg = dataclasses.replace(self.cfg.mutation, weights={"violation_guided": 1.0})
+        for k in (1, 3):
+            C = self.bk.xp.asarray(np.repeat(xv[None, :], k, axis=0).astype(self.gene_dtype))
+            mutate(self.bk, self.dp, C, mcfg, self.rng_dev, self.rng_host, lp_x=self.lp_x,
+                   mem_budget_bytes=self.budgets["operators"])
+        self.bk.synchronize()
+        return 4
 
     # ========================================================================================================= run
     def run(self, budget: float, t0: float, max_gens: int | None = None) -> dict:
@@ -721,6 +860,12 @@ class Engine:
             "verdicts_seen", "oom_retries", "stagnation_events", "immigrants_admitted", "immigrants_dropped",
             "lp_immigrants", "ls_moves", "ls_calls", "duplicates", "n_incumbents", "demoted", "incumbents_reverted",
             "rejected_copies", "aborted_generations")}
+        S = self.S
+        self.sc: dict[str, np.ndarray] = {k: np.zeros(S, np.int64) for k in (
+            "children", "best_events", "incumbents", "best_events_solver", "incumbents_solver", "repaired",
+            "repaired_feasible", "immigrants")}
+        self.sc_since: dict[str, np.ndarray] = {k: np.zeros(S, np.int64) for k in ("children", "best_events")}
+        self.c_strat = {"strategy_redrawn": 0, "strategy_reassigned": 0}
         self.gen_rows: list[dict] = []
         self.g_or: dict[int, int] = {}
         self.g_new_best: set[int] = set()
@@ -739,16 +884,17 @@ class Engine:
         with self.phase("seed"):
             X, origin = seed_population(bk, self.dp, self.P, cfg.seeding, self.rng_dev, self.rng_host,
                                         gene_dtype=self.gene_dtype.name, mem_budget_bytes=self.budgets["operators"])
+        k = X.shape[0]
+        strat0 = (np.arange(k) % self.S).astype(np.uint8)       # round robin (all 0 while the strategy is off)
         with self.phase("repair"):
-            moved = self._repair(X)
+            moved = self._repair(X, strat0)
         if moved is not None:
             origin = origin | np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
         with self.phase("evaluate"):
             ev = self._evaluate(X)
-        k = X.shape[0]
         now = self.trace.now()
         pop0 = self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), self.idc.take(k),
-                              np.full((k, 2), -1, np.int64), origin, 0)
+                              np.full((k, 2), -1, np.int64), origin, 0, strat=strat0)
         meta = dict(rank_pa=np.full(k, -1, np.int8), rank_pb=np.full(k, -1, np.int8), t_first=np.full(k, now))
         self._exchange_in(force=True)
         cand, meta = self._with_pending(pop0, meta)
@@ -775,10 +921,8 @@ class Engine:
             with self.phase("exchange"):
                 self._exchange_in()
         if self.pop.size == 0:                               # every candidate died (duplicates / non-finite)
-            Xn, on = immigrants(bk, dp, self.P, self.rng_dev, self.rng_host, lp_x=self.lp_x,
-                                lp_share=cfg.seeding.lp_rounding, gene_dtype=self.gene_dtype.name,
-                                mem_budget_bytes=self.budgets["operators"])
-            if self._admit(Xn, on, replace=None) == 0:
+            Xn, on, sn = self._immigrants(self.P, lp_share=cfg.seeding.lp_rounding)
+            if self._admit(Xn, on, replace=None, strat=sn) == 0:
                 raise RuntimeError("the population is empty and no immigrant could be admitted")
         pop = self.pop
         Np = pop.size
@@ -786,6 +930,9 @@ class Engine:
         with self.phase("select"):
             ia, ib = select_parents(pop.rank, self.h_key, self.h_viol, self.h_feas, self.O, cfg.selection,
                                     self.rng_host)
+            cs = None
+            if self.strat_on:                                # children's strategies (module docstring)
+                cs = self._child_strategies(pop.strat[ia])
         with self.phase("crossover"):
             dia, dib = bk.xp.asarray(ia), bk.xp.asarray(ib)
             C, xo, touched = crossover(bk, dp, pop.X[dia], pop.X[dib], cfg.crossover, self.rng_dev, self.rng_host,
@@ -793,11 +940,13 @@ class Engine:
             del touched, dia, dib
         pb = np.where(xo != 0, ib, ia)                       # mutation-only children: pb = pa
         with self.phase("mutation"):
+            # with the strategy: one call; children whose strategy has no LP guidance never draw toward_lp
+            lp_rows = self.strat_lp[cs] if (cs is not None and self.lp_x is not None) else None
             mo = mutate(bk, dp, C, cfg.mutation, self.rng_dev, self.rng_host, lp_x=self.lp_x,
-                        mem_budget_bytes=self.budgets["operators"])
+                        mem_budget_bytes=self.budgets["operators"], lp_rows=lp_rows)
         origin = (xo | mo).astype(np.uint16)
         with self.phase("repair"):
-            moved = self._repair(C)
+            moved = self._repair(C, cs)
         if not self._continue(None):                         # budget / stop during the repair: drop this generation
             self.c["aborted_generations"] += 1
             self.trace.event("note", msg=f"generation {self.gen} cut short during the repair ({self.stop_reason})",
@@ -813,7 +962,11 @@ class Engine:
                                 pop.anc_rank[ia], pop.anc_rank[pb], pop.anc_ops[ia], pop.anc_ops[pb],
                                 pa_src=src_bits_of_origin(pop.origin[ia]), pb_src=src_bits_of_origin(pop.origin[pb]))
         children = self._make_pop(C, ev, np.full(k, NO_RANK, np.int8), self.idc.take(k),
-                                  np.stack([pop.ids[ia], pop.ids[pb]], axis=1), origin, self.gen, ar, ao)
+                                  np.stack([pop.ids[ia], pop.ids[pb]], axis=1), origin, self.gen, ar, ao, strat=cs)
+        if cs is not None:
+            cnt = np.bincount(cs, minlength=self.S)
+            self.sc["children"] += cnt
+            self.sc_since["children"] += cnt
         now = self.trace.now()
         meta = dict(rank_pa=pop.rank[ia].astype(np.int8), rank_pb=pop.rank[pb].astype(np.int8),
                     t_first=np.full(k, now))
@@ -827,7 +980,8 @@ class Engine:
             self._gen_record()
 
     # ------------------------------------------------------------------------------------- pieces of a step
-    def _make_pop(self, X, ev, rank, ids, parents, origin, birth, anc_rank=None, anc_ops=None) -> Population:
+    def _make_pop(self, X, ev, rank, ids, parents, origin, birth, anc_rank=None, anc_ops=None,
+                  strat=None) -> Population:
         k = X.shape[0]
         if anc_rank is None:
             anc_rank = np.zeros((k, self.depth), np.uint8)
@@ -835,7 +989,70 @@ class Engine:
         return Population(X=X, key=ev[0], viol=ev[1], feasible=ev[2], rank=np.asarray(rank, np.int8),
                           ids=np.asarray(ids, np.int64), parents=np.asarray(parents, np.int64),
                           origin=np.asarray(origin, np.uint16), birth=np.full(k, birth, np.int32),
-                          anc_rank=anc_rank, anc_ops=anc_ops)
+                          anc_rank=anc_rank, anc_ops=anc_ops,
+                          strat=np.zeros(k, np.uint8) if strat is None else np.asarray(strat, np.uint8))
+
+    # ------------------------------------------------------------------------------------------- strategies
+    def _child_strategies(self, parent: np.ndarray) -> np.ndarray:
+        """Strategies of the O children from their parent A's (module docstring): inherited, redrawn uniformly with
+        probability `strategy.mutation_rate`, then every strategy topped up to min(ceil(min_share·O), O // S)."""
+        sg, S, rng = self.cfg.strategy, self.S, self.rng_host
+        cs = np.asarray(parent, np.uint8).copy()
+        O = cs.size
+        redraw = rng.random(O) < sg.mutation_rate
+        nr = int(redraw.sum())
+        if nr:
+            cs[redraw] = rng.integers(S, size=nr).astype(np.uint8)
+        self.c_strat["strategy_redrawn"] += nr
+        q = min(math.ceil(sg.min_share * O - 1e-9), O // S)
+        if q > 0:
+            cnt = np.bincount(cs, minlength=S)
+            need = np.maximum(q - cnt, 0)
+            if need.any():
+                # donors: a random cnt - q of the children of every strategy above the floor, so none drops below it
+                pool = np.concatenate([rng.permutation(np.flatnonzero(cs == t))[:cnt[t] - q]
+                                       for t in np.flatnonzero(cnt > q)])
+                take = rng.choice(pool, size=int(need.sum()), replace=False)
+                cs[take] = np.repeat(np.arange(S), need).astype(np.uint8)
+                self.c_strat["strategy_reassigned"] += int(need.sum())
+        return cs
+
+    def _random_strategies(self, k: int, lp_only: bool = False) -> np.ndarray:
+        """k independent uniform strategy draws, in row order (never sorted: injected rows arrive best first, and a
+        sort would hand the best row the smallest of k draws); `lp_only`: among the strategies with LP guidance. Zeros
+        (no draw) while the strategy is off."""
+        if not self.strat_on or k <= 0:
+            return np.zeros(max(k, 0), np.uint8)
+        pool = np.flatnonzero(self.strat_lp) if lp_only else np.arange(self.S)
+        return pool[self.rng_host.integers(pool.size, size=k)].astype(np.uint8)
+
+    def _immigrants(self, k: int, frontier_rows=None, lp_share: float | None = None):
+        """`seeding.immigrants` with strategies: (X, origin, strat). Off: exactly the plain call, strat = 0. On: the k
+        strategies are drawn uniformly first; LP roundings (lp_share of them) go only to rows whose strategy has LP
+        guidance; frontier rows keep their draws."""
+        cfg = self.cfg
+        lp_share = cfg.seeding.lp_rounding if lp_share is None else lp_share
+        kw = dict(gene_dtype=self.gene_dtype.name, mem_budget_bytes=self.budgets["operators"])
+        if not self.strat_on:
+            Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host, lp_x=self.lp_x,
+                                frontier_rows=frontier_rows, lp_share=lp_share, **kw)
+            return Xn, on, np.zeros(Xn.shape[0], np.uint8)
+        k = int(k)
+        f = 0 if frontier_rows is None else min(k, int(frontier_rows.shape[0]))
+        draws = self.rng_host.integers(self.S, size=k).astype(np.uint8)
+        rest = draws[f:]
+        on_lp = np.flatnonzero(self.strat_lp[rest]) if self.lp_x is not None else np.zeros(0, np.int64)
+        k_lp = int(round(lp_share * on_lp.size))
+        Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host,
+                            lp_x=self.lp_x if k_lp else None, frontier_rows=frontier_rows, lp_share=0.0,
+                            lp_count=k_lp, **kw)
+        lp_rows = on_lp[:k_lp]                               # rest-positions that become LP roundings
+        other = np.setdiff1d(np.arange(rest.size), lp_rows)
+        strat = np.concatenate([draws[:f], rest[lp_rows], rest[other]]).astype(np.uint8)
+        if strat.size != Xn.shape[0]:
+            raise RuntimeError(f"immigrants returned {Xn.shape[0]} rows for {strat.size} strategies")
+        self.sc["immigrants"] += np.bincount(strat, minlength=self.S)
+        return Xn, on, strat
 
     def _evaluate(self, X):
         """(key, viol, feasible) device arrays; on a CuPy out-of-memory the budget is halved and the call retried."""
@@ -862,27 +1079,46 @@ class Engine:
         self.trace.event("note", msg=f"out of memory in {what}; budget halved to {self.budgets[key]} bytes",
                          error=str(e)[:300])
 
-    def _repair(self, X) -> np.ndarray | None:
-        """Decoder -> local search -> decoder on X (in place). Returns the per-row 'moved by the search' flags."""
-        if X.shape[0] == 0:
+    def _repair(self, X, strat: np.ndarray | None = None) -> np.ndarray | None:
+        """Decoder -> local search -> decoder on X (in place). Returns the per-row 'moved by the search' flags.
+        With the strategy on, `strat` gives each row's strategy and the ONE local-search call gets each row's row-scale
+        index (module docstring); the per-strategy `repaired` / `repaired_feasible` counts come from that call."""
+        k = X.shape[0]
+        if k == 0:
             return None
         if self.decoder is not None:
             self.decoder.apply(X)
+        if not self.strat_on or strat is None:
+            moved = self._ls_run(X)
+        else:
+            strat = np.asarray(strat, np.int64)
+            moved = self._ls_run(X, self.strat_scale[strat])
+            self.sc["repaired"] += np.bincount(strat, minlength=self.S)
+            stv = getattr(self.ls.impl, "last_status", None)
+            if stv is not None and len(stv) == k:
+                self.sc["repaired_feasible"] += np.bincount(strat, weights=(np.asarray(stv) == 1),
+                                                            minlength=self.S).astype(np.int64)
+        if self.decoder is not None:
+            self.decoder.apply(X)
+        return moved
+
+    def _ls_run(self, X, scale_idx: np.ndarray | None = None) -> np.ndarray | None:
+        """One local-search call with the out-of-memory retries; counters into `self.c`; the moved flags."""
+        ls = self.ls
         for attempt in range(OOM_RETRIES + 1):
             try:
-                st = self.ls.run(X, should_stop=self._should_stop)
+                st = (ls.run(X, should_stop=self._should_stop) if scale_idx is None
+                      else ls.run(X, should_stop=self._should_stop, scale_idx=scale_idx))
                 break
             except Exception as e:  # noqa: BLE001
                 if not _is_oom(e) or attempt == OOM_RETRIES:
                     raise
                 self._oom("local_search", e)
-        if self.decoder is not None:
-            self.decoder.apply(X)
         self.c["ls_moves"] += int(st.get("moves", 0))
         self.c["ls_calls"] += 1
         for k in ("local_minima", "finished_feasible", "finished_stall", "finished_budget", "interrupted"):
             self.c[f"ls_{k}"] = self.c.get(f"ls_{k}", 0) + int(st.get(k, 0))
-        lm = getattr(self.ls.impl, "last_moves", None)
+        lm = getattr(ls.impl, "last_moves", None)
         if lm is not None and len(lm) == X.shape[0]:
             return np.asarray(lm) > 0
         return None
@@ -916,7 +1152,7 @@ class Engine:
             X = b.X
             if b.repair:
                 with self.phase("repair"):
-                    moved = self._repair(X)
+                    moved = self._repair(X, b.strat)
                 if moved is not None:
                     b.origin = b.origin | np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
             with self.phase("evaluate"):
@@ -930,7 +1166,7 @@ class Engine:
                     self.trace.event("note", msg=f"{bad} of {k} injected solver solutions are infeasible under the "
                                                  f"EA's test (tol_mode={self.cfg.ranks.tol_mode})")
             parts.append(self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), self.idc.take(k),
-                                        np.full((k, 2), -1, np.int64), b.origin, self.gen))
+                                        np.full((k, 2), -1, np.int64), b.origin, self.gen, strat=b.strat))
             metas.append(dict(rank_pa=np.full(k, -1, np.int8), rank_pb=np.full(k, -1, np.int8),
                               t_first=np.full(k, b.t)))
         self.pending = []
@@ -997,7 +1233,7 @@ class Engine:
                 rank_pb=meta["rank_pb"][j].astype(np.int8), origin=cand.origin[ent].astype(np.uint16),
                 birth=cand.birth[ent].astype(np.int32), key=hk[ent].astype(np.float64),
                 V=hv[ent].astype(np.float64), feasible=hf[ent].astype(bool),
-                t_first=meta["t_first"][j].astype(np.float64)))
+                t_first=meta["t_first"][j].astype(np.float64), strat=cand.strat[ent].astype(np.uint8)))
         if self.frontier is not None and self.gen % cfg.frontier.update_every == 0 and self.gen > 0:
             with self.phase("frontier"):
                 self._frontier_update(cand, hk, hf)
@@ -1008,10 +1244,8 @@ class Engine:
         if surv is not None and self.pop.size < self.P:
             k = self.P - self.pop.size
             with self.phase("immigrants"):
-                Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host, lp_x=self.lp_x,
-                                    lp_share=self.cfg.seeding.lp_rounding, gene_dtype=self.gene_dtype.name,
-                                    mem_budget_bytes=self.budgets["operators"])
-                self._admit(Xn, on, replace=None)
+                Xn, on, sn = self._immigrants(k, lp_share=self.cfg.seeding.lp_rounding)
+                self._admit(Xn, on, replace=None, strat=sn)
         with self.phase("incumbent"):
             self._update_incumbent()
         self._stagnation()
@@ -1107,7 +1341,7 @@ class Engine:
         pop = self.pop
         iid = int(pop.ids[i])
         bits = int(pop.origin[i])
-        src = "solver" if (bits & ORIGIN_INJECTED) and not (bits & int(_GENE_BITS_EA)) else "self"
+        src = "solver" if _is_solver_find(bits) else "self"
         t = self.trace.now()
         self.best_key, self.best_obj, self.best_x = key, obj, x
         self.inc_stack.append((iid, key, obj, x))
@@ -1117,6 +1351,8 @@ class Engine:
             hdr = struct.pack("<ddBi", t, float(obj), SOURCE_CODES.get(src, 255), row.idx.size)
             self.part.write(hdr + row.idx.astype("<i4").tobytes() + row.val.astype("<f8").tobytes())
         self.c["n_incumbents"] += 1
+        if self.strat_on:                                    # a solver find is not the strategy's (module docstring)
+            self.sc["incumbents_solver" if src == "solver" else "incumbents"][int(pop.strat[i])] += 1
         self.g_new_best.add(iid)
         self.trace.incumbent(obj, source=src, t=t, key=key, id=iid, gen=self.gen)
         self._best_event(i, feasible=True, obj=obj)
@@ -1129,10 +1365,20 @@ class Engine:
     def _best_event(self, i: int, feasible: bool, obj: float) -> None:
         pop = self.pop
         bits = int(pop.origin[i])
+        extra = {}
+        if self.strat_on:
+            st_i = int(pop.strat[i])
+            credited = not _is_solver_find(bits)             # a solver solution is not credited to its strategy
+            extra.update(strat=st_i, strat_credited=credited)
+            if credited:
+                self.sc["best_events"][st_i] += 1
+                self.sc_since["best_events"][st_i] += 1
+            else:
+                self.sc["best_events_solver"][st_i] += 1
         self.trace.event("best", key=float(self.h_key[i]), obj=obj, feasible=feasible, rank=int(pop.rank[i]),
                          origin=bits, ops=origin_names(bits), anc_rank=pop.anc_rank[i].tolist(),
                          anc_ops=pop.anc_ops[i].tolist(), parents=pop.parents[i].tolist(), id=int(pop.ids[i]),
-                         birth=int(pop.birth[i]), V=float(self.h_viol[i]), gen=self.gen)
+                         birth=int(pop.birth[i]), V=float(self.h_viol[i]), gen=self.gen, **extra)
 
     def _post(self, X: np.ndarray, obj: np.ndarray, origin: np.ndarray, ids: list[int], gain: float = math.nan,
               frontier: bool = False) -> int:
@@ -1172,25 +1418,28 @@ class Engine:
             if k_fr:
                 fr_rows = self.frontier.sample(k_fr, self.rng_host)
         with self.phase("immigrants"):
-            Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host, lp_x=self.lp_x, frontier_rows=fr_rows,
-                                lp_share=self.cfg.seeding.lp_rounding, gene_dtype=self.gene_dtype.name,
-                                mem_budget_bytes=self.budgets["operators"])
-            self._admit(Xn, on, replace=replace)
+            Xn, on, sn = self._immigrants(k, frontier_rows=fr_rows, lp_share=self.cfg.seeding.lp_rounding)
+            self._admit(Xn, on, replace=replace, strat=sn)
         self.trace.event("note", msg="stagnation immigrants", gen=self.gen, replaced=int(k),
                          from_frontier=int(0 if fr_rows is None else fr_rows.shape[0]))
 
-    def _admit(self, Xn, on: np.ndarray, replace: np.ndarray | None) -> int:
-        """Immigrants into the population under the survival's rules (module docstring). Returns the number admitted."""
+    def _admit(self, Xn, on: np.ndarray, replace: np.ndarray | None, strat: np.ndarray | None = None) -> int:
+        """Immigrants into the population under the survival's rules (module docstring). Returns the number admitted.
+        `strat`: their repair strategies (None: uniform draws while the strategy is on, else 0)."""
         bk, rk = self.bk, self.cfg.ranks
         k = int(Xn.shape[0])
         if k == 0:
             return 0
+        if strat is None:
+            strat = (self.rng_host.integers(self.S, size=k).astype(np.uint8) if self.strat_on
+                     else np.zeros(k, np.uint8))
+        strat = np.asarray(strat, np.uint8)
         on = np.asarray(on, np.uint16).copy()
         rep = np.flatnonzero((on & np.uint16(ORIGIN_SEED_RANDOM | ORIGIN_SEED_LP)) != 0)
         if rep.size:
             drep = bk.xp.asarray(rep)
             Xr = Xn[drep]
-            moved = self._repair(Xr)
+            moved = self._repair(Xr, strat[rep])
             Xn[drep] = Xr
             if moved is not None:
                 on[rep] |= np.where(moved, ORIGIN_REPAIR, 0).astype(np.uint16)
@@ -1255,7 +1504,7 @@ class Engine:
             dch = bk.xp.asarray(ch)
             ids = self.idc.take(ch.size)
             newp = self._make_pop(Xn[dch], (ev[0][dch], ev[1][dch], ev[2][dch]), np.asarray(ranks, np.int8), ids,
-                                  np.full((ch.size, 2), -1, np.int64), on[ch], self.gen)
+                                  np.full((ch.size, 2), -1, np.int64), on[ch], self.gen, strat=strat[ch])
             self.pop = Population.concat(bk, [base, newp])
             self.h_key = np.concatenate([hk, nk[ch]])
             self.h_viol = np.concatenate([hv, nv[ch]])
@@ -1265,7 +1514,8 @@ class Engine:
                 id=ids, pa=np.full(ch.size, -1, np.int64), pb=np.full(ch.size, -1, np.int64),
                 rank_pa=np.full(ch.size, -1, np.int8), rank_pb=np.full(ch.size, -1, np.int8), origin=on[ch],
                 birth=np.full(ch.size, self.gen, np.int32), key=nk[ch].astype(np.float64),
-                V=nv[ch].astype(np.float64), feasible=nf[ch].astype(bool), t_first=np.full(ch.size, now)))
+                V=nv[ch].astype(np.float64), feasible=nf[ch].astype(bool), t_first=np.full(ch.size, now),
+                strat=strat[ch].astype(np.uint8)))
         else:
             self.pop = base
             self.h_key, self.h_viol, self.h_feas = hk, hv, hf
@@ -1367,7 +1617,7 @@ class Engine:
         self.c["injected"] += int(take.size)
         Xd = self.bk.xp.asarray(Y).astype(self.gene_dtype)
         self.pending.append(_Batch(Xd, np.full(take.size, ORIGIN_INJECTED, np.uint16), repair=False, src="solver",
-                                   t=self.trace.now()))
+                                   t=self.trace.now(), strat=self._random_strategies(int(take.size))))
 
     def _lp_arrived(self, x: np.ndarray, source: str, obj: float | None = None, **info) -> None:
         if x.shape[0] != self.prob.n or not np.all(np.isfinite(x)):
@@ -1380,13 +1630,18 @@ class Engine:
         k = int(round(cfg.seeding.lp_rounding * cfg.stagnation.immigrant_frac * self.P))
         if cfg.seeding.lp_rounding > 0:
             k = max(1, k)
+        if self.strat_on and not self.strat_lp.any():
+            k = 0                                            # LP roundings belong to LP-guided strategies only
         self.trace.event("lp", source=source, state="done", obj=obj, immigrants=k, **info)
         if k:
+            sk = self._random_strategies(k, lp_only=True)
             X, o = lp_round(self.bk, self.dp, x, k, self.rng_dev, self.rng_host, gene_dtype=self.gene_dtype.name,
                             mem_budget_bytes=self.budgets["operators"])
             self.pending.append(_Batch(X, (o | ORIGIN_IMMIGRANT).astype(np.uint16), repair=True, src="lp",
-                                       t=self.trace.now()))
+                                       t=self.trace.now(), strat=sk))
             self.c["lp_immigrants"] += k
+            if self.strat_on:
+                self.sc["immigrants"] += np.bincount(sk, minlength=self.S)
 
     def _poll_lp_worker(self) -> None:
         x, info = self.lp_worker.poll()
@@ -1465,6 +1720,13 @@ class Engine:
         self.last_log = (now, self.c["children"])
         phases = self.phase.take()
         self.logged_gen = self.gen
+        extra = {}
+        if self.strat_on:
+            extra = dict(strat_pop=np.bincount(pop.strat, minlength=self.S).tolist(),
+                         strat_best=self.sc_since["best_events"].tolist(),
+                         strat_children=self.sc_since["children"].tolist())
+            for v in self.sc_since.values():
+                v[:] = 0
         self.trace.event(
             "gen", gen=self.gen, best_key=float(hk[hf].min()) if hf.any() else None,
             median_key=float(np.median(fin)) if fin.size else None, feas_share=float(hf.mean()) if hf.size else 0.0,
@@ -1476,7 +1738,7 @@ class Engine:
             gpu_mem_mb=round(self.bk.mem_used_bytes() / 2 ** 20, 2), gpu_pool_mb=round(self.bk.mem_total_bytes() / 2 ** 20, 2),
             feasibility_phase=bool(surv.feasibility_phase) if surv else True, seconds=phases,
             ls_moves=self.c["ls_moves"], oom_retries=self.c["oom_retries"],
-            best_viol=self.best_viol if not hf.any() else 0.0)
+            best_viol=self.best_viol if not hf.any() else 0.0, **extra)
 
     def finish(self) -> dict:
         """Final records and the summary (call once, after the last step)."""
@@ -1499,6 +1761,11 @@ class Engine:
             peak_gpu_used_mb=round(self.peak_used / 2 ** 20, 2), peak_gpu_pool_mb=round(self.peak_pool / 2 ** 20, 2),
             exchange_from_solver=self.from_solver, exchange_to_solver=self.to_solver,
             genealogy_rows=int(sum(len(r["id"]) for r in self.gen_rows)), **c)
+        if self.strat_on:
+            out["strategy"] = dict(names=list(self.strat_names), row_scale=[sc for sc, _ in self.strat_list],
+                                   lp_guidance=[bool(lp) for _, lp in self.strat_list],
+                                   final_pop=np.bincount(pop.strat, minlength=self.S).tolist(),
+                                   **{k: v.tolist() for k, v in self.sc.items()}, **self.c_strat)
         if self.frontier is not None:
             Xf, keys, dist = self.frontier.host_solutions()
             out["frontier"] = dict(X=Xf, keys=keys, dist=dist, ids=self.frontier.ids.copy(),
@@ -1510,9 +1777,9 @@ class Engine:
     # ------------------------------------------------------------------------------------------------- outputs
     def genealogy(self) -> dict:
         """The edge list as column arrays (flags and OR-merged origins applied)."""
-        cols = ("id", "pa", "pb", "rank_pa", "rank_pb", "origin", "birth", "key", "V", "feasible", "t_first")
+        cols = ("id", "pa", "pb", "rank_pa", "rank_pb", "origin", "birth", "key", "V", "feasible", "t_first", "strat")
         dt = dict(id=np.int64, pa=np.int64, pb=np.int64, rank_pa=np.int8, rank_pb=np.int8, origin=np.uint16,
-                  birth=np.int32, key=np.float64, V=np.float64, feasible=bool, t_first=np.float64)
+                  birth=np.int32, key=np.float64, V=np.float64, feasible=bool, t_first=np.float64, strat=np.uint8)
         if self.gen_rows:
             g = {c: np.concatenate([r[c] for r in self.gen_rows]).astype(dt[c]) for c in cols}
         else:

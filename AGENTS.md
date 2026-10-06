@@ -125,7 +125,7 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
-| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b` on 2026-10-06), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml`; `tests/test_configs.py` keeps the default file equal to the code | core |
+| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b` on 2026-10-06), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `itrea2-adaptive.yaml` (development: the self-adaptive repair strategy + the EA's own LP point), `ablations/*.yaml`; `tests/test_configs.py` keeps the default file equal to the code | core |
 | `tools/serving-window.sh` | stop / restore the two local LLM servers for a window | core |
 | `tools/bench_ls.py` | local-search throughput, GPU vs CPU reference (`itrea bench-ls`) | built |
 | `datasets/` | derived tables (committed); `hardness_from_optopt.csv` is background only | — |

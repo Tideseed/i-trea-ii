@@ -22,6 +22,9 @@ DISJOINT row sets: after each chosen move, every variable sharing a row with it 
 scores of the moves applied together add up exactly. With an active cutoff row, every costed variable shares that row,
 so at most one costed move is applied per step. `steps` bounds the steps per call.
 
+Row scales: one row of divisors per scale of `row_scales` (`AugmentedRows.rs_tab`; the self-adaptive repair strategy);
+each individual of a call uses its own (`run(X, scale_idx=...)`), a chunk of mixed scales gathers them per individual.
+
 Memory: the work is chunked over individuals; `per_individual_bytes` counts the (entries, k) temporaries of a scoring
 pass, the (m, k) row state and the (n, k) column state, and `chunk = mem_budget_bytes // per_individual_bytes`.
 Works on NumPy and CuPy (`dp.bk`); X lives on the same backend and is modified in place.
@@ -71,10 +74,15 @@ class DenseLS:
 
     `run(X)` returns {moves, local_minima, steps, finished_feasible, finished_stall, finished_budget, seconds, chunk,
     peak_bytes}. Keyword knob `p_random_walk` (default from cfg if present, else 0): at a local minimum apply the
-    least-bad move with this probability."""
+    least-bad move with this probability.
+
+    `row_scales` (default: `dp`'s own) = the row scales one call can use (the self-adaptive repair strategy):
+    `rs_tab` (R, m_aug) on the device, one row per scale (`AugmentedRows`), and `run(X, scale_idx=...)` gives each
+    individual its index (None: 0). A chunk whose individuals share one scale uses that scale's (m_aug, 1) column as
+    always; a mixed chunk gathers an (m_aug, kc) divisor array (counted in `per_individual_bytes` when R > 1)."""
 
     def __init__(self, dp: DeviceProblem, cfg: RepairCfg, imp_tol: float = 1e-9, mem_budget_bytes: int = 256 << 20,
-                 seed: int = 0, *, p_random_walk: float | None = None):
+                 seed: int = 0, *, p_random_walk: float | None = None, row_scales=None):
         bk = dp.bk
         xp = bk.xp
         self.dp, self.cfg, self.bk = dp, cfg, bk
@@ -88,8 +96,12 @@ class DenseLS:
         prob = dp.prob
         self.n, self.m = prob.n, prob.m
         self.key_offset = float(dp.key_offset)
-        self.rows = AugmentedRows(dp, cfg)
+        self.rows = AugmentedRows(dp, cfg, scales=row_scales)
+        self.row_scales = list(self.rows.scales)
         self.m_aug = self.rows.m_aug
+        self.cut_active = False
+        self.cut_rhs = float("inf")
+        self._rng = np.random.default_rng(self.seed)
         vt, lb, ub = var_types(prob)
         self.vtype = vt
         self.has_cont = bool(np.any(~np.asarray(prob.isint, bool)))
@@ -102,7 +114,8 @@ class DenseLS:
         self.AiT = bk.to_device_sparse(Ai.T.tocsr(), dtype=np.float64)
         self.rl = xp.asarray(self.rows.rl)
         self.ru = xp.asarray(self.rows.ru)
-        self.rs = xp.asarray(self.rows.rs)
+        self.rs_tab = xp.asarray(self.rows.rs_tab)             # (R, m_aug); rs = scale 0's row (a view)
+        self.rs = self.rs_tab[0]
         self.tl = xp.asarray(_tol(self.rows.rl))
         self.tu = xp.asarray(_tol(self.rows.ru))
         self.lb = xp.asarray(lb)
@@ -117,9 +130,6 @@ class DenseLS:
                 if blk.size:
                     self.blocks[cls] = blk
         self.max_entries = max([b.size for b in self.blocks.values()], default=0)
-        self.cut_active = False
-        self.cut_rhs = float("inf")
-        self._rng = np.random.default_rng(self.seed)
 
     # ---------------------------------------------------------------- cutoff
     def set_cutoff(self, inc_key: float | None) -> None:
@@ -131,24 +141,28 @@ class DenseLS:
         self.rows.set_cutoff_side(rhs)
         m = self.m
         self.ru[m] = rhs
-        self.rs[m] = float(self.rows.rs[m])
+        for r in range(len(self.row_scales)):
+            self.rs_tab[r, m] = float(self.rows.rs_tab[r, m])
         self.tu[m] = float(_tol(np.array([rhs]))[0])
 
     # ---------------------------------------------------------------- memory
     @property
     def per_individual_bytes(self) -> int:
         """Bytes of temporaries per individual in a chunk: 7 float64 (entries, k) arrays in a scoring pass, 8 (m, k)
-        row-state arrays, 12 (n, k) column-state arrays."""
-        return int(8 * (7 * self.max_entries + 8 * max(self.m_aug, 1) + 12 * self.n) + 64)
+        row-state arrays, 12 (n, k) column-state arrays; with more than one row scale also the gathered (m, k)
+        divisors and their (entries, k) gather in a pass."""
+        mixed = len(self.row_scales) > 1
+        return int(8 * ((7 + mixed) * self.max_entries + (8 + mixed) * max(self.m_aug, 1) + 12 * self.n) + 64)
 
     def chunk_size(self, k: int) -> int:
         return max(1, min(k, int(self.mem_budget_bytes // self.per_individual_bytes)))
 
     # ------------------------------------------------------------------- run
-    def run(self, X, should_stop=None) -> dict:
+    def run(self, X, should_stop=None, scale_idx=None) -> dict:
         """Improve every row of X in place. `should_stop()` (optional) is polled before every chunk and every step;
         when it returns True the chunk in progress is written back as it stands (its active rows count as
-        `finished_budget`), later chunks are left untouched; both kinds count in `interrupted`."""
+        `finished_budget`), later chunks are left untouched; both kinds count in `interrupted`. `scale_idx` (k,): each
+        row's index into `row_scales` (None: 0)."""
         bk, xp = self.bk, self.bk.xp
         t0 = time.perf_counter()
         k, n = int(X.shape[0]), int(X.shape[1])
@@ -164,6 +178,11 @@ class DenseLS:
         if k == 0:
             self.last_status = status_all
             return out
+        sidx = None
+        if scale_idx is not None and len(self.row_scales) > 1:
+            sidx = np.asarray(scale_idx).astype(np.int64, copy=False).reshape(-1)
+            if sidx.shape[0] != k or sidx.min() < 0 or sidx.max() >= len(self.row_scales):
+                raise ValueError(f"scale_idx must hold {k} indices in [0, {len(self.row_scales)})")
         chunk = self.chunk_size(k)
         out["chunk"] = chunk
         used0 = bk.mem_used_bytes()
@@ -177,7 +196,14 @@ class DenseLS:
             XT = xp.where(xp.isfinite(XT), XT, 0.0)
             XT = xp.where(self.isint[:, None], xp.rint(XT), XT)
             XT = xp.clip(XT, self.lb[:, None], self.ub[:, None])
-            st, cnt, pk = self._run_chunk(XT, kc, should_stop)
+            if sidx is None:
+                rs = self.rs[:, None]
+            else:
+                sc = sidx[s:s + kc]
+                rs = (self.rs_tab[int(sc[0])][:, None] if np.all(sc == sc[0])
+                      else xp.ascontiguousarray(self.rs_tab[xp.asarray(sc)].T))         # (m_aug, kc)
+            st, cnt, pk = self._run_chunk(XT, kc, should_stop, rs)
+            del rs
             n_cut += cnt.pop("interrupted", 0)
             peak = max(peak, pk - used0)
             if is_int_dtype:
@@ -199,13 +225,14 @@ class DenseLS:
         return out
 
     # -------------------------------------------------------------- internals
-    def _measure(self, act, W):
+    def _measure(self, act, W, rs):
+        """rs: the row divisors, (m_aug, 1) for a one-scale chunk or (m_aug, kc) per individual."""
         xp = self.bk.xp
         rl, ru = self.rl[:, None], self.ru[:, None]
         below, above = act < rl, act > ru
         raw = xp.where(below, rl - act, 0.0) + xp.where(above, act - ru, 0.0)
         violated = (below & (rl - act > self.tl[:, None])) | (above & (act - ru > self.tu[:, None]))
-        F = (W * (raw / self.rs[:, None])).sum(axis=0)
+        F = (W * (raw / rs)).sum(axis=0)
         return violated, raw, F
 
     def _scatter_max(self, out, idx, vals):
@@ -215,11 +242,12 @@ class DenseLS:
         xp = self.bk.xp
         return (xp.where(a < rl, rl - a, 0.0) + xp.where(a > ru, a - ru, 0.0)) / rs
 
-    def _pass(self, blk: _ClassBlock, act, W, D):
-        """Δ weighted violation (n_sub, k) of moving each class column by D (n_sub, k)."""
+    def _pass(self, blk: _ClassBlock, act, W, D, rs_rows):
+        """Δ weighted violation (n_sub, k) of moving each class column by D (n_sub, k); rs_rows = the divisors of
+        the block's entries' rows, (entries, 1) or (entries, k)."""
         rl = self.rl[blk.rows_e][:, None]
         ru = self.ru[blk.rows_e][:, None]
-        rs = self.rs[blk.rows_e][:, None]
+        rs = rs_rows
         a0 = act[blk.rows_e]
         v0 = self._rowviol(a0, rl, ru, rs)
         a1 = a0 + blk.vals_e[:, None] * D[blk.lcol_e]
@@ -227,7 +255,7 @@ class DenseLS:
         del a0, a1, v0
         return blk.R @ dv
 
-    def _jump(self, blk: _ClassBlock, XT, act, W, violated, raw, kc):
+    def _jump(self, blk: _ClassBlock, XT, act, W, violated, raw, kc, rs_rows):
         """Tightening value (n_sub, k) of each class column for its violated row with the largest w·v (NaN if none).
 
         The segment argmax runs on int64 keys only: cupyx.scatter_max on float64 loses precision (measured
@@ -235,7 +263,7 @@ class DenseLS:
         (order-preserving for non-negative doubles) and the winning entry is found by a second, index-valued pass."""
         xp = self.bk.xp
         re = blk.rows_e
-        pr = xp.where(violated[re], W[re] * raw[re] / self.rs[re][:, None], 0.0)
+        pr = xp.where(violated[re], W[re] * raw[re] / rs_rows, 0.0)
         bits = pr.view(xp.int64)
         colmax = xp.zeros((blk.n_sub, kc), dtype=xp.int64)
         self._scatter_max(colmax, blk.lcol_e, bits)
@@ -255,13 +283,15 @@ class DenseLS:
         t = XT[blk.cols_e[e], ar] + (side - a) / blk.vals_e[e]
         return xp.where(has, t, xp.nan)
 
-    def _run_chunk(self, XT, kc, should_stop=None):
+    def _run_chunk(self, XT, kc, should_stop=None, rs=None):
+        """rs: the row divisors of this chunk, (m_aug, 1) or (m_aug, kc) (default: scale 0)."""
         bk, xp, cfg = self.bk, self.bk.xp, self.cfg
         inf = float("inf")
+        rs = self.rs[:, None] if rs is None else rs
         ar = xp.arange(kc)
         act = self.A @ XT                                       # (m_aug, kc)
         W = xp.ones((self.m_aug, kc))
-        violated, raw, F = self._measure(act, W)
+        violated, raw, F = self._measure(act, W, rs)
         Fbest = F.copy()
         since = xp.zeros(kc, dtype=xp.int64)
         moves_i = xp.zeros(kc, dtype=xp.int64)
@@ -289,13 +319,14 @@ class DenseLS:
             score = xp.full((self.n, kc), inf)
             delta = xp.zeros((self.n, kc))
             for cls, blk in self.blocks.items():
+                rs_rows = rs[blk.rows_e]
                 x = XT[blk.cols]
                 lbc, ubc = self.lb[blk.cols][:, None], self.ub[blk.cols][:, None]
                 cands = []
                 if cls == VT_BIN:
                     cands.append(1.0 - 2.0 * x)
                 else:
-                    jt = self._jump(blk, XT, act, W, violated, raw, kc)
+                    jt = self._jump(blk, XT, act, W, violated, raw, kc, rs_rows)
                     if cls == VT_INT:
                         cands.append(xp.ones_like(x))
                         cands.append(-xp.ones_like(x))
@@ -306,14 +337,14 @@ class DenseLS:
                 for D in cands:
                     ok = (D != 0) & (x + D >= lbc) & (x + D <= ubc)
                     D = xp.where(ok, D, 0.0)
-                    sc = xp.where(ok, self._pass(blk, act, W, D), inf)
+                    sc = xp.where(ok, self._pass(blk, act, W, D, rs_rows), inf)
                     better = sc < best_s
                     best_s = xp.where(better, sc, best_s)
                     best_d = xp.where(better, D, best_d)
                     del sc, better, ok
                 score[blk.cols] = best_s
                 delta[blk.cols] = best_d
-                del cands, best_s, best_d, x
+                del cands, best_s, best_d, x, rs_rows
             if self.use_obj:
                 score = score + self.cobj[:, None] * delta
             inviol = (self.AiT @ violated.astype(xp.float64)) > 0         # variables in a violated row
@@ -360,7 +391,7 @@ class DenseLS:
             cnt["local_minima"] += n_lm
             cnt["steps"] += int(active.sum())
             del score, delta, Dlt, inviol
-            violated, raw, F = self._measure(act, W)
+            violated, raw, F = self._measure(act, W, rs)
             imp = active & (F < Fbest - 1e-12 * xp.maximum(1.0, xp.abs(Fbest)))
             Fbest = xp.where(imp, F, Fbest)
             since = xp.where(active, xp.where(imp, 0, since + 1), since)

@@ -9,6 +9,8 @@
 # Changes since the 2026-10-05 version (hash 3806548cbc26): gpu_mem_gb 4.0 -> 12.0 (equal GPU memory for the EA pool
 # and cuOpt's RMM limit; cuOpt needs ~10.5 GB, vault D-003) and the repair knobs max_candidates, p_random_walk,
 # row_scan_cap, row_scan_filter (vault 10-design/Feasibility jump local search.md).
+# 2026-10-06 (hash unchanged, 9ac4a93bf93b): the `strategy` section (self-adaptive repair strategy) was added OFF; while
+# strategy.enabled is false the section is inert and is left out of the hash (EAConfig.hash).
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -102,6 +104,16 @@ frontier:
   distance: hamming
   update_every: 5
   reinject: 0.0
+strategy:
+  enabled: false
+  row_scales:
+  - l2
+  - rhs
+  lp_guidance:
+  - false
+  - true
+  mutation_rate: 0.1
+  min_share: 0.05
 backend: cupy
 gpu_mem_gb: 12.0
 log_every: 10

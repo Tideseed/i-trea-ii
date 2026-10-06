@@ -457,6 +457,34 @@ def test_warmup_does_not_touch_the_instance():
     assert w["many"]["generations"] >= 4 and w["one"]["generations"] >= 4
 
 
+@pytest.mark.parametrize("backend", ["numpy", pytest.param("cupy", marks=pytest.mark.gpu)])
+def test_warmup_forces_violation_guided_draws(monkeypatch, backend):
+    """Review finding 2026-10-06: violation_guided's draw over violated rows (cumsum / searchsorted / take kernels) was
+    warmed only if, by chance, a warm-up child had a violated row; at seed 1000 (and 1007 without the strategy) it had
+    none and 14 kernels compiled on the clock at the first generation. The warm-up now mutates children built to
+    violate a row, one child and three, whatever the seed."""
+    if backend == "cupy":
+        gpu_or_skip()
+    from itrea.ea import mutation as M
+    seen: list = []
+    real = M._violation_draws
+
+    def spy(bk, dp, C, children, G, act, S, rng, budget):
+        r = real(bk, dp, C, children, G, act, S, rng, budget)
+        seen.append((str(dp.prob.path), int(children.size), int(r[0].size)))
+        return r
+    monkeypatch.setattr(M, "_violation_draws", spy)
+    for seed in (1000, 1007):
+        for over in ({}, {"strategy.enabled": True}):
+            seen.clear()
+            eng = prepared(toy.set_cover(40, 25), cfg_for(backend, **over), seed=seed)
+            syn = [(k, d) for path, k, d in seen if path == "<synthetic warm-up>"]
+            assert len(syn) == len(seen)                               # nothing of the instance before t0
+            assert any(k == 1 and d > 0 for k, d in syn) and any(k >= 2 and d > 0 for k, d in syn), syn
+            for name in ("many", "one"):
+                assert eng.startup["warmup"][name]["violation_guided_forced"] == 4
+
+
 # ------------------------------------------------------------------------------------------------- GPU
 @pytest.mark.gpu
 def test_knapsack_optimum_cupy(tmp_path):

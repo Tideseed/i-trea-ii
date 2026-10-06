@@ -40,8 +40,8 @@ def _changed(cfg: EAConfig) -> set[str]:
 
 def test_the_expected_files_exist():
     names = {p.relative_to(CONFIGS).as_posix() for p in ALL}
-    assert {"itrea2-default.yaml", "itrea1-faithful.yaml", "ablations/x0.yaml", "ablations/y0.yaml",
-            "ablations/no_bound_demote.yaml", "ablations/one_way_ea_to_solver.yaml",
+    assert {"itrea2-default.yaml", "itrea1-faithful.yaml", "itrea2-adaptive.yaml", "ablations/x0.yaml",
+            "ablations/y0.yaml", "ablations/no_bound_demote.yaml", "ablations/one_way_ea_to_solver.yaml",
             "ablations/one_way_solver_to_ea.yaml", "ablations/post_frontier.yaml"} <= names
 
 
@@ -90,3 +90,22 @@ def test_one_way_ablations_switch_whole_directions():
     assert e2s.to_solver and not (e2s.from_solver or e2s.use_dual_bound or e2s.use_root_lp)
     s2e = EAConfig.from_yaml(CONFIGS / "ablations" / "one_way_solver_to_ea.yaml").exchange
     assert not (s2e.to_solver or s2e.post_frontier) and s2e.from_solver
+
+
+def test_adaptive_config_switches_on_the_strategy_and_the_lp_worker():
+    """itrea2-adaptive = the default + the self-adaptive repair strategy + an LP point of the EA's own (D-010)."""
+    cfg = EAConfig.from_yaml(CONFIGS / "itrea2-adaptive.yaml")
+    assert _changed(cfg) == {"strategy.enabled", "seeding.lp_source"}
+    assert cfg.strategy.enabled and cfg.seeding.lp_source == "highs_async"
+    assert cfg.strategy.strategies() == [("l2", False), ("l2", True), ("rhs", False), ("rhs", True)]
+    assert cfg.ranks.viol_norm == "l2"                               # the survival keeps one scale for everyone
+
+
+def test_disabled_strategy_section_is_outside_the_hash():
+    """While strategy.enabled is false the section is inert: changing its other fields keeps the hash (so every
+    configuration written before the section existed keeps its hash); enabling it changes the hash."""
+    base = EAConfig()
+    assert base.with_overrides({"strategy.row_scales": ["rhs"], "strategy.mutation_rate": 0.5}).hash() == base.hash()
+    on = base.with_overrides({"strategy.enabled": True})
+    assert on.hash() != base.hash()
+    assert on.with_overrides({"strategy.mutation_rate": 0.5}).hash() != on.hash()

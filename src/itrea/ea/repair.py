@@ -1,12 +1,13 @@
 """Batched local search / repair of the children — the dispatcher (`repair.method`).
 
-    LocalSearch(bk, dp, cfg: RepairCfg, imp_tol, mem_budget_bytes, seed)
+    LocalSearch(bk, dp, cfg: RepairCfg, imp_tol, mem_budget_bytes, seed, row_scales=None)
         set_cutoff(inc_key)   arm / refresh / disarm the objective cutoff row (`objective_mode: cutoff_row`); the
                               engine calls it whenever the incumbent key improves (None = no incumbent yet)
-        run(X, should_stop=None) -> dict
+        run(X, should_stop=None, scale_idx=None) -> dict
                               improve every row of X (k, n) in place; returns counters. `should_stop()` (optional) is
                               polled between kernel launches / row slices / steps; when it returns True the search
-                              returns early (rows not reached stay as they were, rows in progress keep their last move)
+                              returns early (rows not reached stay as they were, rows in progress keep their last move).
+                              `scale_idx` (k,): each row's index into `row_scales` (None: index 0)
 
 Methods (vault `10-design/Feasibility jump local search.md`):
     "fj"     feasibility jump. On the CuPy backend: `ls_fj_gpu.FJGpu` (one thread block per individual). On NumPy:
@@ -22,6 +23,13 @@ interrupted, seconds} plus "method"; the implementation may add more (chunk, pea
 by `should_stop` count in `finished_budget` (so the three finish counters still add up to k) and in `interrupted`.
 Integer genes stay integral and inside their bounds in every row the search reached (a row skipped by a stop is left
 untouched).
+
+Row scales (the self-adaptive repair strategy, `StrategyCfg`). The row scale s_i of the search is `dp`'s own
+(`dp.viol_norm_vec` / `count_rows` / `viol_norm`) unless `row_scales` lists several: "fj" and "dense" then keep one row
+of divisors per scale (an (R, m_aug) table, `evaluate.row_scale_table`; everything else is shared — the scales differ
+only in s_i) and `run(X, scale_idx=...)` repairs individuals of every scale in ONE call, each with its own row. On the
+GPU that matters: the blocks of all scales run side by side, so the slowest individual's tail is paid once per call
+(`ls_fj_gpu` module docstring). "none" has no row scale and ignores both (`row_scales` = [None]).
 
 Continuous variables: the singleton columns are decoded in closed form by `continuous.SingletonDecoder`, which the
 ENGINE applies (cfg.continuous == "auto"); this dispatcher does not decode, so `run` keeps the invariant "a feasible
@@ -86,9 +94,11 @@ class LocalSearch:
     """Dispatches `cfg.method` to the implementation for this backend (see the module docstring)."""
 
     def __init__(self, bk: Backend, dp: DeviceProblem, cfg: RepairCfg, imp_tol: float = 1e-9,
-                 mem_budget_bytes: int = 256 << 20, seed: int = 0, **kw):
+                 mem_budget_bytes: int = 256 << 20, seed: int = 0, row_scales=None, **kw):
         self.bk, self.dp, self.cfg = bk, dp, cfg
         self.method = cfg.method
+        if cfg.method in ("fj", "dense") and row_scales is not None:
+            kw = dict(kw, row_scales=list(row_scales))
         if cfg.method == "fj":
             if bk.is_gpu:
                 try:
@@ -115,11 +125,15 @@ class LocalSearch:
             self.impl_name = "none"
         else:
             raise ValueError(f"unknown repair.method {cfg.method!r}")
+        self.row_scales = list(getattr(self.impl, "row_scales", [None]))
 
     def set_cutoff(self, inc_key: float | None) -> None:
         self.impl.set_cutoff(inc_key)
 
-    def run(self, X, should_stop=None) -> dict:
-        out = self.impl.run(X, should_stop=should_stop)
+    def run(self, X, should_stop=None, scale_idx=None) -> dict:
+        if self.method == "none":
+            out = self.impl.run(X, should_stop=should_stop)
+        else:
+            out = self.impl.run(X, should_stop=should_stop, scale_idx=scale_idx)
         out["method"] = self.impl_name
         return out

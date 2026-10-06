@@ -1,0 +1,16 @@
+# I-TREA II -- self-adaptive repair strategy (development, D-010; vault 10-design/I-TREA II algorithm.md,
+# "Self-adaptive repair strategy"). Feasibility probe 1 (2026-10-06, vault 30-results/Development log.md): the LP point
+# after t0 unlocks the UC case and sing44, rhs row scaling unlocks glass4 and fhnw-binpack4-48, and each hurts where the
+# other helps. Here every individual carries a strategy (repair row scale l2 | rhs) x (LP guidance off | on), inherited
+# from its first parent and redrawn with probability 0.1, every strategy keeping at least 5 % of the offspring; selection
+# decides per instance which one spreads. The survival's V stays on ranks.viol_norm (l2) for every individual.
+# seeding.lp_source highs_async: the EA alone (arm A5) also gets an LP point (HiGHS in a worker on the EA's core, after
+# t0); in a coupled run it replaces the solver's root LP as the EA's LP source.
+#
+# Partial file over the defaults (every key not listed keeps its default from src/itrea/config.py). Equivalent overrides:
+#   --set strategy.enabled=true seeding.lp_source=highs_async
+name: itrea2-adaptive
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async

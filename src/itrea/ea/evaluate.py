@@ -9,6 +9,11 @@ non-finite entry gets V = +inf and is never feasible.
 
 Feasibility here is the SEARCH test, in `eval_dtype`. Anything posted to a solver is re-checked on the CPU in float64
 (`Problem.check`), and reported results are re-checked by the independent exact checker.
+
+Row scale. `viol_norm` ("l2" | "rhs" | "count", `ranks.viol_norm`) is the per-row divisor of V and the default row
+scale of the local search. `row_scale_table(dp, scales)` gives the local search's divisors for several row scales at
+once — one row per scale — so the self-adaptive repair strategy (`StrategyCfg`) repairs individuals of different row
+scales in ONE call with a per-individual scale index; V itself is always evaluated on `dp`'s own scale.
 """
 from __future__ import annotations
 
@@ -50,6 +55,8 @@ class DeviceProblem:
     tol_mode: str = "scip"
     viol_norm_vec: object = None   # per-row divisor of the violation in V (l2 row norm or max(1,|rhs|))
     count_rows: bool = False       # viol_norm == "count": V counts violated rows
+    viol_norm: str | None = None   # "l2" | "rhs" | "count" — the mode behind viol_norm_vec / count_rows (None: unknown,
+                                   # the local search then infers l2 vs rhs from the vector, as before this field)
 
     @property
     def n(self) -> int:
@@ -78,8 +85,7 @@ def to_device(prob: Problem, bk: Backend, dtype: str = "float64", tol_mode: str 
 
     coo = prob.A.tocoo()
     order = np.lexsort((coo.col, coo.row))
-    rhs_scale = np.maximum(scale(prob.rl), scale(prob.ru))
-    vn = prob.row_norm if viol_norm == "l2" else rhs_scale
+    vn = row_scale_vector(prob, viol_norm)
     return DeviceProblem(
         bk=bk, prob=prob, dtype=dtype, A=bk.to_device_sparse(prob.A, dtype=dt),
         rl=dev(prob.rl), ru=dev(prob.ru), lb=dev(prob.lb), ub=dev(prob.ub), cmin=dev(prob.cmin, np.float64),
@@ -88,7 +94,60 @@ def to_device(prob: Problem, bk: Backend, dtype: str = "float64", tol_mode: str 
         scale_ub=dev(scale(prob.ub)), isint=xp.asarray(prob.isint), ints=xp.asarray(prob.ints),
         bins=xp.asarray(prob.bins), gints=xp.asarray(prob.gints), conts=xp.asarray(prob.conts),
         nz_row=xp.asarray(coo.row[order].astype(np.int32)), nz_col=xp.asarray(coo.col[order].astype(np.int32)),
-        nz_val=dev(coo.data[order]), tol_mode=tol_mode, viol_norm_vec=dev(vn), count_rows=(viol_norm == "count"))
+        nz_val=dev(coo.data[order]), tol_mode=tol_mode, viol_norm_vec=dev(vn), count_rows=(viol_norm == "count"),
+        viol_norm=viol_norm)
+
+
+ROW_SCALES = ("l2", "rhs", "count")
+
+
+def row_scale_vector(prob: Problem, mode: str) -> np.ndarray:
+    """Per-row divisor of a row's violation: the row 2-norm ("l2") or max(1, |rhs|) over its finite sides ("rhs" and,
+    as the stored vector, "count" — where V counts violated rows and the local search uses 1)."""
+    if mode not in ROW_SCALES:
+        raise ValueError(f"row scale must be one of {ROW_SCALES}, got {mode!r}")
+    if mode == "l2":
+        return np.asarray(prob.row_norm, dtype=np.float64)
+
+    def scale(v):
+        v = np.asarray(v, dtype=np.float64)
+        return np.where(np.isfinite(v), np.maximum(1.0, np.abs(v)), 1.0)
+
+    return np.maximum(scale(prob.rl), scale(prob.ru))
+
+
+def own_row_scale(dp: DeviceProblem) -> tuple[str, np.ndarray]:
+    """("l2" | "rhs" | "count", float64 (m,) divisor s_i) of `dp`'s own scale as the local search uses it: the vector
+    behind V read back from the device ("count": ones), the mode as recorded (`dp.viol_norm`) or, if unrecorded,
+    inferred from the vector."""
+    m = dp.prob.m
+    if dp.count_rows:
+        return "count", np.ones(m)
+    vn = np.asarray(dp.bk.asnumpy(dp.viol_norm_vec), dtype=np.float64).copy()
+    if dp.viol_norm in ("l2", "rhs"):
+        return dp.viol_norm, vn
+    return ("l2" if np.allclose(vn, dp.prob.row_norm) else "rhs"), vn
+
+
+def row_scale_table(dp: DeviceProblem, scales=None) -> tuple[list[str], np.ndarray]:
+    """(modes, (R, m) float64 C-contiguous): the local search's row divisors for each row scale in `scales` (default
+    and None: `dp`'s own scale only). `dp`'s own mode uses exactly `own_row_scale(dp)` (so a one-scale table is the
+    vector the search always used); another mode is `row_scale_vector` cast through the eval dtype like `dp`'s own
+    vector; "count" is 1 in every row."""
+    own, vec = own_row_scale(dp)
+    modes = [own] if scales is None else [str(s) for s in scales]
+    if not modes or len(set(modes)) != len(modes) or any(md not in ROW_SCALES for md in modes):
+        raise ValueError(f"row scales must be distinct values of {ROW_SCALES}, got {modes!r}")
+    m = dp.prob.m
+    tab = np.empty((len(modes), m), dtype=np.float64)
+    for r, md in enumerate(modes):
+        if md == own:
+            tab[r] = vec
+        elif md == "count":
+            tab[r] = 1.0
+        else:
+            tab[r] = row_scale_vector(dp.prob, md).astype(np.dtype(dp.dtype)).astype(np.float64)
+    return modes, tab
 
 
 @dataclass

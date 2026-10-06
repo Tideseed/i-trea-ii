@@ -1,9 +1,15 @@
 """Mutation on the device, batched over children: one operator per child, a few genes each.
 
-mutate(bk, dp, C, cfg, rng_dev, rng_host, lp_x=None, act=None, mem_budget_bytes=256 MiB, stats=None) -> origin
+mutate(bk, dp, C, cfg, rng_dev, rng_host, lp_x=None, act=None, mem_budget_bytes=256 MiB, stats=None,
+       lp_rows=None) -> origin
     C       (k, n) device array of children, mutated IN PLACE; its dtype (int8 / int32 / float64) is preserved.
     origin  (k,) host uint16: the ORIGIN_M_* bit of each child whose genes were changed by its operator (0 = none).
     lp_x    optional (n,) LP-relaxation point (host or device), canonical order — enables "toward_lp".
+    lp_rows optional (k,) bool: the children that may use the LP point (the self-adaptive repair strategy's LP
+            guidance). The others draw their operator from the weights WITHOUT "toward_lp" (renormalised; none left ->
+            "reset"), also when violation_guided re-draws them, so they never get ORIGIN_M_TOWARD_LP. None = every
+            child may (the call is then exactly the one without the argument). One call serves both kinds, so the
+            device sees one gather / scatter per operator however the children are split.
     act     optional (m, k) activities A C^T of the children as they are on entry — saves "violation_guided" an SpMM.
     stats   optional dict, filled with counters: children and genes per operator, violation_guided children that had
             no violated row (and were re-drawn).
@@ -309,8 +315,16 @@ def _normalise_integers(bk: Backend, dp: DeviceProblem, C, S: _Static, budget: i
 
 
 # ------------------------------------------------------------------------------------------------------ entry
+def _draw_ops(names_w: dict, size: int, rng_host: np.random.Generator) -> np.ndarray:
+    """`size` operator codes drawn by weight from {name: weight}."""
+    names = list(names_w)
+    w = np.array([names_w[o] for o in names])
+    return np.array([OPERATORS.index(o) for o in names])[rng_host.choice(len(names), size=size, p=w / w.sum())]
+
+
 def mutate(bk: Backend, dp: DeviceProblem, C, cfg: MutationCfg, rng_dev, rng_host: np.random.Generator,
-           lp_x=None, act=None, mem_budget_bytes: int = DEFAULT_MEM_BUDGET, stats: dict | None = None) -> np.ndarray:
+           lp_x=None, act=None, mem_budget_bytes: int = DEFAULT_MEM_BUDGET, stats: dict | None = None,
+           lp_rows=None) -> np.ndarray:
     """Mutate the children C in place; returns their ORIGIN_M_* bits. See the module docstring."""
     xp = bk.xp
     if C.ndim != 2 or C.shape[1] != dp.n:
@@ -328,10 +342,29 @@ def mutate(bk: Backend, dp: DeviceProblem, C, cfg: MutationCfg, rng_dev, rng_hos
     if sum(weights.values()) <= 0:
         weights = {"reset": 1.0} if "reset" in avail else {}
     ops = np.full(k, -1, dtype=np.int64)                               # -1: no operator (nothing applicable)
-    if weights:
+    no_lp = None                                                       # (k,) bool: children barred from toward_lp
+    if lp_rows is not None and weights.get("toward_lp", 0.0) > 0:
+        lp_rows = np.asarray(lp_rows, dtype=bool).reshape(-1)
+        if lp_rows.shape[0] != k:
+            raise ValueError(f"mutate: lp_rows has {lp_rows.shape[0]} entries for {k} children")
+        if not lp_rows.all():
+            no_lp = ~lp_rows
+
+    def without_lp(wd: dict) -> dict:
+        out = {o: wt for o, wt in wd.items() if o != "toward_lp" and wt > 0}
+        return out if out else ({"reset": 1.0} if "reset" in avail else {})
+
+    if weights and no_lp is None:
         names = list(weights)
         w = np.array([weights[o] for o in names])
         ops = np.array([OPERATORS.index(o) for o in names])[rng_host.choice(len(names), size=k, p=w / w.sum())]
+    elif weights:
+        on, off = np.flatnonzero(~no_lp), np.flatnonzero(no_lp)
+        if on.size:
+            ops[on] = _draw_ops(weights, on.size, rng_host)
+        w_off = without_lp(weights)
+        if off.size and w_off:
+            ops[off] = _draw_ops(w_off, off.size, rng_host)
     # genes per child
     if cfg.rate is not None:
         G = rng_host.binomial(S.n_ints if S.n_ints else S.n, cfg.rate, size=k)
@@ -359,13 +392,21 @@ def mutate(bk: Backend, dp: DeviceProblem, C, cfg: MutationCfg, rng_dev, rng_hos
                 others = {o: wt for o, wt in weights.items() if o != op and wt > 0}
                 if not others and "reset" in avail:
                     others = {"reset": 1.0}
-                if others:
-                    nm = list(others)
-                    p = np.array([others[o] for o in nm])
-                    ops[no_viol] = np.array([OPERATORS.index(o) for o in nm])[
-                        rng_host.choice(len(nm), size=no_viol.size, p=p / p.sum())]
-                else:
-                    ops[no_viol] = -1
+                if no_lp is None:
+                    redraw = [(no_viol, others)]
+                else:                                                   # LP-barred children: never toward_lp
+                    barred = no_lp[no_viol]
+                    redraw = [(no_viol[~barred], others), (no_viol[barred], without_lp(others))]
+                for rows, oth in redraw:
+                    if rows.size == 0:
+                        continue
+                    if oth:
+                        nm = list(oth)
+                        p = np.array([oth[o] for o in nm])
+                        ops[rows] = np.array([OPERATORS.index(o) for o in nm])[
+                            rng_host.choice(len(nm), size=rows.size, p=p / p.sum())]
+                    else:
+                        ops[rows] = -1
             x = _gather(bk, C, cc, jj)
             valid_var = S.isint[jj] & S.movable[jj] & (direction != 0)
             t, valid = _targets(op, x, jj, S, cfg, rng_host, direction=direction)

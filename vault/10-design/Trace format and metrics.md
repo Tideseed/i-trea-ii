@@ -55,8 +55,8 @@ listed ones.
 | `verdict` | solvers receiving posts (SCIP, HiGHS) | `seq`, `obj` (as posted), `accepted`, `row`, `stored`, `primal_before`, `primal_after`, `dup`, plus per solver — **SCIP:** `accepted` = SCIP's own `checkSol` found the row feasible; `stored` = `trySol` kept it (it may still not be the incumbent); `feasible`, `nonfinite`, `obj_solver` (SCIP's objective of the row), `improved` (the primal value moved). **HiGHS:** `outcome` ∈ `primal_bound` (the next callback's primal bound shows it was taken), `solution_callback` (it came back through `cbMipSolution`), `dropped` (outside HiGHS' absolute tolerance, or not taken), `not_improving` (not tried: no better than HiGHS' incumbent), `duplicate_in_flight` (not tried); `tried`; `stored` = accepted **and** tried. So a HiGHS verdict can be `accepted: true, tried: false` |
 | `lp` | SCIP (`--send`) | the root LP solution was posted to the EA: `obj` (once per run; a non-optimal root LP is a `note` instead) |
 | `lp` | EA | an LP point arrived: `source` (`solver` or `highs_async`), `state` (`done`, `bad_point`, `no_solution`, `failed`, `stopped`), `obj`, `immigrants` (LP-rounded individuals queued), `wall_seconds` (`highs_async`), `error` |
-| `gen` | EA, every `log_every` generations and at the end | `gen`, `best_key`, `median_key`, `feas_share`, `n0`, `n1`, `n2`, `pop`, `inc`, `inc_external` (the solver's incumbent key known to the EA), `dual_key`, `rank0_candidates`, `rank0_demoted`, `rank0_over_quota`, `superopt_survivors` (manipulation check: infeasible survivors with key < inc; must be ≤ ⌊x·P⌋), `shortfall`, `children_per_s`, `gpu_mem_mb`, `gpu_pool_mb`, `feasibility_phase`, `seconds` (per phase, CUDA events on the GPU), `ls_moves`, `oom_retries`, `best_viol` (feasibility phase) |
-| `best` | EA | a new population best (an incumbent; during the feasibility phase a lower total violation): `key`, `obj`, `feasible`, `rank`, `origin` (bits), `ops` (their names), `anc_rank`, `anc_ops`, `parents`, `id`, `birth`, `V`, `gen` |
+| `gen` | EA, every `log_every` generations and at the end | `gen`, `best_key`, `median_key`, `feas_share`, `n0`, `n1`, `n2`, `pop`, `inc`, `inc_external` (the solver's incumbent key known to the EA), `dual_key`, `rank0_candidates`, `rank0_demoted`, `rank0_over_quota`, `superopt_survivors` (manipulation check: infeasible survivors with key < inc; must be ≤ ⌊x·P⌋), `shortfall`, `children_per_s`, `gpu_mem_mb`, `gpu_pool_mb`, `feasibility_phase`, `seconds` (per phase, CUDA events on the GPU), `ls_moves`, `oom_retries`, `best_viol` (feasibility phase); with `strategy.enabled` (self-adaptive repair strategy) also `strat_pop` (survivors per strategy), `strat_best` (credited `best` events per strategy since the previous `gen` event — solver finds excluded, see `strat_credited`), `strat_children` (children per strategy since the previous `gen` event) — lists indexed like the summary's `strategy.names` |
+| `best` | EA | a new population best (an incumbent; during the feasibility phase a lower total violation): `key`, `obj`, `feasible`, `rank`, `origin` (bits), `ops` (their names), `anc_rank`, `anc_ops`, `parents`, `id`, `birth`, `V`, `gen`; with `strategy.enabled` also `strat` (its repair strategy) and `strat_credited` (false for a solver solution — injected, no EA operator bit — which is counted under `best_events_solver`, not credited to `strat`) |
 | `frontier` | EA, every `frontier.update_every` generations | `gen`, `size`, `best_key`, `worst_key`, `max_dist`, `mean_dist_to_inc`, `mean_pairwise`, `hv` |
 | `callback` | SCIP, HiGHS (not with `--no-plugin`) | `what`: `first` (SCIP adds `stage`, `timing`), `first_solving` (**SCIP only**: the first callback in the SOLVING stage, `timing`), `summary` at the end: `calls`, `calls_by_timing`, `t_first_callback`, `t_first_solving_callback`, `max_gap_s` (longest stretch without a callback, tail included), `callbacks_per_s`, `record_s`. The "no exchange window" subgroup (first SOLVING-stage callback after T/2) is therefore defined for SCIP only |
 | `note` | all | `msg` (anything else: float64 re-check failures and demotions, injected rows infeasible under the EA's test, OOM retries with the halved budget, stagnation immigrants, stop seen, plugin/callback errors, a non-optimal root LP) |
@@ -78,7 +78,8 @@ Common: `n_incumbents` (solvers; the EA counts them in `n_incumbents` below), `f
 `store_errors` (a side file that could not be written; the summary itself always exists).
 
 **Counters (EA, top level of the summary):** `generations`, `children`, `evaluations`, `evaluations_per_s`,
-`ls_moves`, `ls_moves_per_s`, `ls_calls`, and the search's own counters `ls_local_minima`, `ls_finished_feasible`,
+`ls_moves`, `ls_moves_per_s`, `ls_calls` (local-search calls: one per repair — children, initial population, immigrant
+batch, LP batch — whatever the number of row scales), and the search's own counters `ls_local_minima`, `ls_finished_feasible`,
 `ls_finished_stall`, `ls_finished_budget`, `n_incumbents` (new EA incumbents),
 `posts`, `posts_frontier`, `false_feasible` (float64 re-check failures), `inject_msgs`, `inject_rows`, `echoes`,
 `injected`, `injected_infeasible` (injected rows infeasible under the EA's own test), `injected_dup` (an injected vector
@@ -87,6 +88,17 @@ posted individual), `demoted`, `oom_retries` (an out-of-memory error halved a ph
 `stagnation_events`, `immigrants_admitted`, `immigrants_dropped`, `lp_immigrants`; plus `feasible_found`, `best_key`,
 `final_n0/_n1/_n2`, `final_pop`, `inc_external`, `dual_key`, `lp` (state of the LP point), `peak_gpu_used_mb`,
 `peak_gpu_pool_mb`, `exchange_from_solver`, `exchange_to_solver`, `genealogy_rows`, `outputs` (paths of the npz files).
+With `strategy.enabled` the EA summary adds `strategy`: `names` (`<row scale>/lp|nolp`, index = the strategy number),
+`row_scale`, `lp_guidance`, `final_pop`, and per strategy (lists) `children`, `best_events` and `incumbents` (new
+population bests / incumbents CREDITED to the strategy), `best_events_solver` and `incumbents_solver` (the same for
+solver solutions — injected rows carrying no EA operator bit, the incumbent's source "solver" — listed under the
+strategy their row was given but NOT credited to it: a solver find says nothing about the strategy; so
+`incumbents + incumbents_solver` summed over strategies = `n_incumbents`), `repaired` (rows given to the local search),
+`repaired_feasible` (rows the search finished feasible; always 0 under `repair.method: none`, which reports no per-row
+status), `immigrants` (incl. the LP-rounded batch); plus `strategy_redrawn` (children whose strategy was redrawn) and
+`strategy_reassigned` (children moved by the `min_share` floor). The start-up record (`startup`) then lists
+`strategies`, `local_search_row_scales` (the search's row-scale table, in strategy order; `[null]` under `none`) and
+`local_search_static_bytes`.
 **Counters (solver, `exchange`):** `seconds` (perf-counter time in exchange code on the solver's core), `bytes_in`,
 `bytes_out` (logical float64 payload; the Redis transport may move fewer bytes), `polls`, `msgs_in`, `seq_superseded`
 (posts replaced before this process polled), `rows_in`, `rows_tried`, `rows_dup`, `rows_nonfinite`, SCIP
@@ -109,7 +121,12 @@ seeds, immigrants and injected vectors that entered):
 parents' ranks **at mating**; −1 for seeds, immigrants and injected vectors), `origin` uint16 (`ORIGIN_*` bits, OR-merged
 over exact duplicates, also after entry), `birth` int32 (generation), `key` float64, `V` float64 (total violation at
 entry), `feasible` bool (at entry), `t_first` float64 (seconds since `t0` when the vector was made or received),
-`is_new_best` bool (it became a new population best), `is_accepted_post` bool (the solver accepted it when posted).
+`is_new_best` bool (it became a new population best), `is_accepted_post` bool (the solver accepted it when posted),
+`strat` uint8 (its repair strategy, an index into the summary's `strategy.names`; 0 while `strategy.enabled` is false —
+added 2026-10-06, older genealogy files lack the column). Because `origin` is OR-merged over exact duplicates, a row
+whose strategy has no LP guidance can carry `ORIGIN_M_TOWARD_LP` (a duplicate made by an LP-guided child; no no-LP child
+ever makes that bit itself): an analysis of LP guidance must key on `strat` (or the `best` event's `strat`), never on
+the origin bits.
 The two flags are written explicitly so the lineage analysis does not derive them. About 40 bytes per row, well under
 50 MB for a 300 s run. The OR-accumulated ancestry bit masks in `ea.population` are kept only as an online summary: they
 saturate within a few generations (critique, algorithm lens).
