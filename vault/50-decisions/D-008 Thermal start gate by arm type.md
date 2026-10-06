@@ -25,3 +25,12 @@ change (started below 80 °C) and after it are comparable on that evidence.
 
 **Mechanics.** `gates.THERMAL_WAIT_C_CPU = 88.0`; `pool._arm_uses_gpu(job)` picks the threshold. The stage-1 pool was
 stopped (SIGTERM; its in-flight blocks were voided and requeued) and restarted on the committed change.
+
+## Addendum 2026-10-06 05:00 — two hours of evidence
+- 02:59–05:00, 8 lanes, CPU start gate 88 °C: 213 runs completed, **0 failed**; the box sat at **89–91 °C**
+  (thermal-watch, 30 s) and touched **92.0 °C twice** (pool watchdog, 5 s) — pauses ended 03:32 and 04:52, each
+  voiding the 8 in-flight blocks (16 runs, requeued and rerun in the same pass).
+- X925 clocks at 05:00 (≈ 90 °C): 3.9 GHz on all 8 lanes — the measurement is unaffected; the cost is only the voided
+  lane time (~1 pause per hour ≈ 8 runs).
+- Not changed mid-pass (a restart voids the 8 in-flight runs, the same as one more pause). **For the next CPU-only
+  window:** 7 lanes, or a CPU start gate of 86 °C, to keep the box below the 92 °C pause; decide on the stage-1 tail data.
