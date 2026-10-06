@@ -87,6 +87,14 @@ REGISTERED_HARNESS = {
 }
 
 
+
+def _arm_uses_gpu(job: dict) -> bool:
+    """True if the job's arm starts a process on the GPU (EA on CuPy, cuOpt) — those keep the 80 °C start gate."""
+    try:
+        return bool(pair.ARMS[str(job.get("arm"))].gpu)
+    except KeyError:
+        return True                                   # unknown arm: the stricter gate
+
 class PoolError(RuntimeError):
     pass
 
@@ -350,7 +358,8 @@ class PoolOptions:
     status_file: Path | None = None        # default logs/pool-status.json
     stop_file: Path | None = None          # default logs/pool.stop: touch it to stop before the next block
     lock_path: Path = Path("/tmp/itrea-runner.lock")
-    thermal_start_c: float = gates.THERMAL_WAIT_C
+    thermal_start_c: float = gates.THERMAL_WAIT_C          # GPU arms (any process on the GPU)
+    thermal_start_c_cpu: float = gates.THERMAL_WAIT_C_CPU  # CPU-only arms (D-008)
     thermal_timeout_s: float = 3600.0
     thermal_poll_s: float = 30.0
     mem_wait_s: float = 1800.0
@@ -788,11 +797,12 @@ class Pool:
                 return ("halt", str(e))
             now = time.monotonic()
             t = gates.acpi_max_c()
-            if t is not None and t >= o.thermal_start_c:
+            start_c = o.thermal_start_c if _arm_uses_gpu(r.job) else o.thermal_start_c_cpu
+            if t is not None and t >= start_c:
                 t_end = t_end or now + o.thermal_timeout_s
                 if now > t_end:
                     return ("halt", f"thermal gate: still {t:.1f} °C after {o.thermal_timeout_s:.0f} s")
-                wait_log(f"thermal gate: {t:.1f} °C >= {o.thermal_start_c:.0f} °C, waiting")
+                wait_log(f"thermal gate: {t:.1f} °C >= {start_c:.0f} °C, waiting")
                 self.abort.wait(min(o.thermal_poll_s, 10.0))
                 continue
             t_end = None
@@ -990,7 +1000,7 @@ class Pool:
                    e0_concurrent=e0_concurrent(o.root), mailbox=po.mailbox, use_systemd=po.use_systemd,
                    memory_max_gb=dict(solver=po.solver_mem_gb, ea=po.ea_mem_gb, cuopt=po.cuopt_mem_gb),
                    gpu_mem_gb=po.gpu_mem_gb, reserve_gb=po.reserve_gb, freeze=getattr(self, "freeze", None),
-                   thermal_start_c=o.thermal_start_c, gates=gates.snapshot(), env=record_env.record(),
+                   thermal_start_c=o.thermal_start_c, thermal_start_c_cpu=o.thermal_start_c_cpu, gates=gates.snapshot(), env=record_env.record(),
                    jobs=len(self.jobs), blocks=len(self.blocks), order_seed=o.order_seed)
         d = Path(po.traces_dir) / "resources"
         try:

@@ -32,6 +32,9 @@ GPU_OVERHEAD_GB = 1.0      # non-pool GPU memory per CUDA process (context, cuSP
 REDIS_CAP_GB = 2.0         # the itrea-redis container's memory cap (D-006)
 WATCHDOG_FLOOR_GB = 18.0   # live: below this, stop the run set
 THERMAL_WAIT_C = 80.0      # do not START a run at or above this (D-003: start only below 80 °C)
+THERMAL_WAIT_C_CPU = 88.0  # CPU-only runs (no GPU process) may start below this (D-008: the X925 cores ran at their full
+                           # 3.9 GHz at 88–89 °C with 8 SCIP lanes, 2026-10-06 02:54; the 80 °C start rule protects the
+                           # GPU arms' clock state and only idled CPU lanes). Pause/resume (92/80 °C) are unchanged.
 THERMAL_PAUSE_C = 92.0     # pause the run set at or above this ...
 THERMAL_RESUME_C = 80.0    # ... until below this
 SERVING_UNITS = ("ornith-vllm", "llama-qwen38")

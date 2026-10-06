@@ -259,7 +259,7 @@ def test_lease_expiring_during_a_thermal_wait_halts_before_launch(tmp_path, monk
     calls: list = []
     run_pair, _ = _stub_run_pair(0.1, calls)
     monkeypatch.setattr(pair, "run_pair", run_pair)
-    o = poolopts(tmp_path, require_lease=True, thermal_start_c=80.0, thermal_poll_s=0.1, est_overhead_s=0.0,
+    o = poolopts(tmp_path, require_lease=True, thermal_start_c=80.0, thermal_start_c_cpu=80.0, thermal_poll_s=0.1, est_overhead_s=0.0,
                  open_margin_s=0.0)
     p = pool.Pool(_jobs(_toys(tmp_path, 1), ["A0"]), o)
     assert p.run() == 3 and "lease" in p.halt_reason
@@ -636,3 +636,14 @@ def test_screen2_from_the_run_table(tmp_path, monkeypatch):
     bad = tmp_path / "bad.csv"
     bad.write_text("name,pt_screen\na1,0.5\n")
     assert mj.main(["screen2", "--results", str(bad), "--data", str(data), "--out", str(out)]) == 2
+
+
+def test_thermal_start_gate_depends_on_gpu_use():
+    """D-008: CPU-only arms start below 88 °C, GPU arms below 80 °C."""
+    from itrea.experiments import gates, pool
+    assert gates.THERMAL_WAIT_C == 80.0 and gates.THERMAL_WAIT_C_CPU == 88.0
+    assert pool._arm_uses_gpu({"arm": "SCREEN"}) is False
+    assert pool._arm_uses_gpu({"arm": "A0"}) is False
+    assert pool._arm_uses_gpu({"arm": "A3"}) is True
+    assert pool._arm_uses_gpu({"arm": "A2"}) is True
+    assert pool._arm_uses_gpu({"arm": "nope"}) is True
