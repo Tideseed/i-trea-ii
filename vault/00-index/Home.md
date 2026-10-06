@@ -10,11 +10,11 @@ Successor of Berk Orbay's master's research I-TREA (Orbay 2011, METU M.S. thesis
 manuscript — the starting point and the idea of keeping good infeasible solutions) and of the optopt study
 (`berkorbay/optopt`, whose CPU version of this idea found no gain at 60 s — see [[Research question and spec]]).
 
-**State (2026-10-06):** built and tested on toy models; no commit, no tag, no experiment. Read the newest checkpoint.
+**State (2026-10-06 17:00):** development on the 9-instance dev set (D-010), judged on the coupled arm (D-011). Read the newest checkpoint.
 
 | start here | |
 |---|---|
-| `90-checkpoints/` | session checkpoints — **read the newest first** ([[2026-10-06-0200]]) |
+| `90-checkpoints/` | session checkpoints — **read the newest first** ([[2026-10-06-1700]]) |
 | [[Research question and spec]] | Berk's brief and main claim, the predecessor's null result, the three ranks from I-TREA (2015) to I-TREA II |
 | [[D-002 Pre-registration — hypotheses, arms, analysis]] | v3: primary H1a (A3 < A0, SCIP alone) **and** H1b (A3 < A5, EA alone); secondary H2 (uncoupled portfolio, live A3r), H3 (SCIP ‖ cuOpt), H4 (SCIP ‖ SCIP), H5 (tuned SCIP); mechanism H6 (A5 vs A5x0); exploratory A4, A5y0, A6; metrics, tests, phases — written before any run |
 | [[I-TREA II algorithm]] | the algorithm, every parameter |
