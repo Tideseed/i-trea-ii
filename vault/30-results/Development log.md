@@ -122,3 +122,17 @@ waiting for SCIP's root LP) and (3) the longer repair budget.
   is not found here: the rhs strategies die out there (final population 9 and 8 of 256).
 **Next:** separate the three: `lp1` = coupled default + `seeding.lp_source: highs_async` only (one variable), after the
 LP-stream runs (`lps1` vs `ad1` isolates the stream).
+
+## Aggregation probe (2026-10-06 16:1x) — CPU only, not wired into the EA
+`src/itrea/ea/aggregate.py` substitutes two-variable equality rows (equal magnitudes; integrality kept) exactly:
+x_v = ±y_root + o. On the dev set: radiationm18-12-05 40,623 → 14,919 variables (rows 40,935 → 15,231); rail01
+117,527 → 96,736 (rows 46,843 → 26,052); sing44 59,708 → 57,448; ca__Scenario400 305,712 → 305,328 (32,160 two-variable
+equalities with unequal coefficients refused); glass4, fhnw, loue: nothing. SCIP's and cuOpt's solutions of radiationm,
+rail01, sing44 and ca project to feasible reduced points and lift back exactly (same objective).
+Payoff test (`tools/agg_probe.py`, the CPU feasibility jump with the c01 budget from the same LP roundings,
+radiationm18-12-05, 32 children): original 0/32 feasible, median V 127; aggregated 0/32, median V 88; aggregated with
+10× the budget 0/16, median V 42. The rows still violated on the aggregated model are 154 equality rows over ≥ 9
+general integers (exact sums), 76 rows over continuous variables and a few 3-variable integer equalities — not the
+chains. **Verdict: not wired in.** The chains are not radiationm's blocker; exact integer sums are (an LP-guided
+rounding with propagation is the candidate — what cuOpt's 0.8 s first solution suggests). The module stays, tested
+(`tests/test_aggregate.py`), for rail01-type instances if a later probe shows the chains matter there.
