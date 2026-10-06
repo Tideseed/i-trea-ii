@@ -136,3 +136,35 @@ general integers (exact sums), 76 rows over continuous variables and a few 3-var
 chains. **Verdict: not wired in.** The chains are not radiationm's blocker; exact integer sums are (an LP-guided
 rounding with propagation is the candidate — what cuOpt's 0.8 s first solution suggests). The module stays, tested
 (`tests/test_aggregate.py`), for rail01-type instances if a later probe shows the chains matter there.
+
+## LP stream (2026-10-06 16:03–16:35) — A3@lps1 vs A3@ad1, 9 instances × seeds 0–1, 120 s
+`lps1` = `ad1` + `lp_stream.enabled` (effective hash `4a96b872ffdc`, commit c192bb5) — one variable against `ad1`.
+P(120), seeds averaged:
+
+| instance | SCIP alone | coupled default | coupled adaptive (ad1) | **+ LP stream (lps1)** | cuOpt alone |
+|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 1.000 | 1.000 | 0.296 | 0.297 | 0.645 |
+| fhnw-binpack4-48 | 1.000 | 1.000 | 1.000 | **0.651** (s0 0.302, s1 1.000) | 0.005 |
+| glass4 | 0.344 | 0.247 | 0.241 | 0.228 | 0.308 |
+| item_placement_9903 | 0.660 | 0.400 | 0.522 | 0.569 | 0.666 |
+| neos-3024952-loue | 1.000 | 0.344 | 0.441 | 0.369 (s0 0.478 → 0.332) | 0.760 |
+| neos-960392 | 1.000 | 0.042 | 0.032 | 0.032 | 0.571 |
+| radiationm18-12-05 | 0.229 | 0.237 | 0.235 | 0.234 | 0.009 |
+| rail01 | 1.000 | 1.000 | 1.000 | 1.000 | 0.927 |
+| sing44 | 0.525 | 0.651 | 0.361 | 0.362 | 0.726 |
+
+Mean bounded d of lps1: vs ad1 **+0.05** (3 better: fhnw, loue, glass4; 1 worse: item_placement −0.08); vs SCIP alone
+**+0.38** (7 better, 0 worse, radiationm −0.02 ≈ equal, rail01 equal); vs cuOpt alone +0.10 (6 better, 3 worse: fhnw,
+radiationm, rail01). Hygiene: 18/18 completed, every incumbent checked, GPU health ok.
+
+**Stream counters.** SCIP spent ≤ 0.7 s of 120 s on the stream except radiationm (2.43 s — the bucket's ceiling, 174
+reads). No node LP exists on ca, rail01 (root LP never finishes), and only 1–2 / 10–11 on neos-960392 / sing44 (SCIP
+stays at the root), so the stream cannot act there. The EA took 16–384 points per run; on glass4/fhnw/loue it **missed
+95–358 ids** between two polls (SCIP posts every 0.25 s, the EA reads once per exchange tick — the reads were paid for
+nothing) and dropped 17–29 unused ones. Stream-born members rarely sit in Rank 0 at the end (0–11).
+**Attribution — weak.** fhnw seed 0's optimum (objective 0, at 36.2 s; SCIP accepted it at 36.4 s) came from an EA
+child (uniform crossover + toward_lp mutation + repair, strategy l2/lp) whose ancestry over three generations shows LP
+immigrants but no stream-born member; seed 1 found nothing. The +0.05 is a two-seed, three-instance signal — the stream
+is kept on (cheap, never harmful by more than item_placement's −0.08) but not yet credited.
+**Next for the stream:** match SCIP's read rate to the EA's poll rate (missed ids are wasted SCIP time), then judge it
+on more seeds once the feasibility work (below) is in.
