@@ -70,3 +70,10 @@ bound, and receives the EA's better incumbents as new starting points.
 ## Out of scope (for now)
 Learned control (Laya, LLM agents) of the EA — optopt measured those; revisit only once the EA itself adds value.
 Proving optimality — the EA works on the primal side only; dual-side effects come from the solver.
+
+## Berk's aims, restated (2026-10-06 evening)
+"We are head to head with cuOpt which is developed by some of the best minds out there. Our aim is to make hardest
+problems easier so time to first solution is not primary objective; we don't expect to solve simple problems a few
+seconds faster at all. Once we practice enough we can go for the larger set of seeds and problems." Earlier the same
+day: "being better in a subset of problems is still a strong win." → the primal integral on hard instances is the
+measure; a split against cuOpt is a strong position; scale after practice. See [[Roadmap]].
