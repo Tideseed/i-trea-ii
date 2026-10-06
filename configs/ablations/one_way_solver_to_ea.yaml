@@ -1,0 +1,10 @@
+# Ablation one_way_solver_to_ea -- the solver's incumbent, very good solutions, dual bound and root LP flow into the
+# EA; the EA posts nothing back. Exploratory A3 ablation (exchange direction, D-002 v3 §5).
+# Matching solver flags: the solver process runs with --send and WITHOUT --recv (the heuristic plugin stays installed
+# and inert, as in every SCIP arm).
+# Partial file over the defaults. On the frozen configuration:
+#   --set exchange.to_solver=false exchange.post_frontier=false
+name: ablation-one-way-solver-to-ea
+exchange:
+  to_solver: false
+  post_frontier: false

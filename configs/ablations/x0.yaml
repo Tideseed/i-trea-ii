@@ -1,0 +1,7 @@
+# Ablation x0 -- no Rank 0 (no reserved share for infeasible solutions better than the best feasible one).
+# Mechanism hypothesis H6 (vault D-002 v3): the EA alone with x = 10 % (A5) vs x = 0 (A5x0), on the EA's own P(300).
+# With x = 0 every infeasible candidate whose key beats the incumbent is eliminated (the quota is a total cap).
+# Partial file over the defaults. On the frozen configuration apply the same change as an override:  --set ranks.x=0
+name: ablation-x0
+ranks:
+  x: 0.0

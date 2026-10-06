@@ -1,0 +1,58 @@
+# Datasets
+
+Public instance sets only, all already on disk. **No downloads** — instances, wheels, models or anything else — without
+Berk's explicit ask (host rule; the Wi-Fi link makes each download a cost to him). Customer data (customer) never
+enters this project.
+
+## Where the instances are
+`data/` in the repository is **not in git** (`.gitignore`). On the author's machine it holds three symbolic links into
+the predecessor's checkout, so the two studies read byte-identical files:
+
+| link | target | contents |
+|---|---|---|
+| `data/miplib` | `~/git_repositories/optopt/data/miplib` | `inst/` (240 `.mps.gz`), `solu.txt` (`miplib2017-v33.solu`), `benchmark.zip`, `tag_benchmark.html`, `collection.csv`, `selected.json` (optopt's 80) |
+| `data/pglib_uc` | `~/git_repositories/optopt/data/pglib_uc` | `mps/` (56 `.mps.gz`), `repo/` (the PGLib-UC JSON cases, `uc_model.py`, MODEL.pdf), `build.log` |
+| `data/ml4co` | `~/git_repositories/optopt/data/ml4co` | `instances/1_item_placement/{train,valid}`, `instances/2_load_balancing/{train,valid}` (`.mps.gz` + `.json`) |
+
+`$ITREA_DATA` overrides the location (`itrea.paths.DATA`). Job files and traces store instance paths relative to the
+repository root (`data/miplib/inst/air05.mps.gz`), so a clone with its own `data/` runs unchanged. To recreate the
+links: `ln -s ~/git_repositories/optopt/data/{miplib,ml4co,pglib_uc} data/`. On a machine without optopt, the sources
+below are the public origins (optopt's `optopt fetch` reproduces them).
+
+## Families
+| family | public source | on disk | used here |
+|---|---|---|---|
+| **MIPLIB 2017 benchmark** (Gleixner et al. 2021) | miplib.zib.de, `benchmark.zip`, `miplib2017-v33.solu`, `tag_benchmark.html` | 240 instances, 609 MB | all except the 7 infeasible ones and `supportcase22` are screening candidates ([[Hard instance pool]]); `supportcase22` (open, 2.2 M non-zeros) only in E5 |
+| **PGLib-UC** (power-grid-lib/pglib-uc) | GitHub, 56 JSON cases, converted to MPS with the benchmark's own `uc_model.py` formulation (Knueven, Ostrowski and Watson 2020) | 56 MPS: `ca` 20, `ferc` 24, `rts_gmlc` 12; 482 MB | `ca` and `rts_gmlc` screened; `rts_gmlc` held out of tuning; `ferc` exploratory only |
+| **ML4CO item placement** (Gasse et al. 2022) | ds4dm/ml4co-competition `instances.tar.gz` | train 9,900 + valid 100 instances | 60 screening candidates: `item_placement_9900`–`9924` (the 25 validation instances optopt used) and train `item_placement_0`–`34` |
+| ML4CO load balancing | same archive | train + valid | not used: easy for every solver in optopt; quota 0 |
+
+## Facts that matter for the study
+- **Infeasible MIPLIB instances on disk** (`=inf=` in `solu.txt`): `bnatt500`, `cryptanalysiskb128n5obj14`,
+  `fhnw-binpack4-4`, `neos-2075418-temuka`, `neos-3402454-bohle`, `neos-3988577-wolgan`, `neos859080`. Excluded.
+- **References.** MIPLIB: the `.solu` value (`=opt=` or `=best=`). PGLib-UC and ML4CO have no published optima here:
+  the reference is the best of the screening runs and dedicated reference runs (SCIP 1 h × 2 seeds), frozen in
+  `datasets/reference.csv` before E2 (D-002 §4). optopt's references for these sets were best-of-6 runs at 30–60 s and
+  are not reused.
+- **P-degenerate MIPLIB instances** (reference 0, so Berthold's gap is 1 for any other value): e.g.
+  `academictimetablesmall`, `cbs-cta`, `cryptanalysiskb128n5obj16`, `neos-3004026-krka`, `ns1116954`, `ns1952667`
+  (critique, methodology lens); the screening flags every case, including sign crossings.
+- **Sizes that stress the GPU budget** (optopt features): `s100` (14,733 rows, 364,418 binaries, 1.78 M non-zeros),
+  PGLib-UC `ferc` (n up to 485,233, 52–59 % continuous), `supportcase22` (2.2 M non-zeros). Genes are stored as int8 for
+  pure-binary problems (s100 at P = 256: 93 MB instead of 746 MB as float64).
+- **Continuous variables.** PGLib-UC is 52–59 % continuous with equality-coupled power balance; markshare-type
+  instances have singleton slack columns. `repair.continuous: auto` decodes singleton continuous columns in closed form
+  ([[Feasibility jump local search]]).
+- **Generators.** ML4CO item placement comes from one generator and PGLib-UC from three base systems, so a within-family
+  split tests only seen-family generalisation; `rts_gmlc` is held out of tuning for an unseen-family check.
+
+## Derived tables (`datasets/`, committed)
+| file | what | status |
+|---|---|---|
+| `hardness_from_optopt.csv` | 386 instances: P(60)/P(300) from optopt's grid (strategies H0 H1 S0 S1 C0 C1, one seed), provenance `optopt@4dd48395` | background only — **never** a selection criterion (it mixes cuOpt into "best") |
+| `hard_pool.csv` | the frozen pool, strata, split, flags | after screening (tag `pool-v1`) |
+| `reference.csv` | frozen reference values with their source | before E2 |
+| per-experiment results | one table per experiment, written by `itrea.analysis` | after each experiment |
+
+Raw traces (`traces/raw/`) and stored solutions are regenerated by the jobs and are not committed; resource records
+(`traces/resources/`) are. A versioned archive of the raw traces will be published with the paper, as in optopt.

@@ -1,0 +1,43 @@
+\section{Introduction}\label{sec:intro}
+Planners and schedulers who use MIP solvers rarely wait for a proof of optimality; they need a good feasible solution
+within a fixed time. How soon a solver finds one is measured by the primal integral $P(T)$~\citep{berthold2013primal},
+the gap to the best known value averaged over the time budget $T$, which rewards finding good solutions early.
+
+GPUs now sit beside CPU solvers on small machines, and they suit population search: many candidate solutions can be
+evaluated and repaired at once. NVIDIA cuOpt already runs a GPU population of solutions with recombination and local
+search beside its own branch-and-bound~\citep{corduk2025gpuprimal,corduk2025evoframework,nvidia2026cuoptsrc}. In an
+earlier study on the same machine, simply running cuOpt beside HiGHS or SCIP lowered the primal integral by 21--30\,\%
+at 60\,s, while a CPU evolutionary algorithm exchanging solutions with SCIP gave no measurable gain and lost to a second
+copy of SCIP~\citep{orbay2026optopt}.
+
+I-TREA II tests the changes that study named: a population that lives on the GPU, longer budgets (300\,s and
+1{,}800\,s), and instances on which the solver's own heuristics struggle. The evolutionary algorithm (EA) runs beside
+an exact solver --- SCIP as the primary partner, HiGHS as a replication partner --- and the two exchange solutions in
+both directions: the solver's incumbent, very good solutions from its pool, its proven bound and its root LP solution
+enter the population, and the population's better incumbents enter the solver as new starting points. From the first
+I-TREA~\citep{orbay2011itrea} it keeps one principle: good infeasible solutions --- infeasible solutions whose objective
+is better than the best feasible one --- are kept in the population, here as a capped share (Rank~0), beside a
+protected share of the best feasible solutions (Rank~1).
+
+\paragraph{Question.} The claim under test is that a GPU-based evolutionary metaheuristic coupled with an exact solver
+can beat either one alone. On hard MIP instances, does the coupled system find good feasible solutions sooner than
+\emph{the solver alone} and \emph{the EA alone}? Both comparisons must succeed for the claim to hold. Running two methods
+side by side can beat either one simply by being two, so we also compare the coupling with the same two methods running
+without exchange, and with the solver racing cuOpt on the same GPU (Section~\ref{sec:design}).
+
+\paragraph{Closest prior work.} None of the parts is new. Incumbents were exchanged in both directions between a CPU
+heuristic and a branch-and-bound solver running in parallel two decades ago~\citep{nwana2005cooperative,
+puchinger2005cooperating}. ReXi runs local-search and large-neighbourhood workers beside SCIP workers over a shared
+solution pool~\citep{mexi2026rexi}; CHAP pools the feasible and infeasible candidates of GPU and CPU
+heuristics~\citep{tjusila2026chap}; and inside cuOpt a GPU population with recombination, which keeps infeasible
+members and protects the best feasible one, runs beside cuOpt's own CPU branch-and-bound with solutions flowing both
+ways~\citep{corduk2025evoframework,nvidia2026cuoptsrc}. Reserving a share of the population for infeasible solutions
+goes back at least to IDEA~\citep{singh2011thesis}. What this study puts together is a GPU population coupled with an
+\emph{external, general} MIP solver through two-way exchange, with a capped share of infeasible solutions whose
+objective beats the incumbent, and with the solver's proven bound removing those that can never become feasible. We did
+not find this combination in our search, which is a negative search result, not a priority claim
+(Section~\ref{sec:related}).
+
+\paragraph{Status of this draft.} The hypotheses, arms, instance-pool rules, metrics and analysis were fixed before any
+experiment and are summarised in Section~\ref{sec:design}. No experiment has been run; Section~\ref{sec:results} is a
+placeholder. \pending{Contributions to be stated after the results; no claim is made here.}

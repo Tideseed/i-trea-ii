@@ -1,0 +1,7 @@
+# Ablation y0 -- no protected Rank 1 (the best feasible individuals are not kept by rule).
+# Exploratory since D-007 (arm A5y0). It changes the survivors only under rank2_replacement: generational (the default),
+# where the old Rank 2 dies each generation; under "plus" the best feasible survive by key anyway.
+# Partial file over the defaults. On the frozen configuration:  --set ranks.y=0
+name: ablation-y0
+ranks:
+  y: 0.0

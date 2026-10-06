@@ -1,0 +1,70 @@
+\section{Method}\label{sec:method}
+\pending{This section describes the design as specified before any experiment; parameters are the defaults of the
+pre-registered starting configuration and may change in the capped tuning phase (Section~\ref{sec:design}).}
+
+\subsection{Problem form, violation and feasibility}
+We consider $\min\, c^\top x$ subject to $r^l \le Ax \le r^u$, $l \le x \le u$ and $x_j \in \mathbb{Z}$ for
+$j \in I$, read from an MPS file; maximisation is handled through a sign. The population compares \emph{keys}
+(lower is better). The total violation of an individual is
+\[
+V(x) = \sum_i \frac{\max(r^l_i - a_i, 0) + \max(a_i - r^u_i, 0)}{s_i} + \sum_j (\text{bound violation})_j
+     + \sum_{j \in I} |x_j - \operatorname{round}(x_j)|, \qquad a = Ax,
+\]
+with a row scale $s_i$ (the row's 2-norm by default). $V$ orders infeasible individuals; it is never the feasibility
+test. An individual is \emph{feasible} if every row, bound and integrality condition holds within a tolerance under the
+partner solver's own rule --- relative to $\max(|a_i|, |r_i|, 1)$ for SCIP, absolute for HiGHS --- tested row by row,
+never as a sum. Objective values are always computed in double precision. Every solution passed to a solver is
+re-checked on the CPU in double precision first, and every solution that enters a reported metric is re-checked by an
+independent exact checker.
+
+\subsection{The three ranks}
+Each generation, the candidate set (population, offspring and solutions injected from the solver) is reduced to the
+population size $P$:
+\begin{enumerate}
+\item Exact duplicates are removed (their provenance is merged into the copy that is kept).
+\item The incumbent key $k^*$ is the better of the best feasible key in the candidate set and the solver's incumbent.
+\item \textbf{Rank 1 (feasible good):} the best $\lceil y \cdot \min(\#\text{feasible}, P) \rceil$ feasible candidates
+  ($y = 10\,\%$) are protected; candidates with equal keys leave Rank~1.
+\item \textbf{Rank 0 (infeasible good):} infeasible candidates with key below $k^*$ (by a relative margin); those beyond
+  the solver's proven bound are removed. At most $\lfloor x P \rfloor$ survive ($x = 10\,\%$): over the cap, the
+  non-dominated fronts in (key, $V$) are taken in order and the overflowing front is thinned by repeatedly removing the
+  point nearest to another. Candidates over the cap are removed, not demoted, so $x$ bounds the number of super-optimal
+  infeasible survivors.
+\item \textbf{Rank 2 (rejects):} the remaining places are filled from this generation's new candidates (offspring,
+  injected solutions, immigrants) by non-dominated sorting in (key, $V$) with crowding distance~\citep{deb2002nsga2};
+  the previous generation's Rank~2 does not survive. This makes the protection of Rank~1 matter: with $y = 0$ the
+  best feasible solutions are not kept by rule. A shortfall is filled with immigrants.
+\end{enumerate}
+Before any feasible solution is known, all candidates are ranked by $V$ (a feasibility phase). Parents are chosen by
+tournaments that prefer Rank~1 to Rank~0 to Rank~2, then the lower key, then the lower violation.
+
+\subsection{Variation and repair}
+Crossover (probability 0.9) uses by default a mix of \emph{agreement} (weight 0.6), uniform (0.2) and constraint-block
+(0.2) crossover. In agreement crossover the child keeps the genes on which both parents agree, and repair works only on
+rows that contain a disagreeing gene --- related to the combination heuristics in MIP
+solvers, which fix the variables on which pool solutions agree and solve the rest as a
+sub-MIP~\citep{berthold2006primal}. Mutation changes an absolute
+number of integer genes per child (Poisson, mean 4) by flips, steps, moves toward the LP solution, moves inside violated
+rows or moves that improve the objective. Children are then repaired by a feasibility-jump local
+search~\citep{luteberget2023feasibility}: a weighted violation over the rows, one variable at a time moved to a
+\emph{jump value} that minimises it, and row weights that grow at local minima. Once an incumbent exists, an extra
+row $c^\top x \le k^* - \delta$ joins the weighted rows, so that repair keeps an objective better than the incumbent
+instead of trading it away. The GPU implementation runs one thread block per individual with incremental updates of the
+row activities; a single-core CPU implementation of the same algorithm is the reference and the control.
+Singleton continuous columns are decoded in closed form; other continuous variables are moved by their jump values.
+
+\subsection{Exchange with the solver}
+Solver and EA run as separate processes released together by a start barrier and share one monotonic clock. They
+exchange solutions through a Redis server on the local machine or, as a fallback, through a mailbox directory in shared
+memory; the choice is fixed by a pre-registered overhead measurement. Into SCIP, solutions enter only through a
+heuristic plug-in that tries each posted solution; into HiGHS, through its user-solution callback. The solver posts its
+incumbent, up to eight pool solutions within 1\,\% of it, its proven bound and, once, its root LP solution; the EA posts
+a feasible solution whenever it beats the solver's incumbent. cuOpt never receives solutions (accepting them disables
+its presolve); it is a control arm only.
+
+\subsection{The frontier}
+Beside the ranks the EA keeps a \emph{frontier}: an archive of feasible solutions within 5\,\% of the incumbent that
+are non-dominated in (objective, distance from the incumbent), thinned to 32 by crowding distance. It is an output (a
+set of diverse alternative solutions, reported with its size, spread and hypervolume), an optional source of
+immigrants, and in one ablation a source of additional solutions posted to the solver. With several objectives the same
+archive becomes their Pareto front, as in the first I-TREA.

@@ -1,0 +1,11 @@
+# Ablation post_frontier -- after each frontier update the EA also posts the archive's diverse near-optimal feasible
+# solutions to the solver (SCIP keeps non-improving solutions in its solution storage, where its crossover-type
+# heuristics can use them). Exploratory A3 ablation (vault D-005); off in the main arm, because the brief asks the EA to
+# hand over better incumbents.
+# Partial file over the defaults. On the frozen configuration:
+#   --set exchange.post_frontier=true frontier.enabled=true
+name: ablation-post-frontier
+exchange:
+  post_frontier: true
+frontier:
+  enabled: true

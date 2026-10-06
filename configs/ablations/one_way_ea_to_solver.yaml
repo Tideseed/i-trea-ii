@@ -1,0 +1,14 @@
+# Ablation one_way_ea_to_solver -- the EA posts its better incumbents to the solver; NOTHING flows from the solver to
+# the EA. Exploratory A3 ablation (exchange direction, D-002 v3 §5).
+# All three solver->EA switches are off, not only from_solver: the solver's incumbent key and dual bound shape Rank 0
+# (the incumbent threshold, bound demotion) and its root LP seeds the population, so leaving use_dual_bound or
+# use_root_lp on would leak solver information into a "one-way" arm (design critique 2026-10-05, algorithm lens).
+# With lp_source "solver" and no solver channel the EA gets no LP point; that is part of this arm.
+# Matching solver flags: the solver process runs with --recv and WITHOUT --send.
+# Partial file over the defaults. On the frozen configuration:
+#   --set exchange.from_solver=false exchange.use_dual_bound=false exchange.use_root_lp=false
+name: ablation-one-way-ea-to-solver
+exchange:
+  from_solver: false
+  use_dual_bound: false
+  use_root_lp: false

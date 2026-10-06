@@ -1,0 +1,26 @@
+# RECORD ONLY -- NOT A PLANNED COMPARISON. No pre-registered arm (vault D-002 v3) uses this file.
+# I-TREA II -- the configuration closest to part I (Orbay 2011 M.S. thesis, `orbay2011itrea`; Orbay 2011
+# manuscript), as far as single-objective MIP allows. Mapping and every deviation: vault 50-decisions/D-004.
+#
+# Status: kept as a record of where the defaults came from. Since D-007 (Berk, 2026-10-06) part I is the starting
+# point only -- the principle carried over is keeping good infeasible solutions (Rank 0) -- and faithfulness to part I
+# is not a goal. If it is ever run, it is a labelled exploratory arm, reported as such.
+#
+# Partial file: every key not listed keeps its default from src/itrea/config.py (EAConfig.from_yaml fills them).
+# Equivalent overrides on another base config (EAConfig.with_overrides / `--set`):
+#   crossover.weights={"k_point": 1.0} crossover.k=1 ranks.no_incumbent_policy=itrea ranks.rank2_replacement=plus
+#   stagnation.immigrant_frac=0.0
+# Already at part I's choice in the defaults: rank0_select itrea (Pareto + nearest thinning), rank2_select itrea
+# (non-dominated sorting + crowding), rank1_twins drop, selection.comparator itrea (Rank 1 < Rank 0 < Rank 2),
+# offspring_per_gen = population.size. Part I's problem-specific mutation has no generic equivalent; the defaults'
+# violation_guided / objective_guided operators are its analogues (Second Chance / Forced Closure).
+name: itrea1-faithful
+crossover:
+  weights:
+    k_point: 1.0       # part I: single random cut point
+  k: 1
+ranks:
+  no_incumbent_policy: itrea      # no feasible-search phase: before any incumbent, every individual is infeasible good
+  rank2_replacement: plus         # parents compete with offspring for Rank 2 (part I)
+stagnation:
+  immigrant_frac: 0.0             # no immigrants: part I left diversification to future work ("overly elitist")

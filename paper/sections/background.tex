@@ -1,0 +1,37 @@
+\section{Background}\label{sec:background}
+
+\subsection{I-TREA}
+I-TREA, the Interactive Three Ranks Evolutionary Algorithm~\citep{orbay2011itrea}, was developed for a capacitated
+bi-objective facility relocation problem with partial coverage (maximise covered demand, minimise the number of open
+facilities). It sorts the population into three ranks by feasibility and domination: \emph{Rank~0, infeasible good}
+--- infeasible solutions not dominated by any feasible one, for which a share of the population (for example 10\,\%) is
+reserved; \emph{Rank~1, feasible good} --- feasible non-dominated solutions not rejected by a decision maker; and
+\emph{Rank~2, rejects} --- the rest. Its tournament prefers Rank~1 to Rank~0 to Rank~2, and a decision maker,
+asked pairwise questions during the run, moves rejected solutions to Rank~2. The reserved share follows earlier
+constraint-handling work that keeps infeasible solutions on purpose, in particular IDEA~\citep{singh2011thesis}.
+% The unpublished manuscript (unpublished) is described in the vault; it is not cited without the
+% author's agreement.
+
+I-TREA II keeps the rank names and the principle of good infeasible solutions; everything else is re-designed for
+single-objective MIP and treated as an ordinary parameter. With one objective, ``not dominated by a feasible solution''
+becomes ``objective better than the incumbent''; the brief for this study turns the reserved share into a cap of
+$x$ of the population and protects the best $y$ of the feasible solutions; and the exact solver plays the decision
+maker's part: a Rank~0 solution whose objective beats the solver's proven bound can never become feasible at that value
+and is removed.
+
+\subsection{The predecessor study}
+The optopt study~\citep{orbay2026optopt} measured learned and agent control of HiGHS, SCIP and cuOpt on one NVIDIA DGX
+Spark. Three of its results set up this one. (i) Running cuOpt beside a CPU solver, with no model, lowered the primal
+integral by 30\,\% over HiGHS alone and by 21\,\% over SCIP alone at 60\,s. (ii) Passing cuOpt's solutions into SCIP
+through SCIP's heuristic interface improved SCIP's own trajectory by 14\,\% but not the pair's; passing SCIP's
+solutions to cuOpt cost 15\,\% because cuOpt switches off its presolve once it accepts outside solutions. (iii) A
+Python EA on one CPU core beside SCIP, with up to 20\,\% of super-optimal infeasible individuals, found no measurable
+gain at 60\,s and lost about 1\,\% to a second SCIP copy with equal compute. That study's verdict named a GPU
+population, longer budgets and instances where SCIP's own heuristics fail as the changes that could alter the result.
+
+\subsection{Measuring ``good solutions sooner''}
+For an incumbent value $v$ and a reference value $r$, the primal gap is $\gamma = 1$ if there is no incumbent or $v$
+and $r$ differ in sign, $0$ if $v = r$, and $|v-r|/\max(|v|,|r|)$ otherwise; the primal integral
+$P(T) = \frac{1}{T}\int_0^T \gamma(t)\,\mathrm{d}t \in [0,1]$ averages it over the budget~\citep{berthold2013primal}.
+We also report times to first feasible and to gaps of 5\,\% and 1\,\%, and a MIPfeas-style
+integral~\citep{bussieck2026mipfeas,mittelmann2026mipfeas} for comparison with published results.

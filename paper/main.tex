@@ -1,0 +1,57 @@
+% I-TREA II -- paper source (skeleton). Working title; no results yet.
+% Build: latexmk -pdf main.tex   (bibliography: refs.bib, legally readable works only;
+% paywalled works are named only in Appendix~\ref{app:paywalled}, without bibliography entries).
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{figures/}}
+
+% A visible marker for text that still depends on results or decisions.
+\newcommand{\pending}[1]{\textcolor{gray}{[\emph{#1}]}}
+
+\title{I-TREA II: A GPU Evolutionary Algorithm Coupled with an Exact MIP Solver\\
+\large (working title)}
+\author{Berk Orbay\\ \small\texttt{berk.orbay@tideseed.com}\thanks{Designed and carried out with AgentRA (Agent
+Research Assistant; AgentRA is mainly Claude Opus 5.5, working through Claude Code), under the author's direction;
+see the AI assistance statement (Section~\ref{sec:ai}). Every number in a final version will be produced by the code,
+configurations and job definitions in the project repository.}}
+\date{Draft --- design and build stage, no results (6 October 2026)}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\pending{Abstract to be written after the confirmatory experiment.} Users of mixed-integer programming (MIP) solvers
+often need a good feasible solution within a fixed time rather than a proof of optimality. We study whether an
+evolutionary algorithm that runs on a GPU, coupled with an exact MIP solver so that the two exchange solutions in both
+directions while they run, finds good solutions sooner than either method alone. The population keeps a capped share
+of infeasible solutions whose objective is better than the best feasible one, an idea carried over from the
+interactive three-rank evolutionary algorithm I-TREA~\citep{orbay2011itrea}. The hypotheses, arms, instance-pool rules,
+metrics and analysis were fixed before any experiment. This draft describes the design; it contains no results.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/background}
+\input{sections/method}
+\input{sections/design}
+\input{sections/results}
+\input{sections/related}
+\input{sections/reproducibility}
+\input{sections/ai-assistance}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/appendix}
+
+\end{document}

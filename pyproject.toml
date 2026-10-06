@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "i-trea-ii"
+version = "0.1.0.dev0"
+description = "I-TREA II: a GPU three-rank evolutionary algorithm running beside a MIP solver (SCIP, HiGHS, cuOpt) with two-way solution exchange"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Berk Orbay", email = "berk.orbay@tideseed.com" }]
+dependencies = [
+  "numpy==2.4.6",
+  "scipy==1.18.1",
+  "highspy==1.15.1",
+  "pyscipopt==6.2.1",
+  "pyyaml==6.0.3",
+  "pandas==3.0.3",
+  "pyarrow==23.0.1",
+  "numba==0.64.0",
+  "redis==8.1.0",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda13x==14.2.0"]
+cuopt = ["cuopt-cu13==26.8.*"]
+plots = ["matplotlib==3.11.2"]
+dev = ["pytest==9.1.1", "hypothesis==6.168.1"]
+all = ["i-trea-ii[gpu,cuopt,plots,dev]"]
+
+[project.scripts]
+itrea = "itrea.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/itrea"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "gpu: needs CuPy and a CUDA GPU (skipped otherwise)",
+  "solver: runs a real solver on a toy model (seconds)",
+  "integration: launches real processes through the pair runner",
+]

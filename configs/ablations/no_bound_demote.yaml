@@ -1,0 +1,6 @@
+# Ablation no_bound_demote -- Rank 0 candidates whose key beats the solver's PROVEN dual bound are kept (they can never
+# be feasible at that value; by default they are eliminated). Exploratory A3 ablation (D-002 v3 §5).
+# Partial file over the defaults. On the frozen configuration:  --set ranks.rank0_bound_demote=false
+name: ablation-no-bound-demote
+ranks:
+  rank0_bound_demote: false

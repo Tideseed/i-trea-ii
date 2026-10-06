@@ -1,0 +1,108 @@
+# I-TREA II -- default configuration: every EAConfig parameter at its default in src/itrea/config.py.
+# This is the pre-registered starting point (vault D-002 v3). The confirmatory configuration is chosen from it on the
+# tuning set only (phase E4) and written to configs/frozen-e2.yaml; nothing here is tuned.
+#
+# Generated, not hand-edited (2026-10-06, config hash 9ac4a93bf93b; the hash excludes `name`):
+#   .venv/bin/python -c "import yaml; from itrea.config import EAConfig; d = EAConfig().to_dict(); d['name'] = 'itrea2-default'; print(yaml.safe_dump(d, sort_keys=False))"
+# If config.py's defaults change, regenerate this file, update the hash on the line above and record it in the journal;
+# tests/test_configs.py fails until both agree with EAConfig().
+# Changes since the 2026-10-05 version (hash 3806548cbc26): gpu_mem_gb 4.0 -> 12.0 (equal GPU memory for the EA pool
+# and cuOpt's RMM limit; cuOpt needs ~10.5 GB, vault D-003) and the repair knobs max_candidates, p_random_walk,
+# row_scan_cap, row_scan_filter (vault 10-design/Feasibility jump local search.md).
+# Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
+name: itrea2-default
+population:
+  size: 256
+  offspring_per_gen: 256
+  eval_dtype: float64
+  gene_dtype: auto
+  size_rule: memory
+ranks:
+  x: 0.1
+  y: 0.1
+  elite_basis: feasible
+  rank1_twins: drop
+  rank0_select: itrea
+  rank0_bound_demote: true
+  rank2_select: itrea
+  rank2_replacement: generational
+  tol_mode: scip
+  viol_norm: l2
+  no_incumbent_policy: violation
+  imp_tol: 1.0e-09
+  feas_tol: 1.0e-06
+  int_tol: 1.0e-06
+selection:
+  tournament_k: 2
+  comparator: itrea
+  p_f: 0.45
+  parent_rank_weights: null
+crossover:
+  pc: 0.9
+  weights:
+    agreement: 0.6
+    uniform: 0.2
+    block: 0.2
+  p_swap: 0.1
+  k: 1
+  block_rows: 4
+  block_closure: true
+mutation:
+  genes: 4.0
+  rate: null
+  min_genes: 1
+  weights:
+    flip: 0.3
+    step: 0.15
+    violation_guided: 0.25
+    objective_guided: 0.2
+    toward_lp: 0.1
+  step_max: 2
+  reset_window: 10.0
+repair:
+  method: fj
+  max_steps: 2000
+  stall_steps: 100
+  moves_per_step: 1
+  steps: 50
+  objective_mode: cutoff_row
+  obj_weight: 0.001
+  weight_bump: 1.0
+  max_candidates: 16
+  p_random_walk: 0.0
+  row_scan_cap: 0
+  row_scan_filter: false
+  continuous: auto
+  lp_decode_per_gen: 4
+  lp_time_limit: 2.0
+exchange:
+  enabled: true
+  to_solver: true
+  from_solver: true
+  poll_s: 0.25
+  inject_band: 0.01
+  inject_k: 8
+  post_min_gain: 1.0e-09
+  post_frontier: false
+  use_dual_bound: true
+  use_root_lp: true
+seeding:
+  random: 0.5
+  lp_rounding: 0.5
+  lp_source: solver
+  lp_time_limit: 60.0
+stagnation:
+  gens: 50
+  immigrant_frac: 0.25
+frontier:
+  enabled: true
+  mode: pareto_incumbent
+  band: 0.05
+  max_size: 32
+  distance: hamming
+  update_every: 5
+  reinject: 0.0
+backend: cupy
+gpu_mem_gb: 12.0
+log_every: 10
+lineage_depth: 5

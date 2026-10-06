@@ -1,0 +1,1001 @@
+% refs.bib -- prior art for I-TREA II (Interactive Three Ranks Evolutionary
+% Algorithm, part II): sweeps A-E of 2026-10-05, vault/40-literature/.
+%
+% Every entry below exists and has a legally readable full text: an open
+% venue (arXiv, open-access journal/proceedings, PMLR, LIPIcs, IJCAI, JMLR),
+% an author's or institution's page or repository, Optimization Online, a ZIB
+% report, or a verified preprint. The `url` field is that legal copy; arXiv
+% entries also carry eprint/archivePrefix. Fields that could not be confirmed
+% were left out rather than guessed; where a field comes from a weaker source
+% the `note` says so. "and others" marks an author list truncated on purpose.
+%
+% NOT in this file: paywalled-only works (13; see the vault note "Paywalled
+% research"). No work in the sweeps was found not to exist.
+%
+% Alias keys (the same work appeared under two sweep keys -- use the left one):
+%   corduk2025gpuprimal        <- corduk2025gpuheur
+%   nvidia2026cuoptsrc         <- nvidia2025cuopt
+%   luteberget2023feasibility  <- luteberget2023fj
+% Keys keep the preprint year where the journal version came later:
+%   kempke2025fixprop (MPC 2026), lu2023cupdlp (OR 2025), huang2024evox
+%   (TEVC 2025). The year field is the publication year.
+%
+% Provenance caveats -- a strictness call is needed before the paper cites these:
+%   cantupaz1998survey     open copy on a third-party academic mirror
+%   derrac2011             publisher PDF on the authors' research-group site
+%   pospichal2010cudaga    publisher-typeset PDF on the authors' faculty repository
+%   blum2008hybridizations PMC copy under a time-limited COVID-19 access grant
+%
+% The part-I manuscript's own reference list is in refs-itrea1.bib (another
+% file, different rules: it also lists closed works). Same work, different key
+% there: ray2009infeasibility (= ray2009idea, paywalled-only, not in this file).
+
+% ===========================================================================
+% A. Constraint handling that keeps infeasible solutions
+% ===========================================================================
+
+@phdthesis{singh2011thesis,
+  author  = {Singh, Hemant Kumar},
+  title   = {Development of optimization methods to deal with current challenges in engineering design optimization},
+  school  = {School of Engineering and Information Technology, University College, University of New South Wales at the Australian Defence Force Academy},
+  year    = {2011},
+  doi     = {10.26190/unsworks/15069},
+  url     = {https://unsworks.unsw.edu.au/bitstreams/251ed4c1-33f6-4162-a54c-2e45d700f0ff/download},
+  note    = {Open access (UNSWorks, CC BY-NC-ND 3.0 AU). Chapter~3, Algorithm~3.1 gives IDEA in full}
+}
+
+@article{kimbrough2008fi2pop,
+  author  = {Kimbrough, Steven Orla and Koehler, Gary J. and Lu, Ming and Wood, David Harlan},
+  title   = {On a Feasible--Infeasible Two-Population ({FI-2Pop}) genetic algorithm for constrained optimization: Distance tracing and no free lunch},
+  journal = {European Journal of Operational Research},
+  volume  = {190},
+  number  = {2},
+  pages   = {310--327},
+  year    = {2008},
+  doi     = {10.1016/j.ejor.2007.06.028},
+  url     = {https://repository.upenn.edu/server/api/core/bitstreams/a83719e3-9b32-4200-876f-8eb9da988225/content},
+  note    = {Open copy: author manuscript of 10 April 2007, University of Pennsylvania repository (CC BY-NC-ND 4.0); wording and pagination may differ}
+}
+
+@article{deb2000efficient,
+  author  = {Deb, Kalyanmoy},
+  title   = {An efficient constraint handling method for genetic algorithms},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  volume  = {186},
+  number  = {2--4},
+  pages   = {311--338},
+  year    = {2000},
+  doi     = {10.1016/S0045-7825(99)00389-8},
+  url     = {http://repository.ias.ac.in/9407/1/310.pdf},
+  note    = {Open copy: author preprint (December 1998), Indian Academy of Sciences repository}
+}
+
+@article{coello2002survey,
+  author  = {Coello Coello, Carlos A.},
+  title   = {Theoretical and numerical constraint-handling techniques used with evolutionary algorithms: a survey of the state of the art},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  volume  = {191},
+  number  = {11--12},
+  pages   = {1245--1287},
+  year    = {2002},
+  doi     = {10.1016/S0045-7825(01)00323-1},
+  url     = {https://delta.cs.cinvestav.mx/~ccoello/journals/coello02-02.pdf.gz},
+  note    = {Open copy: author's final manuscript (gzipped PDF) on the author's CINVESTAV page}
+}
+
+@article{mezuramontes2011survey,
+  author  = {Mezura-Montes, Efr{\'e}n and Coello Coello, Carlos A.},
+  title   = {Constraint-handling in nature-inspired numerical optimization: Past, present and future},
+  journal = {Swarm and Evolutionary Computation},
+  volume  = {1},
+  number  = {4},
+  pages   = {173--194},
+  year    = {2011},
+  doi     = {10.1016/j.swevo.2011.10.001},
+  url     = {https://delta.cs.cinvestav.mx/~ccoello/journals/swevo-mezura.pdf.gz},
+  note    = {Open copy: authors' preprint (gzipped PDF) on the author's CINVESTAV page}
+}
+
+@inproceedings{mezuramontes2005useful,
+  author    = {Mezura-Montes, Efr{\'e}n and Coello Coello, Carlos A.},
+  title     = {Useful Infeasible Solutions in Engineering Optimization with Evolutionary Algorithms},
+  booktitle = {MICAI 2005: Advances in Artificial Intelligence},
+  series    = {Lecture Notes in Artificial Intelligence},
+  volume    = {3789},
+  pages     = {652--662},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/11579427_66},
+  url       = {https://delta.cs.cinvestav.mx/~ccoello/conferences/mezura-micai05.pdf.gz},
+  note      = {Open copy: author version (gzipped PDF) on the author's CINVESTAV page}
+}
+
+@article{mezuramontes2005smes,
+  author  = {Mezura-Montes, Efr{\'e}n and Coello Coello, Carlos A.},
+  title   = {A Simple Multimembered Evolution Strategy to Solve Constrained Optimization Problems},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {9},
+  number  = {1},
+  pages   = {1--17},
+  year    = {2005},
+  doi     = {10.1109/TEVC.2004.836819},
+  url     = {https://delta.cs.cinvestav.mx/~ccoello/journals/tec839-final.pdf.gz},
+  note    = {Open copy: authors' final accepted manuscript (gzipped PDF) on the author's CINVESTAV page}
+}
+
+@article{farmani2003selfadaptive,
+  author  = {Farmani, Raziyeh and Wright, Jonathan A.},
+  title   = {Self-adaptive fitness formulation for constrained optimization},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {7},
+  number  = {5},
+  pages   = {445--455},
+  year    = {2003},
+  doi     = {10.1109/TEVC.2003.817236},
+  url     = {https://ndownloader.figshare.com/files/17069744},
+  note    = {Open copy: author deposit in Loughborough University's repository (figshare article 9447755)}
+}
+
+@inproceedings{hamida2000aschea,
+  author    = {Ben Hamida, Sana and Schoenauer, Marc},
+  title     = {An Adaptive Algorithm for Constrained Optimization Problems},
+  booktitle = {Parallel Problem Solving from Nature -- PPSN VI},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1917},
+  pages     = {529--538},
+  publisher = {Springer},
+  year      = {2000},
+  doi       = {10.1007/3-540-45356-3_52},
+  url       = {https://inria.hal.science/inria-00001273/document},
+  note      = {Open copy: HAL inria-00001273}
+}
+
+@inproceedings{lu2018bif,
+  author    = {Lu, Zhichao and Deb, Kalyanmoy and Singh, Hemant},
+  title     = {Balancing Survival of Feasible and Infeasible Solutions in Constraint Evolutionary Optimization Algorithms},
+  booktitle = {2018 IEEE Congress on Evolutionary Computation (CEC)},
+  pages     = {1--8},
+  publisher = {IEEE},
+  year      = {2018},
+  doi       = {10.1109/CEC.2018.8477976},
+  url       = {https://www.egr.msu.edu/~kdeb/papers/c2018002.pdf},
+  note      = {Open copy: COIN Report 2018002 (Michigan State University), titled ``Balancing Survival of Feasible and Infeasible Solutions in Evolutionary Optimization Algorithms''}
+}
+
+@article{li2019ctaea,
+  author        = {Li, Ke and Chen, Renzhi and Fu, Guangtao and Yao, Xin},
+  title         = {Two-Archive Evolutionary Algorithm for Constrained Multiobjective Optimization},
+  journal       = {IEEE Transactions on Evolutionary Computation},
+  volume        = {23},
+  number        = {2},
+  pages         = {303--315},
+  year          = {2019},
+  doi           = {10.1109/TEVC.2018.2855411},
+  eprint        = {1711.07907},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/1711.07907},
+  note          = {Open copy: submitted preprint (arXiv v1, 2017)}
+}
+
+@article{fan2019pps,
+  author        = {Fan, Zhun and Li, Wenji and Cai, Xinye and Li, Hui and Wei, Caimin and Zhang, Qingfu and Deb, Kalyanmoy and Goodman, Erik D.},
+  title         = {Push and pull search for solving constrained multi-objective optimization problems},
+  journal       = {Swarm and Evolutionary Computation},
+  volume        = {44},
+  pages         = {665--679},
+  year          = {2019},
+  doi           = {10.1016/j.swevo.2018.08.017},
+  eprint        = {1709.05915},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/1709.05915}
+}
+
+@article{fan2019iepsilon,
+  author        = {Fan, Zhun and Li, Wenji and Cai, Xinye and Huang, Han and Fang, Yi and You, Yugen and Mo, Jiajie and Wei, Caimin and Goodman, Erik},
+  title         = {An improved epsilon constraint-handling method in {MOEA/D} for {CMOPs} with large infeasible regions},
+  journal       = {Soft Computing},
+  volume        = {23},
+  number        = {23},
+  pages         = {12491--12510},
+  year          = {2019},
+  doi           = {10.1007/s00500-019-03794-x},
+  eprint        = {1707.08767},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/1707.08767}
+}
+
+@article{rahimi2023review,
+  author        = {Rahimi, Iman and Gandomi, Amir H. and Chen, Fang and Mezura-Montes, Efr{\'e}n},
+  title         = {A Review on Constraint Handling Techniques for Population-based Algorithms: from single-objective to multi-objective optimization},
+  journal       = {Archives of Computational Methods in Engineering},
+  volume        = {30},
+  number        = {3},
+  pages         = {2181--2209},
+  year          = {2023},
+  doi           = {10.1007/s11831-022-09859-9},
+  eprint        = {2206.13802},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2206.13802},
+  note          = {Published online 9 December 2022}
+}
+
+% Added 2026-10-06 (cited in the method section for Rank 2's non-dominated sorting and crowding distance), copied
+% unchanged from the part-I reference audit, vault/40-literature/I-TREA (2015) references.bib. Provenance caveat of
+% the same class as those in the header: the open copy is an Internet Archive capture of the published PDF as hosted
+% by the authors' lab (KanGAL); the live page is gone.
+@article{deb2002nsga2,
+  author  = {Deb, K. and Pratap, A. and Agarwal, S. and Meyarivan, T.},
+  title   = {A fast and elitist multiobjective genetic algorithm: {NSGA-II}},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {6},
+  number  = {2},
+  pages   = {182--197},
+  year    = {2002},
+  doi     = {10.1109/4235.996017},
+  url     = {https://web.archive.org/web/20170808124421/http://www.iitk.ac.in/kangal/Deb_NSGA-II.pdf},
+  note    = {Open version: \url{https://web.archive.org/web/20170808124421/http://www.iitk.ac.in/kangal/Deb_NSGA-II.pdf} (the published PDF as hosted by the authors' lab, KanGAL; Internet Archive capture, the live page is gone)}
+}
+
+% ===========================================================================
+% B. Metaheuristics cooperating with MIP solvers
+% ===========================================================================
+
+@inproceedings{puchinger2005cooperating,
+  author    = {Puchinger, Jakob and Raidl, G{\"u}nther R. and Gruber, Martin},
+  title     = {Cooperating Memetic and Branch-and-Cut Algorithms for Solving the Multidimensional Knapsack Problem},
+  booktitle = {MIC 2005: The 6th Metaheuristics International Conference},
+  address   = {Vienna, Austria},
+  pages     = {775--780},
+  year      = {2005},
+  url       = {https://www.ac.tuwien.ac.at/files/pub/puchinger-05a.pdf}
+}
+
+@article{nwana2005cooperative,
+  author  = {Nwana, V. and Darby-Dowman, K. and Mitra, G.},
+  title   = {A co-operative parallel heuristic for mixed zero-one linear programming: Combining simulated annealing with branch and bound},
+  journal = {European Journal of Operational Research},
+  volume  = {164},
+  number  = {1},
+  pages   = {12--23},
+  year    = {2005},
+  doi     = {10.1016/j.ejor.2002.12.002},
+  url     = {https://bura.brunel.ac.uk/handle/2438/702},
+  note    = {Open copy: preprint of 15 June 2003, Brunel University Research Archive}
+}
+
+@mastersthesis{berthold2006primal,
+  author = {Berthold, Timo},
+  title  = {Primal Heuristics for Mixed Integer Programs},
+  school = {Technische Universit{\"a}t Berlin},
+  type   = {Diploma thesis},
+  year   = {2006},
+  url    = {https://opus4.kobv.de/opus4-zib/files/1029/Berthold_Primal_Heuristics_For_Mixed_Integer_Programs.pdf},
+  note   = {Carried out at Zuse Institute Berlin; ZIB OPUS record 1029}
+}
+
+@inproceedings{puchinger2005combining,
+  author    = {Puchinger, Jakob and Raidl, G{\"u}nther R.},
+  title     = {Combining Metaheuristics and Exact Algorithms in Combinatorial Optimization: A Survey and Classification},
+  booktitle = {Artificial Intelligence and Knowledge Engineering Applications: A Bioinspired Approach (IWINAC 2005, Part II)},
+  editor    = {Mira, J. and {\'A}lvarez, J. R.},
+  series    = {Lecture Notes in Computer Science},
+  pages     = {41--53},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/11499305_5},
+  url       = {https://www.ac.tuwien.ac.at/files/pub/puchinger-05.pdf},
+  note      = {Open copy: author version, TU Wien. LNCS volume number not verified}
+}
+
+@incollection{blum2008hybridizations,
+  author    = {Blum, Christian and Cotta, Carlos and Fern{\'a}ndez, Antonio J. and Gallardo, Jos{\'e} E. and Mastrolilli, Monaldo},
+  title     = {Hybridizations of Metaheuristics With Branch \& Bound Derivates},
+  booktitle = {Hybrid Metaheuristics: An Emerging Approach to Optimization},
+  editor    = {Blum, C. and Blesa Aguilera, M. J. and Roli, A. and Sampels, M.},
+  series    = {Studies in Computational Intelligence},
+  volume    = {114},
+  pages     = {85--116},
+  publisher = {Springer},
+  year      = {2008},
+  doi       = {10.1007/978-3-540-78295-7_4},
+  url       = {https://pmc.ncbi.nlm.nih.gov/articles/PMC7121796/},
+  note      = {Open copy: PubMed Central, Springer Nature COVID-19 collection (time-limited access grant; re-check before relying on it)}
+}
+
+@article{carvajal2014diversification,
+  author  = {Carvajal, Rodolfo and Ahmed, Shabbir and Nemhauser, George L. and Furman, Kevin and Goel, Vikas and Shao, Yufen},
+  title   = {Using diversification, communication and parallelism to solve mixed-integer linear programs},
+  journal = {Operations Research Letters},
+  volume  = {42},
+  number  = {2},
+  pages   = {186--189},
+  year    = {2014},
+  doi     = {10.1016/j.orl.2013.12.012},
+  url     = {https://optimization-online.org/wp-content/uploads/2013/05/3900.pdf},
+  note    = {Open copy: preprint on Optimization Online (30 May 2013)}
+}
+
+@article{fischetti2014erraticism,
+  author  = {Fischetti, Matteo and Monaci, Michele},
+  title   = {Exploiting Erraticism in Search},
+  journal = {Operations Research},
+  volume  = {62},
+  number  = {1},
+  pages   = {114--122},
+  year    = {2014},
+  doi     = {10.1287/opre.2013.1231},
+  url     = {https://www.dei.unipd.it/~fisch/papers/exploiting_erraticism_in_search.pdf},
+  note    = {Open copy: revised submitted manuscript on the author's University of Padova page}
+}
+
+@misc{gurobi2026concurrent,
+  author       = {{Gurobi Optimization, LLC}},
+  title        = {Concurrent Optimization},
+  howpublished = {Gurobi Optimizer Reference Manual, Gurobi 13.0, online documentation},
+  year         = {2026},
+  url          = {https://docs.gurobi.com/projects/optimizer/en/current/features/concurrent.html},
+  urldate      = {2026-10-05},
+  note         = {Page last updated 22 September 2026; accessed 5 October 2026}
+}
+
+@incollection{ralphs2018parallel,
+  author    = {Ralphs, Ted and Shinano, Yuji and Berthold, Timo and Koch, Thorsten},
+  title     = {Parallel Solvers for Mixed Integer Linear Optimization},
+  booktitle = {Handbook of Parallel Constraint Reasoning},
+  pages     = {283--336},
+  publisher = {Springer},
+  year      = {2018},
+  doi       = {10.1007/978-3-319-63516-3_8},
+  url       = {https://optimization-online.org/wp-content/uploads/2017/05/5993.pdf},
+  note      = {Open copy: COR@L Technical Report 16T-014-R3 / ZIB-Report 16-74, Optimization Online}
+}
+
+@article{shinano2018fiberscip,
+  author  = {Shinano, Yuji and Heinz, Stefan and Vigerske, Stefan and Winkler, Michael},
+  title   = {{FiberSCIP} -- A Shared Memory Parallelization of {SCIP}},
+  journal = {INFORMS Journal on Computing},
+  volume  = {30},
+  number  = {1},
+  pages   = {11--30},
+  year    = {2018},
+  doi     = {10.1287/ijoc.2017.0762},
+  url     = {https://optimization-online.org/wp-content/uploads/2017/04/5944.pdf},
+  note    = {Open copy: ZIB-Report 13-55 (third revision), Optimization Online}
+}
+
+@article{boschetti2022matheuristics,
+  author  = {Boschetti, Marco Antonio and Maniezzo, Vittorio},
+  title   = {Matheuristics: using mathematics for heuristic design},
+  journal = {4OR},
+  volume  = {20},
+  number  = {2},
+  pages   = {173--208},
+  year    = {2022},
+  doi     = {10.1007/s10288-022-00510-8},
+  url     = {https://link.springer.com/article/10.1007/s10288-022-00510-8},
+  note    = {Open access, CC BY 4.0}
+}
+
+@inproceedings{perron2023cpsat,
+  author    = {Perron, Laurent and Didier, Fr{\'e}d{\'e}ric and Gay, Steven},
+  title     = {The {CP-SAT-LP} Solver (Invited Talk)},
+  booktitle = {29th International Conference on Principles and Practice of Constraint Programming (CP 2023)},
+  editor    = {Yap, Roland H. C.},
+  series    = {Leibniz International Proceedings in Informatics (LIPIcs)},
+  volume    = {280},
+  pages     = {3:1--3:2},
+  publisher = {Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik},
+  year      = {2023},
+  doi       = {10.4230/LIPIcs.CP.2023.3},
+  url       = {https://drops.dagstuhl.de/storage/00lipics/lipics-vol280-cp2023/LIPIcs.CP.2023.3/LIPIcs.CP.2023.3.pdf}
+}
+
+@misc{mexi2026rexi,
+  author        = {Mexi, Gioni and Rehfeldt, Daniel},
+  title         = {Race, Exchange, Improve: Finding high-quality {MIP} solutions quickly},
+  year          = {2026},
+  eprint        = {2609.05954},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.OC},
+  url           = {https://arxiv.org/abs/2609.05954}
+}
+
+@misc{tjusila2026chap,
+  author        = {Tjusila, Gennesaret Kharistio and Hoen, Alexander and Kempke, Nils-Christian and Mexi, Gioni and Berthold, Timo and Gleixner, Ambros and Koch, Thorsten and Pokutta, Sebastian},
+  title         = {{CHAP}: A Hybrid {GPU-CPU} Heuristic for {MIP}},
+  year          = {2026},
+  eprint        = {2605.05086},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.OC},
+  url           = {https://arxiv.org/abs/2605.05086}
+}
+
+@inproceedings{cai2025balans,
+  author    = {Cai, Junyang and Kad{\i}o{\u{g}}lu, Serdar and Dilkina, Bistra},
+  title     = {Balans: Multi-Armed Bandits-based Adaptive Large Neighborhood Search for Mixed-Integer Programming Problems},
+  booktitle = {Proceedings of the Thirty-Fourth International Joint Conference on Artificial Intelligence (IJCAI 2025)},
+  pages     = {2566--2574},
+  year      = {2025},
+  url       = {https://www.ijcai.org/proceedings/2025/0286.pdf},
+  note      = {Preprint: arXiv:2412.14382}
+}
+
+@misc{yilmaz2025parbalans,
+  author        = {Yilmaz, Alican and Cai, Junyang and Kad{\i}o{\u{g}}lu, Serdar and Dilkina, Bistra},
+  title         = {{ParBalans}: Parallel Multi-Armed Bandits-based Adaptive Large Neighborhood Search},
+  year          = {2025},
+  eprint        = {2508.06736},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2508.06736}
+}
+
+@article{hendel2022alns,
+  author  = {Hendel, Gregor},
+  title   = {Adaptive large neighborhood search for mixed integer programming},
+  journal = {Mathematical Programming Computation},
+  volume  = {14},
+  number  = {2},
+  pages   = {185--221},
+  year    = {2022},
+  doi     = {10.1007/s12532-021-00209-7},
+  url     = {https://link.springer.com/content/pdf/10.1007/s12532-021-00209-7.pdf},
+  note    = {Open access, CC BY 4.0. Earlier version: ZIB-Report 18-60, \url{https://opus4.kobv.de/opus4-zib/frontdoor/index/index/docId/7116}}
+}
+
+% ===========================================================================
+% C. GPU primal heuristics for MIP and GPU evolutionary computation
+% ===========================================================================
+
+@article{luteberget2023feasibility,
+  author  = {Luteberget, Bj{\o}rnar and Sartor, Giorgio},
+  title   = {Feasibility Jump: an {LP}-free {Lagrangian} {MIP} heuristic},
+  journal = {Mathematical Programming Computation},
+  volume  = {15},
+  number  = {2},
+  pages   = {365--388},
+  year    = {2023},
+  doi     = {10.1007/s12532-023-00234-8},
+  url     = {https://link.springer.com/content/pdf/10.1007/s12532-023-00234-8.pdf},
+  note    = {Open access, CC BY 4.0. Author preprint: \url{https://luteberget.github.io/preprints/feasibilityjump-2023-01-09.pdf}}
+}
+
+@inproceedings{lin2024localmip,
+  author    = {Lin, Peng and Zou, Mengchuan and Cai, Shaowei},
+  title     = {An Efficient Local Search Solver for Mixed Integer Programming},
+  booktitle = {30th International Conference on Principles and Practice of Constraint Programming (CP 2024)},
+  series    = {Leibniz International Proceedings in Informatics (LIPIcs)},
+  volume    = {307},
+  pages     = {19:1--19:19},
+  publisher = {Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik},
+  year      = {2024},
+  doi       = {10.4230/LIPIcs.CP.2024.19},
+  url       = {https://drops.dagstuhl.de/storage/00lipics/lipics-vol307-cp2024/LIPIcs.CP.2024.19/LIPIcs.CP.2024.19.pdf},
+  note      = {Open access, CC BY 4.0}
+}
+
+@inproceedings{lin2024parailp,
+  author    = {Lin, Peng and Zou, Mengchuan and Chen, Zhihan and Cai, Shaowei},
+  title     = {{ParaILP}: A Parallel Local Search Framework for Integer Linear Programming with Cooperative Evolution Mechanism},
+  booktitle = {Proceedings of the Thirty-Third International Joint Conference on Artificial Intelligence (IJCAI-24)},
+  pages     = {6949--6957},
+  year      = {2024},
+  doi       = {10.24963/ijcai.2024/768},
+  url       = {https://www.ijcai.org/proceedings/2024/0768.pdf}
+}
+
+@misc{corduk2025gpuprimal,
+  author        = {{\c{C}}{\"o}rd{\"u}k, Akif and Sielski, Piotr and Boucher, Alice and Aatish, Kumar},
+  title         = {{GPU}-Accelerated Primal Heuristics for Mixed Integer Programming},
+  year          = {2025},
+  eprint        = {2510.20499},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.OC},
+  url           = {https://arxiv.org/abs/2510.20499},
+  note          = {Poster at the NeurIPS 2025 Workshop on GPU-Accelerated and Scalable Optimization (ScaleOpt)}
+}
+
+@misc{corduk2025evoframework,
+  author       = {{\c{C}}{\"o}rd{\"u}k, Akif and Sielski, Piotr},
+  title        = {{GPU}-Accelerated Evolutionary Framework for Primal Heuristics},
+  howpublished = {Talk, Mixed Integer Programming Workshop 2025, University of Minnesota, 3--6 June 2025},
+  year         = {2025},
+  url          = {https://www.mixedinteger.org/2025/},
+  urldate      = {2026-10-05},
+  note         = {Talk abstract only (speaker: A. {\c{C}}{\"o}rd{\"u}k; joint work with P. Sielski); no paper or slides published}
+}
+
+@misc{nvidia2026cuoptsrc,
+  author       = {{NVIDIA cuOpt developers}},
+  title        = {{NVIDIA cuOpt}: {GPU}-accelerated optimization engine ({MIP} heuristics: population, recombiners and diversity manager)},
+  howpublished = {Source code, GitHub repository NVIDIA/cuopt, Apache License 2.0},
+  year         = {2026},
+  url          = {https://github.com/NVIDIA/cuopt/tree/c2f3df54af31d51c106791812ad1829ab0ca5caa/cpp/src/mip_heuristics/diversity},
+  urldate      = {2026-10-05},
+  note         = {Read at commit c2f3df54af31d51c106791812ad1829ab0ca5caa (5 October 2026); user guide version 26.08}
+}
+
+@article{kempke2025fixprop,
+  author        = {Kempke, Nils-Christian and Koch, Thorsten},
+  title         = {Fix-and-Propagate Heuristics Using Low-Precision First-Order {LP} Solutions for Large-Scale Mixed-Integer Linear Optimization},
+  journal       = {Mathematical Programming Computation},
+  year          = {2026},
+  doi           = {10.1007/s12532-026-00312-7},
+  eprint        = {2503.10344},
+  archivePrefix = {arXiv},
+  url           = {https://link.springer.com/content/pdf/10.1007/s12532-026-00312-7.pdf},
+  note          = {Open access, CC BY 4.0; published online 6 July 2026. Preprint also ZIB-Report 25-04}
+}
+
+@misc{pauphilet2026pangea,
+  author        = {Pauphilet, Jean and Wu, Yupeng},
+  title         = {{PaNGEA}: Parallel Node Generation and Exploration Algorithm on {GPU}},
+  year          = {2026},
+  eprint        = {2610.03090},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2610.03090}
+}
+
+@misc{spoorendonk2026highsheur,
+  author        = {Spoorendonk, Simon},
+  title         = {Presolve heuristics in {HiGHS}: implementation and computational study},
+  year          = {2026},
+  eprint        = {2609.22938},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2609.22938},
+  note          = {The heuristics are in a patched HiGHS v1.15.1 build, not in upstream HiGHS}
+}
+
+@article{sofranac2022domainprop,
+  author        = {Sofranac, Boro and Gleixner, Ambros and Pokutta, Sebastian},
+  title         = {Accelerating Domain Propagation: an Efficient {GPU}-Parallel Algorithm over Sparse Matrices},
+  journal       = {Parallel Computing},
+  volume        = {109},
+  pages         = {102874},
+  year          = {2022},
+  doi           = {10.1016/j.parco.2021.102874},
+  eprint        = {2009.07785},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2009.07785},
+  note          = {Article 102874}
+}
+
+@inproceedings{applegate2021pdlp,
+  author        = {Applegate, David and D{\'\i}az, Mateo and Hinder, Oliver and Lu, Haihao and Lubin, Miles and O'Donoghue, Brendan and Schudy, Warren},
+  title         = {Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient},
+  booktitle     = {Advances in Neural Information Processing Systems 34 (NeurIPS 2021)},
+  year          = {2021},
+  eprint        = {2106.04756},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2106.04756}
+}
+
+@article{lu2023cupdlp,
+  author        = {Lu, Haihao and Yang, Jinwen},
+  title         = {{cuPDLP.jl}: A {GPU} Implementation of Restarted Primal-Dual Hybrid Gradient for Linear Programming in {Julia}},
+  journal       = {Operations Research},
+  volume        = {73},
+  number        = {6},
+  pages         = {3440--3452},
+  year          = {2025},
+  doi           = {10.1287/opre.2024.1069},
+  eprint        = {2311.12180},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2311.12180}
+}
+
+@misc{lu2025cupdlpx,
+  author        = {Lu, Haihao and Peng, Zedong and Yang, Jinwen},
+  title         = {{cuPDLPx}: A Further Enhanced {GPU}-Based First-Order Solver for Linear Programming},
+  year          = {2025},
+  eprint        = {2507.14051},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2507.14051}
+}
+
+@inproceedings{pospichal2010cudaga,
+  author    = {Pospichal, Petr and Jaros, Jiri and Schwarz, Josef},
+  title     = {Parallel Genetic Algorithm on the {CUDA} Architecture},
+  booktitle = {Applications of Evolutionary Computation (EvoApplications 2010, Part I)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {6024},
+  pages     = {442--451},
+  publisher = {Springer},
+  year      = {2010},
+  doi       = {10.1007/978-3-642-12239-2_46},
+  url       = {https://www.fit.vut.cz/research/result-file/c34649/278867/60240442.pdf},
+  note      = {Open copy: publisher-typeset PDF on the Brno University of Technology (FIT) research-result record; self-archiving permission for that version not confirmed}
+}
+
+@article{cantupaz1998survey,
+  author    = {Cant{\'u}-Paz, Erick},
+  title     = {A Survey of Parallel Genetic Algorithms},
+  journal   = {Calculateurs Parall{\`e}les, R{\'e}seaux et Syst{\`e}mes R{\'e}partis},
+  publisher = {Herm{\`e}s},
+  year      = {1998},
+  url       = {https://neo.lcc.uma.es/cEA-web/documents/cant98.pdf},
+  note      = {Volume 10(2), pp. 141--171 per secondary sources (not verified). Earlier IlliGAL Report 97003, University of Illinois at Urbana-Champaign, 1997. Open copy hosted by a third-party academic group (University of M{\'a}laga)}
+}
+
+@article{huang2024evox,
+  author        = {Huang, Beichen and Cheng, Ran and Li, Zhuozhao and Jin, Yaochu and Tan, Kay Chen},
+  title         = {{EvoX}: A Distributed {GPU}-Accelerated Framework for Scalable Evolutionary Computation},
+  journal       = {IEEE Transactions on Evolutionary Computation},
+  volume        = {29},
+  number        = {5},
+  pages         = {1649--1662},
+  year          = {2025},
+  doi           = {10.1109/TEVC.2024.3388550},
+  eprint        = {2301.12457},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/pdf/2301.12457v10}
+}
+
+@misc{toklu2023evotorch,
+  author        = {Toklu, Nihat Engin and Atkinson, Timothy and Micka, Vojt{\v{e}}ch and Liskowski, Pawe{\l} and Srivastava, Rupesh Kumar},
+  title         = {{EvoTorch}: Scalable Evolutionary Computation in {Python}},
+  year          = {2023},
+  eprint        = {2302.12600},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.NE},
+  url           = {https://arxiv.org/abs/2302.12600}
+}
+
+@misc{lange2022evosax,
+  author        = {Lange, Robert Tjarko},
+  title         = {evosax: {JAX}-based Evolution Strategies},
+  year          = {2022},
+  eprint        = {2212.04180},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.NE},
+  url           = {https://arxiv.org/abs/2212.04180}
+}
+
+@misc{sim2026ptilp,
+  author        = {Sim, Kyuil and Choi, Sanghyeok and Park, Jinkyoo},
+  title         = {Solving Integer Linear Programming with Parallel Tempering},
+  year          = {2026},
+  eprint        = {2605.29366},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2605.29366}
+}
+
+@misc{wei2025gpufombip,
+  author        = {Wei, Ningji and Liang, Jiaming},
+  title         = {{GPU}-Accelerated First-Order Method with Randomized Sampling for Binary Integer Programs},
+  year          = {2025},
+  eprint        = {2510.27117},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.OC},
+  url           = {https://arxiv.org/abs/2510.27117}
+}
+
+% ===========================================================================
+% D. Benchmarks, metrics and the hard-instance setting
+% ===========================================================================
+
+@article{gleixner2021miplib,
+  author  = {Gleixner, Ambros and Hendel, Gregor and Gamrath, Gerald and Achterberg, Tobias and Bastubbe, Michael and Berthold, Timo and Christophel, Philipp and Jarck, Kati and Koch, Thorsten and Linderoth, Jeff and L{\"u}bbecke, Marco and Mittelmann, Hans D. and Ozyurt, Derya and Ralphs, Ted K. and Salvagnin, Domenico and Shinano, Yuji},
+  title   = {{MIPLIB} 2017: data-driven compilation of the 6th mixed-integer programming library},
+  journal = {Mathematical Programming Computation},
+  volume  = {13},
+  number  = {3},
+  pages   = {443--490},
+  year    = {2021},
+  doi     = {10.1007/s12532-020-00194-3},
+  url     = {https://www.or.rwth-aachen.de/files/research/publications/Gleixner2021_Article_MIPLIB2017.pdf},
+  note    = {Open access, CC BY 4.0}
+}
+
+@misc{miplib2017web,
+  author       = {{Zuse Institute Berlin}},
+  title        = {{MIPLIB} 2017 -- The Mixed Integer Programming Library},
+  howpublished = {Website},
+  year         = {2026},
+  url          = {https://miplib.zib.de/},
+  urldate      = {2026-10-05},
+  note         = {Maintained by Ambros Gleixner and Mark Turner. Solufile 37 and test files open-v30, hard-v31 and easy-v19 released 24 September 2026; accessed 5 October 2026}
+}
+
+@article{berthold2013primal,
+  author  = {Berthold, Timo},
+  title   = {Measuring the impact of primal heuristics},
+  journal = {Operations Research Letters},
+  volume  = {41},
+  number  = {6},
+  pages   = {611--614},
+  year    = {2013},
+  doi     = {10.1016/j.orl.2013.08.007},
+  url     = {https://webdoc.sub.gwdg.de/ebook/serien/ah/ZIB/ZR-13-17.pdf},
+  note    = {Open copy: ZIB-Report 13-17 (March 2013); record \url{https://opus4.kobv.de/opus4-zib/frontdoor/index/index/docId/4766}}
+}
+
+@article{berthold2021confined,
+  author  = {Berthold, Timo and Csizmadia, Zsolt},
+  title   = {The confined primal integral: a measure to benchmark heuristic {MINLP} solvers against global {MINLP} solvers},
+  journal = {Mathematical Programming},
+  volume  = {188},
+  number  = {2},
+  pages   = {523--537},
+  year    = {2021},
+  doi     = {10.1007/s10107-020-01547-5},
+  url     = {https://optimization-online.org/wp-content/uploads/2020/07/7910.pdf},
+  note    = {Open copy: authors' submitted manuscript, Optimization Online}
+}
+
+@inproceedings{gasse2022ml4co,
+  author        = {Gasse, Maxime and Bowly, Simon and Cappart, Quentin and Charfreitag, Jonas and Charlin, Laurent and Ch{\'e}telat, Didier and Chmiela, Antonia and Dumouchelle, Justin and Gleixner, Ambros and Kazachkov, Aleksandr M. and Khalil, Elias and Lichocki, Pawel and Lodi, Andrea and Lubin, Miles and Maddison, Chris J. and Morris, Christopher and Papageorgiou, Dimitri J. and Parjadis, Augustin and Pokutta, Sebastian and Prouvost, Antoine and Scavuzzo, Lara and Zarpellon, Giulia and others},
+  title         = {The Machine Learning for Combinatorial Optimization Competition ({ML4CO}): Results and Insights},
+  booktitle     = {Proceedings of the NeurIPS 2021 Competitions and Demonstrations Track},
+  series        = {Proceedings of Machine Learning Research},
+  volume        = {176},
+  pages         = {220--231},
+  year          = {2022},
+  eprint        = {2203.02433},
+  archivePrefix = {arXiv},
+  url           = {https://proceedings.mlr.press/v176/gasse22a.html}
+}
+
+@misc{bussieck2026mipfeas,
+  author       = {Bussieck, Michael and Dirkse, Steve},
+  title        = {Expanding the Focus: Introducing the {MIPfeas} Benchmark},
+  howpublished = {GAMS blog},
+  year         = {2026},
+  url          = {https://www.gams.com/blog/2026/03/expanding-the-focus-introducing-the-mipfeas-benchmark/},
+  urldate      = {2026-10-05},
+  note         = {Posted 17 March 2026, updated 16 September 2026}
+}
+
+@misc{mittelmann2026mipfeas,
+  author       = {Bussieck, Michael},
+  title        = {Open Source {MIPFEAS} Benchmark on the {MIPLIB2017} Instances},
+  howpublished = {In H. D. Mittelmann, Benchmarks for Optimization Software},
+  year         = {2026},
+  url          = {https://plato.asu.edu/ftp/mipfeas.html},
+  urldate      = {2026-10-05},
+  note         = {Results page of 16 September 2026, prepared with assistance from NVIDIA}
+}
+
+@article{dolan2002profiles,
+  author        = {Dolan, Elizabeth D. and Mor{\'e}, Jorge J.},
+  title         = {Benchmarking optimization software with performance profiles},
+  journal       = {Mathematical Programming, Series A},
+  volume        = {91},
+  number        = {2},
+  pages         = {201--213},
+  year          = {2002},
+  doi           = {10.1007/s101070100263},
+  eprint        = {cs/0102001},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/cs/0102001}
+}
+
+@article{gould2016note,
+  author  = {Gould, Nicholas and Scott, Jennifer},
+  title   = {A note on performance profiles for benchmarking software},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {43},
+  number  = {2},
+  pages   = {15:1--15:5},
+  year    = {2016},
+  doi     = {10.1145/2950048},
+  url     = {https://centaur.reading.ac.uk/74694/1/perform_toms.pdf},
+  note    = {Article 15; published online 2016, print issue 2017. Open copy: accepted manuscript, University of Reading repository (CentAUR)}
+}
+
+@phdthesis{achterberg2007cip,
+  author = {Achterberg, Tobias},
+  title  = {Constraint Integer Programming},
+  school = {Technische Universit{\"a}t Berlin},
+  year   = {2007},
+  doi    = {10.14279/depositonce-1634},
+  url    = {https://depositonce.tu-berlin.de/bitstreams/a301bdbc-d04d-4fd5-9e04-c0399908689c/download},
+  note   = {Appendix A.3 (pp. 321--322): shifted geometric mean}
+}
+
+@article{knueven2020uc,
+  author  = {Knueven, Bernard and Ostrowski, James and Watson, Jean-Paul},
+  title   = {On Mixed-Integer Programming Formulations for the Unit Commitment Problem},
+  journal = {INFORMS Journal on Computing},
+  volume  = {32},
+  pages   = {857--876},
+  year    = {2020},
+  doi     = {10.1287/ijoc.2019.0944},
+  url     = {https://optimization-online.org/wp-content/uploads/2018/11/6930.pdf},
+  note    = {Volume and pages from DBLP/Semantic Scholar (not in Crossref); issue not verified. Open copy: preprint, Optimization Online (November 2019 revision)}
+}
+
+@misc{pglibuc2019,
+  author       = {{IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms}},
+  title        = {{PGLib-UC}: Benchmarks for the Unit Commitment Problem},
+  howpublished = {GitHub repository power-grid-lib/pglib-uc, release v19.08 (7 August 2019)},
+  year         = {2019},
+  url          = {https://github.com/power-grid-lib/pglib-uc},
+  note         = {Data licence CC BY 4.0. Cite also the original sources of the cases used, as the repository asks}
+}
+
+@misc{xavier2024ucjl,
+  author       = {Xavier, Alinson S. and Kazachkov, Aleksandr M. and Yurdakul, Og{\"u}n and He, Jun and Qiu, Feng},
+  title        = {{UnitCommitment.jl}: A {Julia/JuMP} Optimization Package for Security-Constrained Unit Commitment (Version 0.4)},
+  howpublished = {Zenodo},
+  year         = {2024},
+  doi          = {10.5281/zenodo.11236859},
+  url          = {https://github.com/ANL-CEEESA/UnitCommitment.jl},
+  note         = {Release v0.4.0; concept DOI 10.5281/zenodo.4269874. Code BSD-3-Clause; the Zenodo record lists CC BY 4.0. Cite the version DOI of the release actually used}
+}
+
+@article{xavier2020scuc,
+  author        = {Xavier, {\'A}linson S. and Qiu, Feng and Ahmed, Shabbir},
+  title         = {Learning to Solve Large-Scale Security-Constrained Unit Commitment Problems},
+  journal       = {INFORMS Journal on Computing},
+  year          = {2020},
+  doi           = {10.1287/ijoc.2020.0976},
+  eprint        = {1902.01697},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/1902.01697},
+  note          = {Published online 9 October 2020; volume and pages not in Crossref}
+}
+
+@article{demsar2006,
+  author  = {Dem{\v{s}}ar, Janez},
+  title   = {Statistical Comparisons of Classifiers over Multiple Data Sets},
+  journal = {Journal of Machine Learning Research},
+  volume  = {7},
+  pages   = {1--30},
+  year    = {2006},
+  url     = {https://www.jmlr.org/papers/volume7/demsar06a/demsar06a.pdf}
+}
+
+@article{derrac2011,
+  author  = {Derrac, Joaqu{\'\i}n and Garc{\'\i}a, Salvador and Molina, Daniel and Herrera, Francisco},
+  title   = {A practical tutorial on the use of nonparametric statistical tests as a methodology for comparing evolutionary and swarm intelligence algorithms},
+  journal = {Swarm and Evolutionary Computation},
+  volume  = {1},
+  number  = {1},
+  pages   = {3--18},
+  year    = {2011},
+  doi     = {10.1016/j.swevo.2011.02.002},
+  url     = {https://sci2s.ugr.es/sites/default/files/ficherosPublicaciones/1374_2011-Derrac-SWEVO.pdf},
+  note    = {Open copy: publisher-formatted PDF on the authors' research-group site (SCI2S, University of Granada)}
+}
+
+@article{dicicco1996bootstrap,
+  author  = {DiCiccio, Thomas J. and Efron, Bradley},
+  title   = {Bootstrap Confidence Intervals},
+  journal = {Statistical Science},
+  volume  = {11},
+  number  = {3},
+  pages   = {189--228},
+  year    = {1996},
+  doi     = {10.1214/ss/1032280214},
+  url     = {https://projecteuclid.org/journals/statistical-science/volume-11/issue-3/Bootstrap-confidence-intervals/10.1214/ss/1032280214.pdf},
+  note    = {With discussion and rejoinder. Free to read at the publisher}
+}
+
+@misc{bartzbeielstein2020benchmarking,
+  author        = {Bartz-Beielstein, Thomas and Doerr, Carola and van den Berg, Daan and Bossek, Jakob and Chandrasekaran, Sowmya and Eftimov, Tome and Fischbach, Andreas and Kerschke, Pascal and La Cava, William and L{\'o}pez-Ib{\'a}{\~n}ez, Manuel and Malan, Katherine M. and Moore, Jason H. and Naujoks, Boris and Orzechowski, Patryk and Volz, Vanessa and Wagner, Markus and Weise, Thomas},
+  title         = {Benchmarking in Optimization: Best Practice and Open Issues},
+  year          = {2020},
+  eprint        = {2007.03488},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2007.03488},
+  note          = {Version 2 (16 December 2020); version 1 also issued as CIplus Band 2/2020, TH K{\"o}ln}
+}
+
+% ===========================================================================
+% E. Novelty check: I-TREA lineage, EA/B&B exchange, LLM-driven evolution
+% ===========================================================================
+
+@mastersthesis{orbay2011itrea,
+  author  = {Orbay, Berk},
+  title   = {An Interactive Evolutionary Algorithm for the Multiobjective Relocation Problem with Partial Coverage},
+  school  = {Middle East Technical University},
+  address = {Ankara, Turkey},
+  type    = {M.S. thesis, Operational Research},
+  month   = apr,
+  year    = {2011},
+  url     = {https://open.metu.edu.tr/handle/11511/20509},
+  note    = {Supervisor: Esra Karasakal. Handle hdl:11511/20509; open PDF \url{https://open.metu.edu.tr/bitstream/handle/11511/20509/index.pdf}}
+}
+
+@article{gallardo2007mabnb,
+  author  = {Gallardo, Jos{\'e} E. and Cotta, Carlos and Fern{\'a}ndez, Antonio J.},
+  title   = {On the Hybridization of Memetic Algorithms with Branch-and-Bound Techniques},
+  journal = {IEEE Transactions on Systems, Man, and Cybernetics, Part B (Cybernetics)},
+  volume  = {37},
+  number  = {1},
+  pages   = {77--83},
+  year    = {2007},
+  doi     = {10.1109/TSMCB.2006.883266},
+  url     = {https://carloscotta.com/papers/gallardo07hybridization.pdf},
+  note    = {Open copy: pre-publication draft on co-author C. Cotta's site; pagination differs from the published version}
+}
+
+@techreport{nieminen2003gamilp,
+  author      = {Nieminen, Kimmo and Ruuth, Sampo and Maros, Istv{\'a}n},
+  title       = {Genetic algorithm for finding a good first integer solution for {MILP}},
+  institution = {Department of Computing, Imperial College London},
+  type        = {Departmental Technical Report},
+  number      = {2003/4},
+  month       = apr,
+  year        = {2003},
+  url         = {https://www.doc.ic.ac.uk/research/technicalreports/2003/DTR03-4.pdf},
+  note        = {ISSN 1469-4174}
+}
+
+@article{vidal2022hgs,
+  author        = {Vidal, Thibaut},
+  title         = {Hybrid genetic search for the {CVRP}: Open-source implementation and {SWAP}* neighborhood},
+  journal       = {Computers \& Operations Research},
+  volume        = {140},
+  pages         = {105643},
+  year          = {2022},
+  doi           = {10.1016/j.cor.2021.105643},
+  eprint        = {2012.10384},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2012.10384},
+  note          = {Article 105643}
+}
+
+@inproceedings{liu2024eoh,
+  author        = {Liu, Fei and Tong, Xialiang and Yuan, Mingxuan and Lin, Xi and Luo, Fu and Wang, Zhenkun and Lu, Zhichao and Zhang, Qingfu},
+  title         = {Evolution of Heuristics: Towards Efficient Automatic Algorithm Design Using Large Language Model},
+  booktitle     = {Proceedings of the 41st International Conference on Machine Learning (ICML 2024)},
+  series        = {Proceedings of Machine Learning Research},
+  volume        = {235},
+  pages         = {32201--32223},
+  year          = {2024},
+  eprint        = {2401.02051},
+  archivePrefix = {arXiv},
+  url           = {https://proceedings.mlr.press/v235/liu24bs/liu24bs.pdf}
+}
+
+@inproceedings{ye2024reevo,
+  author        = {Ye, Haoran and Wang, Jiarui and Cao, Zhiguang and Berto, Federico and Hua, Chuanbo and Kim, Haeyeon and Park, Jinkyoo and Song, Guojie},
+  title         = {{ReEvo}: Large Language Models as Hyper-Heuristics with Reflective Evolution},
+  booktitle     = {Advances in Neural Information Processing Systems 37 (NeurIPS 2024)},
+  year          = {2024},
+  doi           = {10.52202/079017-1381},
+  eprint        = {2402.01145},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2402.01145}
+}
+
+@misc{zhang2025dhevo,
+  author        = {Zhang, Zhihao and Li, Siyuan and Li, Chenxi and Liu, Feifan and Chen, Mengjing and Li, Kai and Zhong, Tao and An, Bo and Liu, Peng},
+  title         = {{DHEvo}: Data-Algorithm Based Heuristic Evolution for Generalizable {MILP} Solving},
+  year          = {2025},
+  eprint        = {2507.15615},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.NE},
+  url           = {https://arxiv.org/abs/2507.15615}
+}
+
+@misc{yazdani2025evocut,
+  author        = {Yazdani, Milad and Mostajabdaveh, Mahdi and Aref, Samin and Zhou, Zirui},
+  title         = {{EvoCut}: Strengthening Integer Programs via Evolution-Guided Language Models},
+  year          = {2025},
+  eprint        = {2508.11850},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2508.11850}
+}
+
+@misc{nie2026milpevo,
+  author        = {Nie, Jinbiao and Feng, Kewei and Zhang, Xiaoyuan and Yin, Shan and Wang, Zizhuo and Dong, Bin},
+  title         = {{MILP-Evo}: Closed-Loop Fully Automatic Design of {MILP} Solvers},
+  year          = {2026},
+  eprint        = {2607.18252},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2607.18252}
+}
+
+@misc{orbay2026optopt,
+  author = {Orbay, Berk},
+  title  = {Optimizing the Optimizers: Measuring Learned Control of {MIP} Solvers on a Single {DGX} Spark},
+  year   = {2026},
+  doi    = {10.5281/zenodo.22947442},
+  url    = {https://doi.org/10.5281/zenodo.22947442},
+  note   = {Technical report; code at \url{https://github.com/berkorbay/optopt}}
+}

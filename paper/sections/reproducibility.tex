@@ -1,0 +1,19 @@
+\section{Reproducibility}\label{sec:repro}
+\pending{To be completed with the release.} The project repository holds the code (the Python package
+\texttt{itrea}), the configurations with their hashes, the job files that define every run (instance, arm, seed,
+budget, configuration), the pre-registration and every later decision, a research journal, and the derived tables.
+The raw run trajectories and every stored incumbent vector will be published as a versioned archive with checksums and
+the code revision they belong to, as for the predecessor study~\citep{orbay2026optopt}.
+
+\paragraph{Re-analysis and replication.} Re-deriving every table from the archived trajectories must reproduce the
+published tables exactly. Re-running the jobs tests whether the conclusions hold on another machine; the numbers will
+differ, because every metric is a wall-clock measurement on one DGX Spark and GPU arithmetic is not bit-reproducible.
+
+\paragraph{Checked solutions.} No reported objective rests on a solver's own feasibility check: every incumbent is
+re-read and checked by an independent checker with another library, in exact rational arithmetic for bounds,
+integrality and the objective and with an exact re-check of any row near the tolerance.
+
+\paragraph{Environment.} Python 3.12; NumPy 2.4.6, SciPy 1.18.1, CuPy 14.2.0 (CUDA 13), HiGHS 1.15.1, SCIP 10 through
+PySCIPOpt 6.2.1, NVIDIA cuOpt 26.08, Redis 7 with redis-py 8.1.0; Ubuntu 24.04 with kernel 6.17 and NVIDIA driver
+580.173.02. Instances are public: MIPLIB 2017~\citep{gleixner2021miplib}, PGLib-UC~\citep{pglibuc2019} built with
+its own formulation~\citep{knueven2020uc}, and ML4CO~\citep{gasse2022ml4co}.
