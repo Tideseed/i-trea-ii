@@ -270,3 +270,29 @@ def test_redis_container_args_match_d006():
     assert a[a.index("--cpuset-cpus") + 1] == "0" and a[a.index("--memory") + 1] == "2g"
     assert a[a.index("-p") + 1] == "127.0.0.1:6390:6379" and a[a.index("--restart") + 1] == "no"
     assert "noeviction" in a and "1536mb" in a and exchange_ctl.IMAGE == "redis:7-alpine"
+
+
+def test_serving_processes_tolerated_only_when_asked(tmp_path):
+    """D-010: with tolerate=is_serving_pid a model-server GPU process (by cgroup) is recorded, not foreign."""
+    from itrea.experiments import gpu_health
+    proc = tmp_path / "proc"
+    for pid, cg in ((111, "0::/user.slice/user@1000.service/llm.slice/ornith-vllm.service\n"),
+                    (222, "0::/user.slice/user@1000.service/app.slice/other.service\n")):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / "cgroup").write_text(cg)
+        (proc / str(pid) / "stat").write_text(f"{pid} (x) S 1 0 0\n")
+
+    def query(cmd):
+        return "2400, 60, 90\n" if "--query-gpu" in cmd[1] else "111, [N/A]\n"
+
+    def serving(pid):
+        return gpu_health.is_serving_pid(pid, proc=str(proc))
+    strict = gpu_health.Sampler(query=query, proc=str(proc))
+    loose = gpu_health.Sampler(query=query, proc=str(proc), tolerate=serving)
+    for _ in range(5):
+        strict.sample()
+        loose.sample()
+    assert strict.summary(gpu_run=True)["verdict"] == "void"
+    s = loose.summary(gpu_run=True)
+    assert s["verdict"] == "ok" and s["tolerated_pids"] == [111] and s["foreign_pids"] == []
+    assert not serving(222)

@@ -39,3 +39,10 @@ development never touched.
 7. **Resources:** daytime windows with **[local LLM agent] stopped only** ([local LLM agent] stays for chat; Berk does not chat with
    [local LLM agent]), one GPU lane (one coupled run at a time: one SCIP core + the GPU EA, far cooler than 8 SCIP lanes),
    fan-governor rest breaks honoured (D-009). Free memory is checked after stopping llama-qwen38 before any run.
+
+**Addendum 08:2x — the GPU is shared with an idle [local LLM agent].** The first development run was voided by the GPU-health
+check: [local LLM agent]'s vLLM engine (`ornith-vllm.service`) holds a GPU context even when idle, and every other GPU process
+counts as foreign. For development runs the pool is started with `--allow-serving`: GPU processes of the two model
+servers (identified by their systemd cgroup) are recorded as `tolerated_pids` in each run's GPU-health record instead
+of voiding the run. A chat with [local LLM agent] during a run adds bandwidth noise — acceptable for descriptive development
+numbers; confirmatory and screening runs still require both servers stopped and void on any foreign process.

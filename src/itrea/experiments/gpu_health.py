@@ -100,6 +100,18 @@ def descends_from(pid: int, roots: set[int], proc: str = "/proc", max_depth: int
     return False
 
 
+SERVING_CGROUPS = ("ornith-vllm.service", "llama-qwen38.service")   # the host's local model servers
+
+
+def is_serving_pid(pid: int, proc: str = "/proc") -> bool:
+    """True if the process belongs to one of the local model servers (by its systemd cgroup, not its name)."""
+    try:
+        cg = open(f"{proc}/{int(pid)}/cgroup").read()
+    except (OSError, ValueError):
+        return False
+    return any(u in cg for u in SERVING_CGROUPS)
+
+
 class Sampler(threading.Thread):
     """Samples the GPU every `period_s` until stop(). `own_pids()` returns the run's process ids (descendants are
     recognised by walking the parent chain); every other compute process is foreign.
@@ -108,8 +120,12 @@ class Sampler(threading.Thread):
 
     def __init__(self, own_pids: Callable[[], set[int]] | None = None, period_s: float = 1.0,
                  query: Callable[[list[str]], str] | None = None, clock_floor_mhz: float = CLOCK_FLOOR_MHZ,
-                 foreign_max_share: float = FOREIGN_MAX_SHARE, busy_util: float = BUSY_UTIL, proc: str = "/proc"):
+                 foreign_max_share: float = FOREIGN_MAX_SHARE, busy_util: float = BUSY_UTIL, proc: str = "/proc",
+                 tolerate: Callable[[int], bool] | None = None):
+        """tolerate(pid): a non-run GPU process that is recorded as `tolerated` instead of foreign — the local model
+        servers when the run set was started with --allow-serving (development / exploratory runs only, D-010)."""
         super().__init__(daemon=True, name="itrea-gpu-health")
+        self.tolerate = tolerate
         self.own_pids = own_pids or (lambda: set())
         self.period_s = period_s
         self.query = query or _run
@@ -133,9 +149,12 @@ class Sampler(threading.Thread):
         if g is None:
             return None
         own = set(self.own_pids())
-        foreign = [pid for pid, _ in apps if not descends_from(pid, own, self.proc)]
+        others = [pid for pid, _ in apps if not descends_from(pid, own, self.proc)]
+        tol = self.tolerate or (lambda _pid: False)
+        foreign = [pid for pid in others if not tol(pid)]
         s = dict(t=t, sm_mhz=g["sm_mhz"], temp_c=g["temp_c"], util=g["util"],
-                 apps=[[pid, mem] for pid, mem in apps], foreign=foreign)
+                 apps=[[pid, mem] for pid, mem in apps], foreign=foreign,
+                 tolerated=[pid for pid in others if tol(pid)])
         with self._lock:
             self.samples.append(s)
         return s
@@ -201,6 +220,8 @@ def summarize(samples: list[dict], gpu_run: bool = True, clock_floor_mhz: float 
         foreign_pids=foreign_pids,
         foreign_samples=n_foreign,
         foreign_share=round(n_foreign / n, 4),
+        tolerated_pids=sorted({p for s in samples for p in s.get("tolerated", [])}),
+        tolerated_share=round(sum(1 for s in samples if s.get("tolerated")) / n, 4),
     )
     reasons = []
     if unverifiable:

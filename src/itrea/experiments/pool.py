@@ -968,7 +968,9 @@ class Pool:
             self.watchdog.start()
         if o.pair_opts.gpu_health:                 # ONE sampler for every lane (2 nvidia-smi calls/s, not 2 per lane)
             from itrea.experiments import gpu_health
-            self.sampler = gpu_health.Sampler(own_pids=self._inflight_pids, period_s=o.pair_opts.gpu_period_s)
+            self.sampler = gpu_health.Sampler(
+                own_pids=self._inflight_pids, period_s=o.pair_opts.gpu_period_s,
+                tolerate=(gpu_health.is_serving_pid if o.allow_serving else None))   # D-010: dev runs beside [local LLM agent]
             self.sampler.start()
         threads = [threading.Thread(target=self.lane_loop, args=(l,), name=f"lane-{l.name}", daemon=True)
                    for l in self.lanes]
@@ -1076,6 +1078,7 @@ def main(argv=None) -> int:
                        deadline=_deadline(a.deadline), allow_unfrozen=a.allow_unfrozen, allow_serving=a.allow_serving,
                        rerun_failed=a.rerun_failed, order_seed=a.order_seed, logs_dir=a.logs_dir,
                        max_blocks=a.max_blocks, dry_run=a.dry_run, pair_opts=po)
+    po.tolerate_serving_gpu = bool(a.allow_serving)
     prev = pair.install_term_handlers()        # SIGTERM / SIGHUP -> the KeyboardInterrupt cleanup (halt, stop runs)
     if not a.no_pin:
         pair.pin_runner()                      # the runner's own work off the timed cores (before any thread starts)

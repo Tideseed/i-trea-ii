@@ -217,6 +217,8 @@ class PairOptions:
     cupy_cache_dir: Path = CUPY_CACHE_DIR
     gpu_health: bool = True
     gpu_period_s: float = 1.0
+    tolerate_serving_gpu: bool = False         # the model servers' GPU processes are recorded, not foreign (pool sets it
+                                               # from --allow-serving; never for test or screening jobs, D-010)
     shared_sampler: object | None = None       # a running gpu_health.Sampler owned by the pool (one for every lane);
                                                # None = this run starts and stops its own
     module_override: dict[str, list[str]] = field(default_factory=dict)  # kind -> argv prefix (tests: fake process)
@@ -769,7 +771,8 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             sampler = opts.shared_sampler
         else:
             sampler = gpu_health.Sampler(own_pids=lambda: own | (opts.extra_own_pids() if opts.extra_own_pids
-                                                                 else set()), period_s=opts.gpu_period_s)
+                                                                 else set()), period_s=opts.gpu_period_s,
+                                         tolerate=(gpu_health.is_serving_pid if opts.tolerate_serving_gpu else None))
             sampler.start()
             own_sampler = True
 
