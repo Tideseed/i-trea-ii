@@ -126,6 +126,17 @@ a run recorded before it) and the configuration hash is unchanged.
 Configuration: `configs/itrea2-adaptive.yaml` = the defaults + `strategy.enabled` + `seeding.lp_source: highs_async`
 (the EA alone gets an LP point too).
 
+## Two-scale survival in the feasibility phase (2026-10-06, development; `ranks.feas_alt_scale`, off by default)
+Before any feasible solution is known, survival ranks every candidate by V on the one scale `ranks.viol_norm`. With
+the self-adaptive strategy, children repaired on the rhs scale are then judged on l2 — on fhnw-binpack4-48 they died
+out (8–9 of 256) although rhs repair + rhs survival reaches the optimum there in 30 s (feasibility probe 1, c04).
+With `ranks.feas_alt_scale` set (e.g. `rhs`), the feasibility phase keeps the non-dominated fronts over
+(V on `viol_norm`, V on the second scale), crowding on the overflowing front — each scale's least-violated candidate
+survives and neither scale's numbers are compared with the other's (the consult's second choice; protected per-scale
+demes were its first, kept for later together with region islands). Costs one extra evaluation of the candidate set
+per generation, in the feasibility phase only; outside it the option does nothing. Left out of the configuration hash
+while `none` (`_LATE_DEFAULTS`).
+
 ## Seeding
 `seed_mix`: random in bounds (integer-rounded), LP-relaxation rounding (HiGHS root LP on the CPU, before the clock,
 counted in the start-up record), and the solver's incumbents as they arrive.

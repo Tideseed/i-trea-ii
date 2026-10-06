@@ -147,3 +147,28 @@ def test_generational_rank2_unchanged_once_an_incumbent_exists():
     # the "plus" replacement lets the old ones compete
     sp = three_rank_survival(key, viol, feas, P, RankCfg(rank2_replacement="plus"), ids=np.arange(16), is_new=new)
     assert set(range(1, 8)) <= set(sp.idx.tolist())
+
+
+# ------------------------------------------------- ranks.feas_alt_scale: 2-D survival in the feasibility phase
+def test_feasibility_phase_pareto_keeps_each_scales_best():
+    """Before any feasible solution, with viol_alt the survivors are the non-dominated fronts over (V, viol_alt): a
+    candidate that is best on the second scale but poor on the first survives (2026-10-06, fhnw-binpack4-48)."""
+    from itrea.config import RankCfg
+    from itrea.ea.ranks import three_rank_survival
+    cfg = RankCfg()
+    n = 10
+    key = np.zeros(n)
+    feas = np.zeros(n, bool)
+    v = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 50.0])     # on viol_norm
+    va = np.array([9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.5, 0.1])     # on the second scale: #9 is its best
+    plain = three_rank_survival(key, v, feas, 3, cfg)
+    assert plain.feasibility_phase and 9 not in plain.idx.tolist()
+    two = three_rank_survival(key, v, feas, 3, cfg, viol_alt=va)
+    assert two.feasibility_phase and len(two.idx) == 3
+    assert 0 in two.idx.tolist() and 9 in two.idx.tolist()               # both scales' best (crowding extremes)
+    # outside the feasibility phase viol_alt is ignored
+    feas2 = feas.copy()
+    feas2[0] = True
+    a = three_rank_survival(key, v, feas2, 3, cfg)
+    b = three_rank_survival(key, v, feas2, 3, cfg, viol_alt=va)
+    assert a.idx.tolist() == b.idx.tolist()

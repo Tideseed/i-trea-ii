@@ -226,6 +226,8 @@ def plan_memory(prob: Problem, cfg: EAConfig, gene_dtype: np.dtype) -> MemoryPla
                  crossover_patterns=2 * nnz * (e + 4),
                  dedup_projection=16 * n,
                  frontier_archive=F * n * e)
+    if cfg.ranks.feas_alt_scale != "none":                        # a second device problem (ranks.feas_alt_scale)
+        fixed["device_problem_alt"] = fixed["device_problem"]
 
     def terms(P: int) -> dict:
         O = _offspring(cfg, P)
@@ -579,6 +581,10 @@ class Engine:
         t = time.monotonic()
         self.dp: DeviceProblem = to_device(prob, bk, cfg.population.eval_dtype, cfg.ranks.tol_mode,
                                            cfg.ranks.viol_norm)
+        # ranks.feas_alt_scale: the same problem with the second row scale, for the feasibility phase's 2-D survival
+        self.dp_alt: DeviceProblem | None = None
+        if cfg.ranks.feas_alt_scale != "none":
+            self.dp_alt = to_device(prob, bk, cfg.population.eval_dtype, cfg.ranks.tol_mode, cfg.ranks.feas_alt_scale)
         rec["device_copy_s"] = time.monotonic() - t
         # -------------------------------------------------------------------------------- operators
         t = time.monotonic()
@@ -1065,12 +1071,16 @@ class Engine:
 
     def _evaluate(self, X):
         """(key, viol, feasible) device arrays; on a CuPy out-of-memory the budget is halved and the call retried."""
+        ev = self._evaluate_on(self.dp, X)
+        self.c["evaluations"] += int(X.shape[0])
+        return ev.key, ev.viol, ev.feasible
+
+    def _evaluate_on(self, dp, X):
+        """`evaluate` on `dp` (the main device problem, or `dp_alt` for ranks.feas_alt_scale) with the OOM retry."""
         rk = self.cfg.ranks
         for attempt in range(OOM_RETRIES + 1):
             try:
-                ev = evaluate(self.dp, X, rk.feas_tol, rk.int_tol, mem_budget_bytes=self.budgets["evaluate"])
-                self.c["evaluations"] += int(X.shape[0])
-                return ev.key, ev.viol, ev.feasible
+                return evaluate(dp, X, rk.feas_tol, rk.int_tol, mem_budget_bytes=self.budgets["evaluate"])
             except Exception as e:  # noqa: BLE001
                 if not _is_oom(e) or attempt == OOM_RETRIES:
                     raise
@@ -1210,12 +1220,16 @@ class Engine:
         # r1_ids), and a member demoted by a solver verdict has left r1_ids already, so this mask stays valid
         prev_r1 = np.isin(cand.ids, np.fromiter(self.r1_ids, np.int64, len(self.r1_ids)))
         surv = None
+        viol_alt = None
+        if self.dp_alt is not None and not hf.any() and not math.isfinite(self.inc_external):
+            with self.phase("evaluate"):                     # feasibility phase only: V on the second row scale
+                viol_alt = bk.asnumpy(self._evaluate_on(self.dp_alt, cand.X).viol)
         # every failing round demotes at least one feasible candidate and the float64 checks are cached by id, so at
         # most #feasible + 1 rounds are needed; the last round always ends with a Rank 1 that passed the re-check
         for _ in range(int(hf.sum()) + 1):
             surv = three_rank_survival(hk, hv, hf, self.P, rk, inc_external=self.inc_external,
                                        dual_bound=self.dual_key, rng=self.rng_host, dup=dup, ids=cand.ids,
-                                       is_new=is_new, prev_r1=prev_r1)
+                                       is_new=is_new, prev_r1=prev_r1, viol_alt=viol_alt)
             r1 = surv.idx[surv.rank == R1]
             failed = [int(i) for i in r1 if int(cand.ids[i]) not in self.r1_ids
                       and not self._check_candidate(cand, int(i))[0]]

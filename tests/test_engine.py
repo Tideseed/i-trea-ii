@@ -527,3 +527,24 @@ def test_one_way_arm_cupy():
 def test_internal_constants_documented():
     """The engine's own knobs that are not in EAConfig stay visible (they appear in the start-up record)."""
     assert 0 < E.HEADROOM < 1 and E.FRONTIER_OFFER >= 1 and E.MAX_DEMOTIONS >= 1 and 0 < E.STOP_POLL_S <= 1
+
+
+def test_feas_alt_scale_two_scale_feasibility_phase():
+    """ranks.feas_alt_scale: a second device problem exists only when asked; the run keeps the invariants and the
+    survival gets V on the second scale while nothing feasible is known."""
+    p = toy.set_cover(60, 40, 0.08, seed=3)
+    eng = prepared(p, cfg_for(**{"ranks.feas_alt_scale": "rhs", "strategy.enabled": True}), seed=2)
+    assert eng.dp_alt is not None
+    seen = []
+    orig = E.three_rank_survival
+
+    def spy(*a, **kw):
+        seen.append(kw.get("viol_alt") is not None)
+        return orig(*a, **kw)
+    E.three_rank_survival = spy
+    try:
+        run_checked(eng, 6)
+    finally:
+        E.three_rank_survival = orig
+    assert seen and all(isinstance(s, bool) for s in seen)
+    assert prepared(p, cfg_for(), seed=2).dp_alt is None

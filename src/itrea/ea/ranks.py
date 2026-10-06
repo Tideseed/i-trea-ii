@@ -182,14 +182,17 @@ def three_rank_survival(key: np.ndarray, viol: np.ndarray, feasible: np.ndarray,
                         inc_external: float = np.inf, dual_bound: float = -np.inf,
                         rng: np.random.Generator | None = None, dup: np.ndarray | None = None,
                         ids: np.ndarray | None = None, is_new: np.ndarray | None = None,
-                        prev_r1: np.ndarray | None = None) -> Survival:
+                        prev_r1: np.ndarray | None = None, viol_alt: np.ndarray | None = None) -> Survival:
     """Choose at most P survivors and their ranks.
 
     key/viol/feasible: host arrays over the candidate set (key lower is better). dup: True = drop (duplicate vector).
     inc_external: the solver's incumbent key known to the EA (inf if none). dual_bound: the solver's proven bound as a
     key (-inf if unknown). ids: individual ids (age tie-breaks; lower = older); default = position.
     is_new: True for this generation's offspring / injected / immigrants (generational Rank 2); default all True.
-    prev_r1: True for the members of the previous generation's Rank 1 (the Rank 1 ratchet, step 1); default none."""
+    prev_r1: True for the members of the previous generation's Rank 1 (the Rank 1 ratchet, step 1); default none.
+    viol_alt: V of every candidate on a second row scale (`ranks.feas_alt_scale`); used only in the feasibility phase
+    with the "violation" policy — non-dominated fronts over (V, viol_alt), crowding on the overflowing front, so each
+    scale's least-violated candidate survives; ignored otherwise."""
     key = np.asarray(key, dtype=np.float64)
     viol = np.asarray(viol, dtype=np.float64)
     feasible = np.asarray(feasible, dtype=bool)
@@ -269,6 +272,10 @@ def three_rank_survival(key: np.ndarray, viol: np.ndarray, feasible: np.ndarray,
     rest = np.flatnonzero(pool2)
     if slots <= 0 or rest.size == 0:
         r2 = np.empty(0, dtype=np.int64)
+    elif feas_phase and cfg.no_incumbent_policy == "violation" and viol_alt is not None:
+        va = np.asarray(viol_alt, dtype=np.float64)
+        rest = rest[np.isfinite(va[rest])]
+        r2 = _pareto_select(rest, viol, va, ids, slots, "crowding")
     elif feas_phase and cfg.no_incumbent_policy == "violation":
         r2 = _by_violation(rest, key, viol, ids)[:slots]
     elif cfg.rank2_select == "itrea":

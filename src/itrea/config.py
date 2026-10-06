@@ -67,6 +67,11 @@ class RankCfg:
     no_incumbent_policy: str = "violation"  # no feasible solution known yet: "violation" (rank all by V then key, all
                                             # Rank 2 — feasibility phase) | "itrea" (all are infeasible good: Rank 0
                                             # selection over everything, no quota)
+    feas_alt_scale: str = "none"       # feasibility phase ("violation" policy) only: "none" — by V on viol_norm, as
+                                       # before | "l2" | "rhs" | "count" — non-dominated fronts over (V on viol_norm,
+                                       # V on this scale) with crowding, each scale's best kept (2026-10-06: under the
+                                       # self-adaptive strategy, children repaired on the rhs scale died out under l2
+                                       # survival on fhnw-binpack4-48; vault 80-reviews, feasibility targets consult)
     # Any shortfall below P (too few eligible candidates) is filled by the engine with immigrants, never with
     # over-quota infeasible-good individuals: the x quota is a TOTAL cap on super-optimal infeasible survivors.
     imp_tol: float = 1e-9              # "better than the incumbent" margin, relative to max(1, |inc|)
@@ -229,6 +234,10 @@ class LpStreamCfg:
                                        # four, round robin (else always the first LP point)
 
 
+# Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
+_LATE_DEFAULTS = {"ranks.feas_alt_scale": "none"}
+
+
 @dataclass
 class EAConfig:
     name: str = "default"
@@ -256,14 +265,19 @@ class EAConfig:
 
     def hash(self) -> str:
         """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy` and
-        `lp_stream` sections while disabled: they are inert then, so every configuration written before a section
-        existed keeps its hash (the default's `9ac4a93bf93b` among them)."""
+        `lp_stream` sections while disabled, and the fields in `_LATE_DEFAULTS` while at their default: they are
+        inert then, so every configuration written before a section or field existed keeps its hash (the default's
+        `9ac4a93bf93b` among them)."""
         d = self.to_dict()
         d.pop("name", None)
         if not self.strategy.enabled:
             d.pop("strategy", None)
         if not self.lp_stream.enabled:
             d.pop("lp_stream", None)
+        for dotted, default in _LATE_DEFAULTS.items():     # fields added after a hash was recorded: out while default
+            sec, _, k = dotted.partition(".")
+            if d.get(sec, {}).get(k, object()) == default:
+                d[sec].pop(k)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
     @classmethod
@@ -311,6 +325,8 @@ class EAConfig:
         _check(r.rank2_replacement in ("generational", "plus"), "ranks.rank2_replacement in generational|plus")
         _check(r.tol_mode in ("scip", "highs", "rhs"), "ranks.tol_mode in scip|highs|rhs")
         _check(r.viol_norm in ("l2", "rhs", "count"), "ranks.viol_norm in l2|rhs|count")
+        _check(r.feas_alt_scale in ("none", "l2", "rhs", "count") and r.feas_alt_scale != r.viol_norm,
+               "ranks.feas_alt_scale in none|l2|rhs|count and different from ranks.viol_norm")
         _check(r.x == 0 or math.floor(r.x * p.size + 1e-12) >= 1, "ranks.x * population.size must give >= 1 Rank 0 slot")
         _check(r.y == 0 or r.elite_basis != "population" or math.ceil(r.y * p.size - 1e-12) >= 1, "ranks.y slots")
         _check(r.no_incumbent_policy in ("violation", "itrea"), "ranks.no_incumbent_policy in violation|itrea")

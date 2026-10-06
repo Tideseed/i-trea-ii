@@ -13,6 +13,8 @@
 # strategy.enabled is false the section is inert and is left out of the hash (EAConfig.hash).
 # 2026-10-06 (hash unchanged): the `lp_stream` section (D-011, the solver's good infeasible node LP points streamed into
 # the population) was added OFF, under the same rule.
+# 2026-10-06 (hash unchanged): ranks.feas_alt_scale (two-scale survival in the feasibility phase) added at its
+# default "none"; fields added later are left out of the hash while at their default (_LATE_DEFAULTS in config.py).
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -33,6 +35,7 @@ ranks:
   tol_mode: scip
   viol_norm: l2
   no_incumbent_policy: violation
+  feas_alt_scale: none
   imp_tol: 1.0e-09
   feas_tol: 1.0e-06
   int_tol: 1.0e-06

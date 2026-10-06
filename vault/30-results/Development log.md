@@ -13,6 +13,9 @@ SCIP-accepted posts. Change notes say what was changed and why, with the commit.
 
 | 2026-10-06 | 770df17 / c192bb5 | LP stream (D-011): SCIP streams good infeasible node LP points (2 % time budget, few fractional variables preferred); the EA ranks them (V of the nearest rounding, key) and turns each into 4 repaired children, ordinary survival only. `configs/itrea2-adaptive-lps.yaml` (`a2ad94e9188d`); with the c01 budget `4a96b872ffdc`. Reviewed before the first GPU run (3 medium findings fixed). Measured as `lps1` against `ad1` | Berk 15:2x: "when solver comes up with suitable good infeasible solutions (minimize infeasibility then maximize objective function) it might be able to inject to EA's population … We are aiming for more diversity in EA" |
 
+| 2026-10-06 | (this commit) | `ranks.feas_alt_scale` (off by default, every hash unchanged): two-scale Pareto survival in the feasibility phase over (V_l2, V_rhs). Not yet run | fhnw-binpack4-48: rhs-repaired children die under l2 survival (ad1/lps1 final population 8–9 of 256); consult with GPT-6.1 Sol |
+| 2026-10-06 | 4d044ac | aggregation of two-variable equality rows (`src/itrea/ea/aggregate.py`), exact; NOT wired in (payoff probe negative on radiationm) | radiationm/rail01 equality chains |
+
 ## Results
 | date | cfg | instance | seed | P_SCIP | P_EA | P_port | ttf (s) | posts/acc | notes |
 |---|---|---|---|---|---|---|---|---|---|
