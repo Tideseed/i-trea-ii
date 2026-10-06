@@ -39,6 +39,9 @@ A three-lens design critique followed ([[2026-10-05 design critique — response
      is no solution; for PGLib-UC and ML4CO **always** (their stage-1 reference is the run's own best value, so a P
      rule on one seed would measure time to its own result).
    A MIPLIB instance that stage 1 solves with P(300) < 0.05 cannot reach any stratum, so it needs no second seed.
+   **Amended after the tag by [[D-008 Thermal start gate by arm type]] (2026-10-06 02:5x, during stage 1):** 8 lanes
+   (X925 cores 5–9, 15–17), not 9 — with 9 lanes the box reached 91 °C against the 92 °C pause; CPU-only arms start
+   below 88 °C. A resource rule; the screening measurement (one SCIP run per X925 core at full clock) is unchanged.
 3. **Pool freeze** (rules in §2): write `datasets/hard_pool.csv` and the split, commit, tag **`pool-v1`**.
 4. **Reference values frozen** (§4): write `datasets/reference.csv`, commit.
 5. **E0 calibration** (§7): CPU/GPU interference, exchange transport ([[D-006 Exchange platform — Redis, file mailbox as fallback]]), callback windows.
