@@ -96,8 +96,10 @@ heuristic ↔ B&B exchange); Vidal's HGS 2022 (managed infeasible share with pre
    works with its own B&B.
 4. **Protection of a top-y % feasible share** rather than the single best feasible (cuOpt) — but protecting a feasible
    share as such is established (ASCHEA), so this is a parameter choice, not a contribution.
-5. **Method.** Parametric operators, a pre-registered protocol with a cuOpt race on the same GPU as the primary
-   control, lineage tracing of improvements to Rank 0 ancestors ([[D-002 Pre-registration — hypotheses, arms, analysis]]).
+5. **Method.** Parametric operators and a pre-registered protocol whose primary test is the main claim of
+   [[D-007 Main claim — the coupling beats either method alone]] — the coupled system against SCIP alone **and** against
+   the EA alone — with the uncoupled portfolio of the two and the SCIP ‖ cuOpt race on the same GPU as secondary
+   controls; lineage tracing of improvements to Rank 0 ancestors ([[D-002 Pre-registration — hypotheses, arms, analysis]]).
 
 Nothing in the sweeps supports a stronger claim, and none should be made before the experiments.
 
