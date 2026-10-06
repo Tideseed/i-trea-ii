@@ -36,7 +36,7 @@ Python access; probing state), pseudo-solutions (very row-infeasible, little var
 new diversity; "not stored" ≠ infeasible).
 
 **Berk's order — minimise infeasibility, then optimise the objective — applied twice:**
-- in SCIP, cheaply: a node is "good" when its count of fractional integer variables (`getNLPBranchCands`, free) is at
+- in SCIP, cheaply: an LP whose value reaches the cutoff bound is skipped (not super-optimal); a node is "good" when its count of fractional integer variables (`getNLPBranchCands`, free) is at
   most the 25 % quantile of the last 32 LP solves; integral LP points are skipped (SCIP checks them itself);
 - in the EA, exactly: each point is rounded to the nearest integer point and evaluated on the GPU; the pool (16 points)
   is ranked lexicographically by (V of that rounding, key) and used best first.
@@ -51,7 +51,9 @@ coupling's cost, against a harness-matched A0.
 feasibility jump, then **ordinary survival only** — a super-optimal infeasible child competes for Rank 0 under its x·P
 cap and NSGA-II selection, never bypassing them; a feasible one follows the incumbent / Rank 1 rules. At most 2 points
 per exchange tick. Stagnation immigrants take their LP point from the pool's best four, round robin, instead of always
-the first LP point. The first stream point becomes the EA's LP point if it has none yet.
+the first LP point. A stream point never becomes the EA's LP point (`lp_x` keeps `seeding.lp_source`). The pool keeps
+16 points: used points leave first (except the best four), so new points keep giving children even when they are
+worse than the best seen.
 Marking: origin SEED_LP | INJECTED | IMMIGRANT (a combination no other path produces — the uint16 origin has no free
 bit); the generation record counts `rank0_stream` (Rank 0 members born from the stream) to see whether it floods Rank 0.
 
@@ -61,6 +63,18 @@ SCIP's last 3 points with their ids, so an EA that misses a post loses nothing.
 **Configuration.** Section `lp_stream` (off by default; left out of the hash while off — every existing hash unchanged).
 `configs/itrea2-adaptive-lps.yaml` = the adaptive configuration + the stream (hash `a2ad94e9188d`). SCIP only (the
 runner refuses a HiGHS partner).
+
+**Review of 770df17 (same day, before any GPU run; fixed in the next commit).** (1) Adopting the first stream point
+as the EA's LP point raced the HiGHS worker (`lp_source: highs_async`) — the LP source depended on timing and differed
+between arms; removed. (2) The validation rule (stream needs the exchange) blocked every no-exchange arm (A3r, A5, A5x0,
+A5y0); `_NOX` now switches the stream off too. (3) Used points never left the pool, so a full pool could silence the
+stream; fixed (above). (4) `nodeinfeasible` and the cutoff were ignored; now a cut-off node or an LP at the cutoff is
+skipped. (6) The budget charged only reads and posts; now every decision is charged (try/finally), and the quantile is
+a 1 µs nearest-rank instead of a 33 µs `np.quantile`. (7) Ids skipped between two polls are counted (`lps_missed`).
+Not changed: duplicate merging can OR the stream bits into an EA-bred member (`rank0_stream`/`final_stream` may
+over-count slightly; P(T) and the attribution in `build_runs` do not read these bits); rounding before clipping, as in
+`_receive`. Checked and fine: getSolVal(None, ·) over original variables at both timings, SCIP's search unchanged with
+the stream on (identical nodes, LP iterations and callbacks on the toy), disabled configurations bit-identical.
 
 ## 4. What it will not fix
 Better seeds give no coordinated moves: instances with long equality chains (rail01's 45.5k conservation rows;

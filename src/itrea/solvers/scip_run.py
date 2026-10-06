@@ -193,8 +193,8 @@ class _Exchange:
         self.lps_last = -float("inf")
         self.lps_wait: float | None = None
         self.lps_id = 0
-        self.lps_stats = dict(lp_solves=0, integral=0, reads=0, early=0, quality=0, patience=0, read_s=0.0, post_s=0.0,
-                              bad=0)
+        self.lps_stats = dict(lp_solves=0, cutoff=0, integral=0, reads=0, early=0, quality=0, patience=0, read_s=0.0,
+                              post_s=0.0, bad=0)
         self.LP_OPTIMAL = SCIP_LPSOLSTAT.OPTIMAL
         self.DIDNOTRUN, self.DIDNOTFIND, self.FOUNDSOL = (SCIP_RESULT.DIDNOTRUN, SCIP_RESULT.DIDNOTFIND,
                                                           SCIP_RESULT.FOUNDSOL)
@@ -220,7 +220,7 @@ class _Exchange:
             m.interruptSolve()
 
     # ----------------------------------------------------------------------------------------- plugin
-    def on_call(self, heur, timing: int):
+    def on_call(self, heur, timing: int, nodeinfeasible: bool = False):
         """One plugin call: a clock read and a few counters unless a poll, a stop check or the root LP is due."""
         now = time.monotonic()
         t = now - self.proc.t0
@@ -245,7 +245,7 @@ class _Exchange:
         if (self.mode == "active" and self.send and not self.lp_posted and timing & self.AFTERLPNODE
                 and stage == self.SOLVING and m.getDepth() == 0):
             self._post_root_lp()
-        if self.lps_on and timing & self.LPS_TIMING and stage == self.SOLVING:
+        if self.lps_on and timing & self.LPS_TIMING and stage == self.SOLVING and not nodeinfeasible:
             self._lp_stream_tick(now, t)
         if now < self.next_poll:
             return {"result": self.DIDNOTRUN}
@@ -422,12 +422,23 @@ class _Exchange:
             self.proc.stats.seconds += time.perf_counter() - tp
 
     def _lp_stream_tick(self, now: float, t: float) -> None:
-        """One optimal LP solve seen by the plugin: decide whether its point is read (module docstring)."""
+        """One optimal LP solve seen by the plugin: decide whether its point is read (module docstring). Its whole
+        cost — this decision included, not only the read and the post — is charged to the stream's budget."""
+        tp = time.perf_counter()
+        try:
+            self._lp_stream_decide(now, t)
+        finally:
+            self.lps_spent += time.perf_counter() - tp
+
+    def _lp_stream_decide(self, now: float, t: float) -> None:
         m = self.m
         if m.inProbing() or m.getLPSolstat() != self.LP_OPTIMAL:
             return
         st = self.lps_stats
         st["lp_solves"] += 1
+        if m.getLPObjVal() >= m.getCutoffbound():        # not super-optimal: a node about to be cut off (review)
+            st["cutoff"] += 1
+            return
         nfrac = int(m.getNLPBranchCands())
         if nfrac == 0:
             st["integral"] += 1
@@ -441,33 +452,37 @@ class _Exchange:
             self.lps_wait = now
         if len(self.lps_win) < 8:
             why = "early"
-        elif nfrac <= float(np.quantile(np.fromiter(self.lps_win, dtype=np.float64), self.lps_q)):
-            why = "quality"
-        elif now - self.lps_wait >= self.lps_patience:
-            why = "patience"
         else:
-            return
-        self._lp_stream_read(now, t, nfrac, why)
+            w = sorted(self.lps_win)                     # nearest-rank quantile: ~1 µs (np.quantile ~33 µs)
+            if nfrac <= w[int(self.lps_q * (len(w) - 1))]:
+                why = "quality"
+            elif now - self.lps_wait >= self.lps_patience:
+                why = "patience"
+            else:
+                return
+        self._lp_stream_read(now, nfrac, why)
 
-    def _lp_stream_read(self, now: float, t: float, nfrac: int, why: str) -> None:
+    def _lp_stream_read(self, now: float, nfrac: int, why: str) -> None:
+        """Read, post, account. The time is charged by the caller (`_lp_stream_tick`, try/finally), so a post that
+        raises is charged too and cannot make reads free."""
         m, st = self.m, self.lps_stats
         tp = time.perf_counter()
+        self.lps_last, self.lps_wait = now, None
         x = np.fromiter((m.getSolVal(None, v) for v in self.ov), dtype=np.float64, count=self.n)
         t_read = time.perf_counter() - tp
-        self.lps_last, self.lps_wait = now, None
         if not np.all(np.isfinite(x)):
             st["bad"] += 1
-            self.lps_spent += t_read
             return
         obj = float(self.c_local @ x + self.offset)
         self.lps_id += 1
         self.lps_ring.append((self.lps_id, self.proc.namemap.to_canonical(x), obj))
         X = np.vstack([r[1] for r in self.lps_ring])
-        seq = self.proc.mailbox.lps.post(X, np.array([r[2] for r in self.lps_ring]),
-                                         origin=np.array([r[0] for r in self.lps_ring], dtype=np.int64))
+        try:
+            seq = self.proc.mailbox.lps.post(X, np.array([r[2] for r in self.lps_ring]),
+                                             origin=np.array([r[0] for r in self.lps_ring], dtype=np.int64))
+        finally:
+            self.lps_est = 0.5 * self.lps_est + 0.5 * (time.perf_counter() - tp)
         dt = time.perf_counter() - tp
-        self.lps_spent += dt
-        self.lps_est = 0.5 * self.lps_est + 0.5 * dt
         st["reads"] += 1
         st[why] += 1
         st["read_s"] += t_read
@@ -520,7 +535,7 @@ def _classes():
 
         def heurexec(self, heurtiming, nodeinfeasible):
             try:
-                return self.ex.on_call(self, int(heurtiming))
+                return self.ex.on_call(self, int(heurtiming), bool(nodeinfeasible))
             except Exception as e:  # noqa: BLE001 — an exception inside a SCIP callback must not go unseen
                 self.ex.proc.trace.event("note", msg=f"plugin error: {type(e).__name__}: {e}"[:500])
                 self.ex.proc.stats.add("plugin_errors")

@@ -134,7 +134,7 @@ _HIGHS_X = ProcSpec("highs", "solver", exchange=True)
 _EA_GPU = ProcSpec("ea", "ea", backend="cupy")
 _EA_CPU = ProcSpec("ea", "ea", backend="numpy")
 _CUOPT = ProcSpec("cuopt", "cuopt")
-_NOX = (("exchange.enabled", False),)
+_NOX = (("exchange.enabled", False), ("lp_stream.enabled", False))   # the stream needs the exchange (review 770df17)
 
 ARMS: dict[str, ArmSpec] = {a.name: a for a in [
     ArmSpec("A0", (_SCIP,), doc="SCIP alone, harness-matched (plugin installed and inert, null partner)"),

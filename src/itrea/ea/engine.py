@@ -866,7 +866,8 @@ class Engine:
         self.lps_seen = 0                        # highest point id taken from the stream
         self.lps_rr = 0                          # round robin over the pool's best for stagnation immigrants
         if self.lps is not None:
-            self.c.update({k: 0 for k in ("lps_msgs", "lps_points", "lps_used", "lps_rows", "lps_dropped")})
+            self.c.update({k: 0 for k in ("lps_msgs", "lps_points", "lps_used", "lps_rows", "lps_dropped",
+                                          "lps_missed")})
         S = self.S
         self.sc: dict[str, np.ndarray] = {k: np.zeros(S, np.int64) for k in (
             "children", "best_events", "incumbents", "best_events_solver", "incumbents_solver", "repaired",
@@ -1049,7 +1050,7 @@ class Engine:
         f = 0 if frontier_rows is None else min(k, int(frontier_rows.shape[0]))
         draws = self.rng_host.integers(self.S, size=k).astype(np.uint8)
         rest = draws[f:]
-        on_lp = np.flatnonzero(self.strat_lp[rest]) if self.lp_x is not None else np.zeros(0, np.int64)
+        on_lp = np.flatnonzero(self.strat_lp[rest]) if lpx is not None else np.zeros(0, np.int64)
         k_lp = int(round(lp_share * on_lp.size))
         Xn, on = immigrants(self.bk, self.dp, k, self.rng_dev, self.rng_host,
                             lp_x=lpx if k_lp else None, frontier_rows=frontier_rows, lp_share=0.0,
@@ -1635,8 +1636,10 @@ class Engine:
 
     def _lps_receive(self, msg) -> None:
         """New points of the LP stream (ids above the last seen): round each to the nearest integer point, evaluate
-        that rounding, and keep the best `lp_stream.pool` points ranked (V, key). The first point becomes the EA's LP
-        point if it has none yet (it then spawns the usual LP-rounding immigrants instead of stream children)."""
+        that rounding, and keep them in the pool ranked (V, key). A stream point never becomes the EA's LP point
+        (`lp_x` keeps its configured source, `seeding.lp_source` — review of 770df17: adopting the first stream point
+        raced the HiGHS worker and made the LP source depend on timing). Ids skipped between two polls (more than
+        `ring` posts) are counted in `lps_missed`."""
         prob, bk = self.prob, self.bk
         self.c["lps_msgs"] += 1
         X = np.asarray(msg.X, dtype=np.float64)
@@ -1644,7 +1647,10 @@ class Engine:
         if ids.shape[0] != X.shape[0] or X.shape[1:] != (prob.n,):
             self.trace.event("note", msg=f"LP stream message {msg.seq} malformed: X {X.shape}, ids {ids.shape}")
             return
-        new = np.flatnonzero((ids > self.lps_seen) & np.all(np.isfinite(X), axis=1))
+        fresh = ids > self.lps_seen
+        if fresh.any():
+            self.c["lps_missed"] += max(0, int(ids[fresh].min()) - self.lps_seen - 1)
+        new = np.flatnonzero(fresh & np.all(np.isfinite(X), axis=1))
         if ids.size:
             self.lps_seen = max(self.lps_seen, int(ids.max()))
         if new.size == 0:
@@ -1658,20 +1664,32 @@ class Engine:
         hk, hv, hf = (bk.asnumpy(a) for a in ev)
         now = self.trace.now()
         for j, i in enumerate(new):
-            self.lps_pool.append(dict(id=int(ids[i]), x=X[i], y=Y[j], obj=float(msg.obj[i]), V=float(hv[j]),
-                                      key=float(hk[j]), feas=bool(hf[j]), t=now, used=False))
+            self.lps_pool.append(dict(id=int(ids[i]), x=X[i].copy(), y=Y[j].copy(), obj=float(msg.obj[i]),
+                                      V=float(hv[j]), key=float(hk[j]), feas=bool(hf[j]), t=now, used=False))
         self.c["lps_points"] += int(new.size)
         self.lps_pool.sort(key=lambda q: (q["V"], q["key"]))
-        cap = self.lps.pool
-        if len(self.lps_pool) > cap:
-            self.c["lps_dropped"] += sum(1 for q in self.lps_pool[cap:] if not q["used"])
-            del self.lps_pool[cap:]
+        self._lps_trim()
         self.trace.event("lps", seq=int(msg.seq), ids=[int(ids[i]) for i in new], V=[float(v) for v in hv],
                          key=[float(k) for k in hk], feasible=int(hf.sum()), pool=len(self.lps_pool))
-        if self.lp_x is None and self.lps_pool:
-            first = self.lps_pool[0]
-            first["used"] = True
-            self._lp_arrived(first["x"], source="solver_stream", obj=first["obj"])
+
+    def _lps_trim(self) -> None:
+        """Keep the pool at `lp_stream.pool` points: USED points leave first (worst first), except the best four, which
+        the stagnation immigrants draw from; only then the worst unused ones (counted in `lps_dropped`). So a stream
+        whose new points are worse than the best ever seen keeps producing children (review of 770df17)."""
+        cap = self.lps.pool
+        pool = self.lps_pool
+        if len(pool) <= cap:
+            return
+        excess = len(pool) - cap
+        for i in range(len(pool) - 1, 3, -1):                # used ones beyond the best four, worst first
+            if excess == 0:
+                break
+            if pool[i]["used"]:
+                del pool[i]
+                excess -= 1
+        if excess:
+            self.c["lps_dropped"] += sum(1 for q in pool[-excess:] if not q["used"])
+            del pool[-excess:]
 
     def _lps_use(self) -> None:
         """Turn up to `lp_stream.per_tick` unused pool points, best (V, key) first, into `lp_stream.roundings` children

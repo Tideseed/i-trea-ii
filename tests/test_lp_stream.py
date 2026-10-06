@@ -131,9 +131,9 @@ def test_stream_points_ranked_and_turned_into_children():
     pool = eng.lps_pool
     assert [(q["V"], q["key"]) for q in pool] == sorted((q["V"], q["key"]) for q in pool)   # Berk's order
     assert sorted(q["id"] for q in pool) == [1, 2, 3] and all(q["used"] for q in pool)
-    # the first point is the EA's LP point (no LP before it); the other two became stream children
-    assert eng.lp_info["source"] == "solver_stream" and eng.lp_x is not None
-    assert c["lps_used"] == 2 and c["lps_rows"] == 2 * 4
+    # a stream point never becomes the EA's LP point (its source stays seeding.lp_source); all three gave children
+    assert eng.lp_x is None and eng.lp_info["source"] == "solver"
+    assert c["lps_used"] == 3 and c["lps_rows"] == 3 * 4 and c["lps_missed"] == 0
     assert out["lp_stream"]["pool"] == 3 and out["lp_stream"]["unused"] == 0
     gens = [e for e in read_events(eng.trace.path) if e["kind"] == "gen"] if getattr(eng.trace, "path", None) else []
     for g in gens:
@@ -156,17 +156,15 @@ def test_stream_children_carry_the_stream_origin_and_are_repaired():
     eng._lps_use = spy
     eng.begin(time.monotonic(), 3600.0)
     eng.step()
-    assert len(batches) == 1 and batches[0][0].repair
-    b, X0 = batches[0]
-    assert b.X.shape == (3, p.n)
-    assert np.all((b.origin & ~np.uint16(ORIGIN_REPAIR)) == (STREAM_BITS | ORIGIN_IMMIGRANT))   # + REPAIR if moved
-    # the best point became the EA's LP point; the other one's nearest rounding is row 0 (before the repair)
-    lp_pt, other = eng.lps_pool[0], eng.lps_pool[1]
-    assert np.array_equal(eng.lp_x, lp_pt["x"])
-    assert np.array_equal(X0[0], other["y"])                           # before the repair
-    assert np.all((X0 == 0) | (X0 == 1))
+    assert len(batches) == 2 and all(b.repair for b, _ in batches)       # per_tick 2: both points in one tick
+    for (b, X0), q in zip(batches, eng.lps_pool):                        # best (V, key) first
+        assert b.X.shape == (3, p.n)
+        assert np.all((b.origin & ~np.uint16(ORIGIN_REPAIR)) == (STREAM_BITS | ORIGIN_IMMIGRANT))  # + REPAIR if moved
+        assert np.array_equal(X0[0], q["y"])                             # row 0 = the nearest rounding, before repair
+        assert np.all((X0 == 0) | (X0 == 1))
+    assert eng.lp_x is None
     check_invariants(eng)
-    assert eng.c["lps_used"] == 1 and eng.c["lps_rows"] == 3
+    assert eng.c["lps_used"] == 2 and eng.c["lps_rows"] == 6
 
 
 def test_stream_ignores_malformed_and_disabled_never_reads_it():
@@ -185,6 +183,39 @@ def test_stream_ignores_malformed_and_disabled_never_reads_it():
 
 def test_one_way_arm_never_reads_the_stream():
     assert "lps" in SpyMailbox.FORBIDDEN
+
+
+def test_used_points_leave_the_pool_first_and_missed_ids_are_counted():
+    """Review of 770df17: with a full pool, new points worse than the best ever seen must still give children."""
+    p = toy.knapsack(30)
+    X = knapsack_lp_points(p, 9)
+    cfg = cfg_for(**{"lp_stream.enabled": True, "lp_stream.pool": 7, "lp_stream.per_tick": 8,
+                     "lp_stream.roundings": 1})                         # the best four stay; three free slots
+    eng = prepared(p, cfg, seed=2, mailbox=StreamMailbox())
+    eng.begin(time.monotonic(), 3600.0)
+    for ids in ([1, 2, 3], [4, 5, 6], [7, 8, 9]):
+        eng._lps_receive(_msg(p, X[np.array(ids) - 1], ids, ids[0]))
+        eng._lps_use()
+        assert len(eng.lps_pool) <= 7
+    assert eng.c["lps_used"] == 9 and eng.c["lps_dropped"] == 0 and eng.c["lps_missed"] == 0
+    keys = [(q["V"], q["key"]) for q in eng.lps_pool]
+    assert keys == sorted(keys)
+    eng2 = prepared(p, cfg, seed=2, mailbox=StreamMailbox())
+    eng2.begin(time.monotonic(), 3600.0)
+    eng2._lps_receive(_msg(p, X[:3], [1, 2, 3], 1))
+    eng2._lps_receive(_msg(p, X[6:9], [7, 8, 9], 2))                   # ids 4-6 were overwritten before a poll
+    assert eng2.c["lps_missed"] == 3 and eng2.c["lps_points"] == 6
+
+
+def test_no_exchange_arms_switch_the_stream_off():
+    from itrea.experiments.pair import effective_config
+    for arm in ("A5", "A3r", "A5x0", "A5y0"):
+        cfg, ov = effective_config({"instance": "x.mps", "arm": arm, "seed": 0, "budget": 10.0,
+                                    "config": "configs/itrea2-adaptive-lps.yaml"})
+        assert not cfg.lp_stream.enabled and not cfg.exchange.enabled, arm
+    cfg, _ = effective_config({"instance": "x.mps", "arm": "A3", "seed": 0, "budget": 10.0,
+                               "config": "configs/itrea2-adaptive-lps.yaml"})
+    assert cfg.lp_stream.enabled
 
 
 # ------------------------------------------------------------------------------------------------------- SCIP
@@ -214,6 +245,7 @@ def test_scip_streams_fractional_node_lp_points(tmp_path):
     s = _summary(run)
     ls = s["lp_stream"]
     assert ls["reads"] >= 3 and ls["reads"] == ls["early"] + ls["quality"] + ls["patience"]
+    assert "cutoff" in ls and ls["cutoff"] < ls["lp_solves"]
     assert ls["points"] == ls["reads"] and ls["lp_solves"] >= ls["reads"]
     assert ls["spent_s"] <= 0.05 * s["wall_s"] + 0.05            # the budget (+ start allowance and one read)
     msg = mb.lps.poll()

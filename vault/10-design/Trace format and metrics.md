@@ -56,7 +56,7 @@ listed ones.
 | `lp` | SCIP (`--send`) | the root LP solution was posted to the EA: `obj` (once per run; a non-optimal root LP is a `note` instead) |
 | `lps` | SCIP (`--lp-stream`, D-011) | a node LP point was read and posted: `seq`, `id` (point id, increasing), `depth`, `nodes`, `nfrac` (fractional integer variables), `obj` (LP objective, original space), `why` (`early` — one of the first 8 LP solves; `quality` — `nfrac` within the configured quantile; `patience`), `read_s`, `s` (read + post) |
 | `lps` | EA (`lp_stream.enabled`) | stream points taken: `seq`, `ids` (new point ids), `V`, `key` (of each point's nearest rounding), `feasible` (how many of those roundings were feasible), `pool` (pool size after) |
-| `lp` | EA | an LP point arrived: `source` (`solver`, `highs_async` or `solver_stream` — the first point of the LP stream), `state` (`done`, `bad_point`, `no_solution`, `failed`, `stopped`), `obj`, `immigrants` (LP-rounded individuals queued), `wall_seconds` (`highs_async`), `error` |
+| `lp` | EA | an LP point arrived: `source` (`solver` or `highs_async`; an LP-stream point never becomes the LP point), `state` (`done`, `bad_point`, `no_solution`, `failed`, `stopped`), `obj`, `immigrants` (LP-rounded individuals queued), `wall_seconds` (`highs_async`), `error` |
 | `gen` | EA, every `log_every` generations and at the end | `gen`, `best_key`, `median_key`, `feas_share`, `n0`, `n1`, `n2`, `pop`, `inc`, `inc_external` (the solver's incumbent key known to the EA), `dual_key`, `rank0_candidates`, `rank0_demoted`, `rank0_over_quota`, `superopt_survivors` (manipulation check: infeasible survivors with key < inc; must be ≤ ⌊x·P⌋), `shortfall`, `children_per_s`, `gpu_mem_mb`, `gpu_pool_mb`, `feasibility_phase`, `seconds` (per phase, CUDA events on the GPU), `ls_moves`, `oom_retries`, `best_viol` (feasibility phase); with `strategy.enabled` (self-adaptive repair strategy) also `strat_pop` (survivors per strategy), `strat_best` (credited `best` events per strategy since the previous `gen` event — solver finds excluded, see `strat_credited`), `strat_children` (children per strategy since the previous `gen` event) — lists indexed like the summary's `strategy.names`; with `lp_stream.enabled` also `rank0_stream` (Rank 0 members born from the stream: origin SEED_LP and INJECTED), `lps_pool`, `lps_unused` |
 | `best` | EA | a new population best (an incumbent; during the feasibility phase a lower total violation): `key`, `obj`, `feasible`, `rank`, `origin` (bits), `ops` (their names), `anc_rank`, `anc_ops`, `parents`, `id`, `birth`, `V`, `gen`; with `strategy.enabled` also `strat` (its repair strategy) and `strat_credited` (false for a solver solution — injected, no EA operator bit — which is counted under `best_events_solver`, not credited to `strat`) |
 | `frontier` | EA, every `frontier.update_every` generations | `gen`, `size`, `best_key`, `worst_key`, `max_dist`, `mean_dist_to_inc`, `mean_pairwise`, `hv` |
@@ -91,7 +91,8 @@ posted individual), `demoted`, `oom_retries` (an out-of-memory error halved a ph
 `final_n0/_n1/_n2`, `final_pop`, `inc_external`, `dual_key`, `lp` (state of the LP point), `peak_gpu_used_mb`,
 `peak_gpu_pool_mb`, `exchange_from_solver`, `exchange_to_solver`, `genealogy_rows`, `outputs` (paths of the npz files).
 With `lp_stream.enabled` the EA summary adds the counters `lps_msgs`, `lps_points`, `lps_used`, `lps_rows`,
-`lps_dropped` (unused points pushed out of the pool) and `lp_stream`: `pool`, `unused`, `best` ({V, key} of the pool's
+`lps_dropped` (unused points pushed out of the pool), `lps_missed` (point ids skipped between two polls) and
+`lp_stream`: `pool`, `unused`, `best` ({V, key} of the pool's
 best point), `final_rank0_stream`, `final_stream` (members of the final population born from the stream).
 With `strategy.enabled` the EA summary adds `strategy`: `names` (`<row scale>/lp|nolp`, index = the strategy number),
 `row_scale`, `lp_guidance`, `final_pop`, and per strategy (lists) `children`, `best_events` and `incumbents` (new
@@ -112,7 +113,8 @@ status), `immigrants` (incl. the LP-rounded batch); plus `strategy_redrawn` (chi
 statistics: `status`, `wall_s`, `overrun_s`, `final_dual`, `nodes`, `lp_iterations`, `nodes_per_s`,
 `lp_iterations_per_s`, `presolve_s`, `n_sols_found`, `n_best_sols_found`, `callbacks` (the `callback` summary),
 `received_vectors`, `posted_keys`, `root_lp_posted`, `lp_stream` (with `--lp-stream`, D-011: `lp_solves` seen,
-`integral` skipped, `reads` = `early` + `quality` + `patience`, `bad`, `read_s`, `post_s`, `spent_s`, `points`; else
+`cutoff` skipped (LP value ≥ the cutoff bound), `integral` skipped, `reads` = `early` + `quality` + `patience`, `bad`,
+`read_s`, `post_s`, `spent_s` (the stream's whole cost: every decision as well as the reads and posts), `points`; else
 null). cuOpt adds `rmm_limit_bytes`, `rmm_peak_bytes`,
 `rmm_total_bytes`, `rmm_current_bytes`, `rmm_peak_count`.
 
