@@ -168,3 +168,13 @@ immigrants but no stream-born member; seed 1 found nothing. The +0.05 is a two-s
 is kept on (cheap, never harmful by more than item_placement's −0.08) but not yet credited.
 **Next for the stream:** match SCIP's read rate to the EA's poll rate (missed ids are wasted SCIP time), then judge it
 on more seeds once the feasibility work (below) is in.
+
+## Finding (16:3x): the c01 repair budget starves the evolution
+`ad1` and `lps1` carried the c01 budget (`repair.max_steps 20000, repair.stall_steps 1000`) for comparability with
+feasibility probe 1. It makes every generation 6–9× slower, because the GPU repair waits for the slowest individual:
+coupled glass4 296 generations in 120 s (default) → 34 (ad1) / 27 (lps1); neos-3024952-loue 303 → 48; item_placement
+2,060 → 465 (repair moves per child 99–166 → 460–890). The EA alone on glass4: 956 → 110. This explains the ad1 losses
+on loue and item_placement (3–4× fewer posts) and the stream's missed ids (the EA reads the mailbox between
+generations, every 2.5–4.5 s). In probe 1, c01 alone never unlocked an instance — the LP point and the rhs scale did.
+So today's ad1/lps1 gains came with an EA that hardly evolved. **Next run `lps0`** = `itrea2-adaptive-lps` at the
+DEFAULT repair budget (hash `a2ad94e9188d`), after `lp1`.
