@@ -181,3 +181,9 @@ on loue and item_placement (3–4× fewer posts) and the stream's missed ids (th
 generations, every 2.5–4.5 s). In probe 1, c01 alone never unlocked an instance — the LP point and the rhs scale did.
 So today's ad1/lps1 gains came with an EA that hardly evolved. **Next run `lps0`** = `itrea2-adaptive-lps` at the
 DEFAULT repair budget (hash `a2ad94e9188d`), after `lp1`.
+Improvement probe (`tools/agg_improve_probe.py`, 16:5x): from SCIP's incumbent #1 of radiationm18-12-05 (objective
+83,244 at 0.31 s; the optimum is near 17,500), 32 copies with 5 integer genes mutated, the CPU feasibility jump with the
+objective cutoff: **0/32 better-and-feasible** on the original and on the aggregated model, at both budgets (children
+end with V ≈ 0.003 — stuck just short). The objective is ONE integer variable (a min-max structure): lowering it by 1
+tightens every row it bounds at once, which no single or chain move does. radiationm needs a non-local operator
+(fix-and-propagate around the incumbent, or a residual sub-MIP), not better local moves; parked.
