@@ -54,6 +54,9 @@ budget's loss, which mixes a step cap (2,000) with a short stall rule (100). A o
 log, 2026-10-07) shows the step cap costs nothing (cap4k vs lps1: +0.05 [−0.04, +0.15], 3 better / 1 worse) while the
 stall rule hurts (stall100: −0.11, 1 / 3). The clock keeps the stall rule and caps steps, so (b) tested a refuted
 premise, and the per-generation bandit would inherit the same question. We proceed to **Stage 2 (active)** with its
-rejection rules unchanged — they judge the outcome (item_placement ≥ 3 of 4 seeds better with mean d ≥ +0.15; sing44,
-glass4, loue, ca each d ≥ −0.05; radiationm, rail01 within ±0.01; mechanism agreement). Criterion (c) is replaced in
-Stage 2 by its intended check, seconds per generation outside the repair calls within 10 % of the control.
+outcome rules unchanged (item_placement ≥ 3 of 4 seeds better with mean d ≥ +0.15; sing44, glass4, loue, ca each
+d ≥ −0.05; radiationm, rail01 within ±0.01). Two changes, stated before the run: the mechanism criterion keeps
+item_placement's part (≥ 60 % of its post-feasible time below "none") but **drops** "≥ 60 % of glass4's and loue's
+time at none or one below" — it carries the same refuted premise; glass4 and loue stay guarded by their outcome rule
+(d ≥ −0.05 vs lps1). Criterion (c) becomes its intended check: seconds per generation outside the repair calls within
+10 % of the control. Stage 2 is also reported in D-013's terms (each solver's weak set, mean as guard).
