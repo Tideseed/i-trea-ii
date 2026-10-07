@@ -244,3 +244,32 @@ gain per second of each horizon, with deep repair kept until the EA's own first 
 and the LP batch always repaired deep. Staged: instrumentation + shadow mode first (no behaviour change; pass criteria
 stated in advance), the active controller only if the shadow signal separates item_placement from glass4/loue.
 Full record: [[2026-10-06 Repair-depth design (workflow)]].
+
+## Repair clock, Stage 1 — shadow (2026-10-07 09:01–09:26) — A3@rc0 vs in-window A3@lps1w, 7 blocks
+Both LLM servers stopped (Berk 09:0x), GPU otherwise idle. Stage 0b first: full suite 656 passed / 2 skipped
+(gpu-marked horizon tests included); on CuPy, shadow and shadow-forced runs are bit-identical to the disabled run in
+6 of 6 toy scenarios (26 arrays each). 14/14 runs completed. `logs/rc_stage1.py` (to be moved to `tools/`):
+
+| run | generations rc0 / control | first own feasible | `would` in the post phase | criterion |
+|---|---|---|---|---|
+| item_placement s0 | 411 / 376 | 0.1 s | 2^7 59 %, 2^8 14 %, 2^12 10 % | (a) PASS — left none at 0.4 s for 2^7, rate ratio 3.05 |
+| item_placement s1 | 394 / 395 | 0.1 s | 2^7 36 %, 2^9 17 %, 2^8 16 % | (a) PASS — left none at 0.4 s for 2^7, rate ratio 2.14 |
+| glass4 s0 | 17 / 25 | 5.5 s | none 35 %, 2^12 29 %, 2^13 24 %, 2^11 12 % | (b) FAIL 35 %; (c) FAIL −32 % |
+| neos-3024952-loue s0 | 47 / 52 | 2.1 s | 2^11 46 %, 2^7 23 %, none 21 % | (b) FAIL 21 % |
+| neos-960392 s0 | 9 / 9 | 0.9 s | none 56 %, 2^7 22 %, 2^8 22 % | (b) FAIL 56 % |
+| sing44 s0 | 70 / 69 | 12.7 s | none 91 % | (c) PASS |
+| ca s0 | 18 / 19 | 34.8 s | none (1 post generation) | (c) PASS |
+
+**Verdict by D-012's letter: FAIL** ((a) pass, (b) fail, (c) fail on glass4). Two findings qualify it:
+- **(c) is not overhead.** Seconds per generation outside the repair calls are equal within a few % (glass4 1,008 vs
+  1,073 ms; loue 122 vs 125; item 93 vs 96; sing44 117 vs 103); glass4's 17 vs 25 generations come from longer repair
+  calls on its trajectory (4.8 vs 3.7 s per generation — coupled runs diverge after the first exchange). The proxy
+  "generation count within 10 %" is too noisy for an instance with ~20 generations.
+- **(b) tested a premise, not only the controller.** It assumed "glass4, loue, neos-960392 want deep repair" from
+  lps0 < lps1 — but the default budget is max_steps 2,000 AND stall_steps **100**; the clock's shallow levels keep
+  stall 1,000 and only cap the total at 2^11–2^13. glass4's two material gains came from lanes of 1,073 and 287 steps.
+**Next — test the premise, one variable each** (`logs/dev-premise.jsonl`, queued): `cap4k` (lps1 with max_steps
+4,096, stall 1,000 — what the clock chose) and `stall100` (lps1 with stall 100 — what made lps0 shallow) on glass4,
+loue, neos-960392, item_placement × seeds 0–1, against lps1w. If cap4k ≈ lps1 there, the controller's shallow choice
+is harmless and Stage 2 (active) is the real test; if cap4k loses, the counterfactual is myopic and D-012's fallback
+(the per-generation bandit) follows.
