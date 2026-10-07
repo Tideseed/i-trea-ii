@@ -34,3 +34,8 @@ cheaply, with the predictions written here BEFORE any run.
 - The 8 instances join the development set in being **excluded from the confirmatory test selection**
   (`datasets/classprobe_set.csv`); the pool freeze (#1) must read both exclusion lists — it does not yet (to fix).
 - Runs: after the repair clock's Stage 2, in the same extended window (`jobs/classprobe1.jsonl`).
+
+## Result (2026-10-07 15:13) — INCONCLUSIVE
+(a) 3 of 5 (losses on krka, kumeu, chromaticindex1024-7: hits; wins on comp21-2idx and toguru: misses, d −0.24 each);
+(b) holds. Out of sample the coupling helped SCIP on 2 of its 8 weak instances and lost to cuOpt on 5 of 6 — see
+Development log, "Class probe — D-014 result".
