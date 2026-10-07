@@ -345,3 +345,32 @@ P(120): s0 0.635 (first feasible 76 s; run of 2026-10-06), **s1 0.229 (27 s), s2
 (lps1, lps1w, alt2) 2 / 10; adaptive at the default depth 0 / 4; SCIP alone 0 / 2; cuOpt alone 1 / 1 (P 0.005).
 Reading: on fhnw the single rhs scale works where the adaptive mix of four strategies rarely does — selection does
 not concentrate on rhs within 120 s. This argues for per-scale demes (#16) over the strategy gene for the row scale.
+
+## Own LP + deep repair, nothing else (2026-10-07 11:20–12:23) — A3@lpd, 9 × seeds 0–1
+`lpd` = coupled default + `seeding.lp_source: highs_async` + deep repair (max_steps 20,000, stall 1,000); no adaptive
+strategy, no LP stream (effective hash `05998e37504d`). 18/18 completed, every incumbent checked, GPU health ok.
+
+| instance | SCIP | cuOpt | lp1 (own LP) | **lpd (own LP + deep)** | lps1 (+ strategy + stream + deep) |
+|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 1.000 | 0.647 | 0.509 | 0.305 | **0.300** |
+| fhnw-binpack4-48 | 1.000 | **0.005** | 1.000 | 1.000 | 0.651 |
+| glass4 | 0.344 | 0.308 | 0.300 | **0.193** | 0.228 |
+| item_placement_9903 | 0.660 | 0.666 | **0.218** | 0.613 | 0.569 |
+| neos-3024952-loue | 1.000 | 0.760 | **0.369** | 0.451 | **0.369** |
+| neos-960392 | 1.000 | 0.571 | **0.027** | 0.038 | 0.032 |
+| radiationm18-12-05 | 0.229 | **0.009** | 0.224 | 0.231 | 0.234 |
+| rail01 | 1.000 | **0.927** | 1.000 | 1.000 | 1.000 |
+| sing44 | 0.525 | 0.726 | 0.492 | **0.344** | 0.362 |
+
+| comparison | better / worse | mean d [95 % CI] | p | rule |
+|---|---|---|---|---|
+| lpd vs SCIP alone | **6 / 1** | **+0.44 [+0.21, +0.67]** | 0.031 | supported |
+| lpd vs cuOpt alone | 6 / 3 | +0.11 [−0.33, +0.50] | 0.65 | inconclusive |
+| lps1 vs lpd (strategy + stream at deep depth) | 5 / 3 | +0.07 [−0.03, +0.17] | 0.25 | inconclusive |
+| lpd vs lp1 (deep vs default depth, neither) | 3 / 4 | −0.01 [−0.28, +0.24] | 0.94 | inconclusive |
+D-013 weak sets: SCIP's (7) mean P 0.88 → 0.54 (−39 %, 5 of 7 improved); cuOpt's (6) 0.72 → 0.46 (−36 %, 5 of 6).
+
+**Reading.** The own LP carries the gain over SCIP in every configuration (+0.43 to +0.44). The adaptive strategy and
+the LP stream add little: +0.07 at deep depth (fhnw +0.35 — one solved seed —, loue +0.18, neos-960392 +0.16; glass4
+−0.15), −0.12 at the default depth. Repair depth is a clean instance trade (deep: ca +0.40, glass4 +0.36, sing44 +0.30;
+default: item_placement +0.64, neos-960392 +0.27, loue +0.18) — the target of the repair clock (Stage 2 running).
