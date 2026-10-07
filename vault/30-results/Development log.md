@@ -440,3 +440,35 @@ overhead — on ca the 10-s per-call cap at "none" (active mode, after the first
 time from repair (65–73 vs 95–98 s) to immigrants (31–40 vs 9–11 s) with no change in P (+0.02); on item_placement the
 ratio falls because generations are far shorter. **Outcome-level: the target is met strongly and no guard is harmed.**
 Decision in D-012 addendum 2.
+
+## Three-way arm A9 — pilot (2026-10-07 19:58–20:41) — 7 instances, seed 0, 120 s, both LLM servers stopped
+A9 = SCIP ↔ EA ← cuOpt (`configs/itrea2-dev-rc-3way.yaml`, repair clock active); A3x = its matched control (SCIP ↔ EA,
+EA on the same X925 core, no cuOpt); A2 = SCIP ‖ cuOpt race (no exchange); A0 / A6 = seed-0 runs from the development
+set and the class probe. 21/21 completed (+ a 30-s glass4 smoke run), every incumbent checked, GPU health ok.
+
+| instance | SCIP alone | cuOpt alone | race A2 | A3x | **A9** | SCIP inside A9 | cuOpt inside A9 |
+|---|---|---|---|---|---|---|---|
+| neos-3004026-krka | 0.318 | 0.004 | 0.003 | 0.303 | **0.003** | 0.071 | 0.003 |
+| fhnw-binpack4-48 | 1.000 | 0.005 | 0.005 | 0.301 | **0.009** | 0.114 | 0.009 |
+| radiationm18-12-05 | 0.154 | 0.009 | 0.007 | 0.164 | **0.009** | 0.023 | 0.011 |
+| neos-3656078-kumeu | 1.000 | 0.107 | 0.111 | 1.000 | 0.148 | 0.299 | 0.148 |
+| chromaticindex1024-7 | 1.000 | 0.071 | 0.054 | 1.000 | 0.545 | 1.000 | 0.545 |
+| item_placement_9903 | 0.631 | 0.666 | 0.617 | 0.379 | **0.362** | 0.362 | 0.620 |
+| sing44 | 0.518 | 0.726 | 0.572 | **0.287** | 0.477 | 0.510 | 0.920 |
+
+| A9 vs | better / worse (of 7) | mean d [95 % CI] |
+|---|---|---|
+| SCIP alone | **7 / 0** | **+0.68 [+0.42, +0.90]** |
+| A3x (same coupling without cuOpt) | 6 / 1 | +0.55 [+0.16, +0.89] |
+| cuOpt alone | 3 / 4 | −0.07 [−0.42, +0.25] |
+| race A2 (SCIP ‖ cuOpt, no EA) | 2 / 5 | −0.18 [−0.48, +0.09] |
+
+**Reading.** (1) cuOpt's solutions, passed through the EA, fix the coupled system's blind spot: where the EA alone found
+nothing (krka, kumeu, chromaticindex1024-7) or little, A9 is 0.46–0.99 better than SCIP alone and than A3x — and SCIP
+*itself* improves inside A9 (fhnw 1.0 → 0.114, kumeu 1.0 → 0.30, krka 0.32 → 0.07, radiationm 0.15 → 0.02; 1–3
+cuOpt vectors per run reached SCIP as incumbents). (2) Against cuOpt alone and the race, A9 wins where the EA adds its
+own improvements (item_placement +0.46 / +0.41, sing44 +0.34 / +0.17, krka +0.32 vs cuOpt) and loses where **cuOpt runs
+slower beside the EA**: cuOpt inside A9 reached 0.545 on chromaticindex1024-7 against 0.071 alone, and 0.92 against
+0.73 on sing44 — GPU contention, the effect optopt's A4 measured (continuous GPU work beside cuOpt doubled its P).
+**Next:** the EA should yield the GPU to cuOpt when it is not contributing (a back-off / duty-cycle rule) — the D-010
+"EA back-off" item, now with a measured cost; then seeds 1–2 and the D-013 weak-set report.

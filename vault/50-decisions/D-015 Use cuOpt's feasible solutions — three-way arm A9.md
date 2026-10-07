@@ -42,3 +42,9 @@ cuOpt's, 0 Redis's, 4 and 10–14 the runner's).
 X925 6, no cuOpt; same configuration file and run hash as A3, its own arm label). The fourth comparison becomes
 **A9 vs A3x** (does cuOpt help the coupled system); A9 vs A3 is reported as descriptive only. A9's job files
 include A3x jobs in the same blocks.
+
+## Pilot result (2026-10-07 20:41, seed 0, 7 instances; Development log "Three-way arm A9 — pilot")
+A9 vs SCIP alone 7 / 0, mean d +0.68 [+0.42, +0.90]; vs A3x 6 / 1, +0.55; vs cuOpt alone 3 / 4, −0.07 [−0.42, +0.25];
+vs the race A2 2 / 5, −0.18. cuOpt's solutions reach SCIP through the EA and lift SCIP itself; the losses against
+cuOpt/race come from cuOpt slowing down beside the EA on the shared GPU (chromaticindex1024-7: 0.545 inside A9 vs 0.071
+alone). Next: an EA back-off rule (yield the GPU when the EA is not contributing).
