@@ -60,3 +60,15 @@ item_placement's part (≥ 60 % of its post-feasible time below "none") but **dr
 time at none or one below" — it carries the same refuted premise; glass4 and loue stay guarded by their outcome rule
 (d ≥ −0.05 vs lps1). Criterion (c) becomes its intended check: seconds per generation outside the repair calls within
 10 % of the control. Stage 2 is also reported in D-013's terms (each solver's weak set, mean as guard).
+
+## Addendum 2 — 2026-10-07 18:1x — Stage 2 result and decision
+Outcome rules: item_placement 4/4 better, mean d +0.50 (≥ 3/4, ≥ +0.15: met); sing44 +0.18, glass4 +0.18, loue −0.04,
+ca +0.02 (≥ −0.05: met); rail01 0.00 (met); mechanism 94 % below "none" on item_placement (≥ 60 %: met); every incumbent
+checked, GPU health ok. **Failed by the letter:** radiationm −0.02 vs ±0.01 (the clock never acted there — identical
+search, seed/trajectory noise; the band was mis-set) and criterion (c) (the 10-s cap at "none" shifts time from repair
+to immigrants on ca, P unchanged — a behaviour of the cap, not overhead).
+**Decision:** the repair clock (active, `itrea2-adaptive-lps-rc` + `repair_clock.mode: active`) becomes the
+development default for repair depth; this is the second stated deviation from D-012's letter, so it is a
+development choice only — the confirmatory test (prereg-v2) judges it with noise-aware bands set from the control's
+seed-to-seed spread. Follow-ups: decide whether the 10-s cap at "none" should apply at all (it changed ca's time use
+without benefit); bands for any future rule are set from measured control noise, never a fixed ±0.01.

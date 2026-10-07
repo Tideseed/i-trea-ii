@@ -414,3 +414,28 @@ returns; deterministic mode ignores the start. **Wall time of a 3-s solve was 12
 (deterministic mode: 3.0 s) — each restart costs ~10 s beyond its time limit, which the restart design's slice
 lengths must absorb. (The script's own summary line "start_used: False" uses a stricter echo test; the objectives above
 are the evidence.)
+
+## Repair clock, Stage 2 — complete (2026-10-07 12:23–13:21 and 16:48–18:03) — A3@rc1 (active) vs same-day A3@lps1w
+22 blocks, 44 runs (both LLM servers stopped in both windows), every incumbent checked, GPU health ok on all.
+
+| instance | seeds | P rc1 (seed values) | P lps1w | mean d | time below "none" | D-012 rule |
+|---|---|---|---|---|---|---|
+| item_placement_9903 | 0–3 | 0.279, 0.417, 0.260, 0.134 | 0.570, 0.555, 0.501, 0.553 | **+0.50** (4/4 better) | 94 % | target: ≥ 3/4 and ≥ +0.15 — **PASS** |
+| sing44 | 0–1 | 0.315, 0.352 | 0.366, 0.452 | +0.18 | 87 % | ≥ −0.05 — PASS |
+| glass4 | 0–1 | 0.148, 0.235 | 0.220, 0.243 | +0.18 | 0 % | ≥ −0.05 — PASS |
+| neos-3024952-loue | 0–1 | 0.380, 0.332 | 0.356, 0.328 | −0.04 | 76–89 % | ≥ −0.05 — PASS |
+| ca__Scenario400_reserves_1 | 0–3 | 0.296, 0.296, 0.280, 0.313 | 0.295, 0.322, 0.279, 0.310 | +0.02 | 0 % | ≥ −0.05 — PASS |
+| radiationm18-12-05 | 0–1 | 0.165, 0.306 | 0.164, 0.294 | −0.02 | 0 % | within ±0.01 — **FAIL by the letter** |
+| rail01 | 0–1 | 1.0, 1.0 | 1.0, 1.0 | 0.00 | 100 % | within ±0.01 — PASS |
+| fhnw-binpack4-48 | 0–1 | 1.0, 1.0 | 1.0, 1.0 | 0.00 | 100 % | reported |
+| neos-960392 | 0–1 | 0.032, 0.030 | 0.032, 0.030 | +0.005 | 52–76 % | reported |
+Overall rc1 vs lps1w: 5 better / 2 worse of 7 informative, mean d **+0.12 [+0.00, +0.26]**. Generations: item_placement
+1,813–2,087 vs ~390; loue 57/106 vs 47/42; neos-960392 21/52 vs 9/12.
+
+**Two rules fail by the letter.** (1) radiationm −0.02 against a ±0.01 band — the clock played "none" for the whole
+run (no horizon applied), so rc1 and its control ran the same search; the band was set tighter than seed-to-trajectory
+noise. (2) Criterion (c), non-repair seconds per generation within 10 % of the control (ratio 0.35–2.25): not
+overhead — on ca the 10-s per-call cap at "none" (active mode, after the first feasible point) fired 16 times, moving
+time from repair (65–73 vs 95–98 s) to immigrants (31–40 vs 9–11 s) with no change in P (+0.02); on item_placement the
+ratio falls because generations are far shorter. **Outcome-level: the target is met strongly and no guard is harmed.**
+Decision in D-012 addendum 2.
