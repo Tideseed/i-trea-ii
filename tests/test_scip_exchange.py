@@ -160,6 +160,46 @@ def test_scip_round_trip_file_mailbox(tmp_path, cover):
     _check_round_trip(mb, run, p, x_opt, rc, out)
 
 
+@pytest.mark.solver
+def test_scip_credits_a_cuopt_row_to_cuopt(tmp_path, cover):
+    """Arm A9 (D-015): an EA row that is an unchanged cuOpt vector carries POST_CUOPT in its origin; the incumbent SCIP
+    makes from it is recorded with source "cuopt" (not "ea") and its verdict note says so, while a feasible row
+    without the bit, tried just before it in the same message, keeps the "ea" label (the A3 path); the infeasible
+    unmarked row is rejected without the note."""
+    from itrea.ea.population import ORIGIN_INJECTED
+    from itrea.solvers.common import POST_CUOPT
+    path, p, x_opt = cover
+    x_bad = _infeasible_variant(p, x_opt)
+    x_worse = x_opt.copy()
+    x_worse[np.flatnonzero(x_opt < 0.5)[0]] = 1.0                       # one more set: feasible, costlier
+    assert p.check(x_worse).feasible and p.objective(x_worse) > p.objective(x_opt)
+    mb = _new_mailbox(tmp_path, p.names, "rt-cuopt")
+    mb.to_solver.post(np.vstack([x_worse, x_opt, x_bad]),
+                      [p.objective(x_worse), p.objective(x_opt), p.objective(x_bad)],
+                      origin=np.array([ORIGIN_INJECTED, ORIGIN_INJECTED | POST_CUOPT, 0], dtype=np.int64))
+    run = tmp_path / "run"
+    rc, out = _launch(MODULE, ["--instance", str(path), "--seed", "3", "--budget", "20", "--run-dir", str(run),
+                               "--mailbox", str(tmp_path / "mb"), "--run-id", "rt-cuopt", "--recv", "--send",
+                               "--mem-mb", "1000"], mb)
+    assert rc == 0, out
+    ev = read_events(Path(run) / "solver.events.jsonl")
+    inc = [e for e in ev if e["kind"] == "incumbent"]
+    # one trySol may record two incumbents (BESTSOLFOUND twice), so positions, not counts, are checked
+    i_ea = [i for i, e in enumerate(inc) if e["source"] == "ea"]
+    i_cu = [i for i, e in enumerate(inc) if e["source"] == "cuopt"]
+    assert i_ea and i_cu and max(i_ea) < min(i_cu)
+    assert all(inc[i]["obj"] == pytest.approx(p.objective(x_worse)) for i in i_ea)
+    assert all(inc[i]["obj"] == pytest.approx(p.objective(x_opt)) for i in i_cu)
+    names, recs = load_incumbents(Path(run) / "solver.incumbents.npz")
+    assert [r[2] for r in recs if r[2] != "self"] == [inc[i]["source"] for i in sorted(i_ea + i_cu)]
+    ver = {e["row"]: e for e in ev if e["kind"] == "verdict"}
+    assert ver[0]["accepted"] and "cuopt" not in ver[0]
+    assert ver[1]["accepted"] and ver[1]["cuopt"] is True
+    assert not ver[2]["accepted"] and "cuopt" not in ver[2]
+    assert _summary(run)["exchange"]["rows_in_cuopt"] == 1
+    assert SOURCE_CODES["cuopt"] == 3                    # the crash-safe .part record has a code for it
+
+
 def _redis_or_skip():
     try:
         import redis

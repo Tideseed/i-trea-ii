@@ -7,9 +7,12 @@ Never the other Redis instances on the host (they belong to other services), nev
 
 Keys of one run (all under `itrea:<run_id>:`, deleted by the runner at the end; 1-day expiry as a backstop):
     order                       canonical variable names (JSON list)
-    ch:<name>                   stream per channel (to_solver, to_ea, lp, lps): fields x (encoded vector), obj, seq, t,
-                                origin; MAXLEN ~64 — history of every exchange, the latest entry is the "message"
+    ch:<name>                   stream per channel (to_solver, to_ea, lp, lps, to_ea_cuopt): fields x (encoded vector),
+                                obj, seq, t, origin; MAXLEN ~64 — history of every exchange, the latest entry is the
+                                "message"
     info                        JSON string (solver incumbent, dual bound, status, seq, t)
+    info_cuopt                  the same from cuOpt (arm A9, D-015: `cuopt_run --send` writes `ch:to_ea_cuopt` and this
+                                key, never the solver's `ch:to_ea` / `info` — latest message wins on each)
     pool                        sorted set: member = solution id, score = key (lower is better) — the shared pool
     pool:x                      hash: solution id -> encoded vector;  pool:meta  hash: id -> JSON (obj, source, t)
     ready:<role>, start, stop   barrier and stop flags
@@ -145,6 +148,8 @@ class RedisMailbox:
         self.lps = _Stream(self.r, self.p + "ch:lps", maxlen=8)  # D-011 LP stream (origin = point ids); each entry
         # is a ring of up to r full vectors, so the history is kept short
         self.info = _Info(self.r, self.p + "info")
+        self.to_ea_cuopt = _Stream(self.r, self.p + "ch:to_ea_cuopt")   # arm A9 (D-015): cuOpt's own channels
+        self.info_cuopt = _Info(self.r, self.p + "info_cuopt")
         if create and next(iter(self.r.scan_iter(match=self.p + "*", count=100)), None) is not None:
             raise RuntimeError(f"redis key space {self.p}* is not empty (stale run?)")
         self.last_seq = 0

@@ -145,9 +145,12 @@ def test_cuopt_rmm_limit_run_writes_trace_and_incumbents(tmp_path, cover):
     assert keys == sorted(keys, reverse=True)                    # minimisation: strictly improving record
     ev = read_events(run / "cuopt.events.jsonl")
     assert sum(e["kind"] == "incumbent" for e in ev) == len(recs)
-    if recs:                        # --send: the last incumbent went to the EA in canonical order
-        msg = mb.to_ea.poll()
+    if recs:                        # --send: the last incumbent went to the EA in canonical order, on cuOpt's own
+        assert mb.to_ea.poll() is None and mb.info.poll() is None      # channels (A9) — never the solver's
+        msg = mb.to_ea_cuopt.poll()
         assert msg is not None and set(msg.origin.tolist()) == {ORIGIN_SOLVER}
+        info = mb.info_cuopt.poll()
+        assert info is not None and info["solver"] == "cuopt"
         assert msg.obj[0] == pytest.approx(recs[-1][1])
         assert p.objective(msg.X[0]) == pytest.approx(msg.obj[0], abs=1e-6)
         assert s["exchange"]["posts_out"] == len(recs)

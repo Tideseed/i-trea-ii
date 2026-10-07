@@ -27,6 +27,9 @@ Exit codes: 0 = normal end (budget, optimality, stop file, SIGTERM), 1 = excepti
 Origin bits per row of a solver -> EA message (`to_ea`): ORIGIN_SOLVER (the solver found it) or ORIGIN_EA_ECHO (a
 vector the solver received from the EA earlier, coming back as part of its pool). Echo marking keeps EA-born solutions
 from being credited to the solver in the lineage analysis (critique, systems lens, "Provenance of echoed solutions").
+EA -> solver rows (`to_solver`) carry the EA's uint16 origin bits; in arm A9 (D-015) a row that is an UNCHANGED cuOpt
+vector also carries POST_CUOPT (bit 16, above every EA bit: the message's origin is int64), so SCIP records the
+incumbent it makes as source "cuopt", not "ea".
 
 Adapted in part from berkorbay/optopt@4dd48395, MIT (`src/optopt/solvers/common.py`: the gzip JSON solution format
 and its "never fail the run" rule).
@@ -55,6 +58,7 @@ from itrea.trace import Trace, save_incumbents
 
 ORIGIN_SOLVER = 1          # row of a to_ea message that the solver found itself
 ORIGIN_EA_ECHO = 2         # row the solver had received from the EA (its own post coming back)
+POST_CUOPT = 1 << 16       # EA -> solver row that is an unchanged cuOpt vector (A9): the solver credits it to cuOpt
 
 EXIT_OK, EXIT_EXCEPTION, EXIT_BAD_ARGS = 0, 1, 2
 

@@ -43,7 +43,8 @@ One generation (`step`, vault `10-design/I-TREA II algorithm.md`):
      dtype, join the next candidate set with ORIGIN_INJECTED (never repaired). Info: incumbent and proven bound as
      keys (sense · objective). LP: the point (once) — LP-rounded individuals (`lp_round`, share
      `seeding.lp_rounding` of the immigrant count) join the next candidate set, and `toward_lp` mutation uses it.
-     The stop file is checked at every tick whatever the direction (control plane).
+     The stop file is checked at every tick whatever the direction (control plane). cuOpt's channels (arm A9) are read
+     only with `exchange.from_cuopt` ("Three-way arm A9" below).
   2. parents: `selection.select_parents` on the host; 3. `crossover` -> (children, origin bits, touched); children
      that were not crossed are mutation-only (pb = pa); 4. `mutate` in place;
   5. repair: `SingletonDecoder` (when `repair.continuous == "auto"` and the problem has singleton continuous columns)
@@ -64,9 +65,10 @@ One generation (`step`, vault `10-design/I-TREA II algorithm.md`):
      repeated (counted `false_feasible`) until Rank 1 holds only re-checked members (at most #feasible + 1 rounds).
      The population = candidates.take(idx, rank=survival.rank). A survival shortfall is filled with immigrants (below).
   8. a new EA incumbent (best feasible key improved after rounding + float64 check): trace `incumbent` (source "self",
-     or "solver" for an injected vector carrying no EA operator bit) and `best` events, every incumbent vector kept for
-     `trace.save_incumbents`; posted to the solver when `exchange.enabled and to_solver` and it beats the solver's
-     incumbent known to the EA by `post_min_gain` (relative). During the feasibility phase a `best` event marks a lower
+     or "solver" for an injected vector carrying no EA operator bit — "cuopt" when that vector came from cuOpt, A9) and
+     `best` events, every incumbent vector kept for `trace.save_incumbents`; posted to the solver when
+     `exchange.enabled and to_solver` and it beats the solver's incumbent known to the EA by `post_min_gain`
+     (relative). During the feasibility phase a `best` event marks a lower
      total violation. Solver verdicts (read only when from_solver): a rejected post demotes that individual
      (`solver_rejections`; a Rank 1 member moves to Rank 2 at once), its vector hash is remembered so a re-created
      copy fails the float64 check (`rejected_copies`), and if it was the EA's current incumbent the incumbent falls
@@ -131,6 +133,31 @@ generation — a lane-step horizon 2^j or "none" — for every repair call of it
     `gen` events add the `rc_*` fields, the summary a `repair_clock` block, the counters `ls_finished_horizon` and
     `ls_cap_hits` (vault `10-design/Trace format and metrics.md`).
 
+Three-way arm A9 (`exchange.from_cuopt`, D-015; off by default, and then cuOpt's channels are never read and nothing
+below happens). cuOpt runs beside the solver and posts its incumbents on its OWN channels (`to_ea_cuopt`,
+`info_cuopt`). At every exchange tick, after the solver's channels:
+  - rows: as the solver's (step 1: band, integers rounded, cast, ORIGIN_INJECTED, never repaired, survival decides),
+    trace kind `inject_cuopt`, counters `cuopt_inject_msgs`, `cuopt_inject_rows`, `cuopt_injected`,
+    `cuopt_injected_infeasible`, `cuopt_injected_dup`. The ids they receive form `cuopt_ids`: an individual's vector
+    never changes after entry, so the id marks "this is cuOpt's vector". A vector the solver's channel delivered
+    first stays the solver's (the duplicate merges into the earlier member).
+  - info: cuOpt's incumbent (key) is `inc_cuopt`; `inc_external` = min(the solver's `inc_solver`, `inc_cuopt`) is the
+    external incumbent of the survival (Rank 0's "better than the incumbent"), `_admit`, the cutoff and the
+    feasibility-phase test. cuOpt's bound is recorded (`dual_key_cuopt`) but NOT used: Rank 0's bound demotion keeps
+    the solver's proven bound alone, so in the engine A9 differs from its matched control A3x (the runner's A3 with
+    A9's EA footprint, no cuOpt) by cuOpt's solutions and incumbent only. Not from A3: the runner gives A9's EA one
+    X925 core, which with `seeding.lp_source: highs_async` it shares with the HiGHS LP worker (it inherits the EA's
+    affinity), where A3's EA has three A725 cores (`itrea.experiments.pair`).
+  - attribution: an incumbent that is an unchanged cuOpt vector (`_is_solver_find` and an id in `cuopt_ids`) has
+    source "cuopt" (counted in `cuopt_incumbents`; like a solver find, not credited to a repair strategy). A post is
+    worth sending when it beats the SOLVER's incumbent (`inc_solver`), not the min — an unchanged cuOpt vector that
+    beats SCIP's incumbent is handed to SCIP, which is the point of the arm — and its row carries POST_CUOPT (bit 16 of
+    the message's int64 origin) so SCIP records the incumbent it makes as source "cuopt", not "ea". `post` events get
+    `cuopt_rows`; `cuopt_posts` counts those posts, `cuopt_rows_accepted` / `cuopt_rows_rejected` the solver's
+    verdicts on their cuOpt ROWS (the unit of `solver_accepted`: a frontier post of several cuOpt rows, or a re-posted
+    vector, gives several; per-post counts are build_runs'); `best` events get `cuopt`, `gen` events `inc_solver`,
+    `inc_cuopt`, `dual_key_cuopt`, `cuopt_pop`; the genealogy a `cuopt` column.
+
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
 archive members), evaluated, de-duplicated against the population and admitted with the survival's rules: an
 infeasible immigrant better than the incumbent takes a Rank 0 slot only while the quota floor(x·P) has room (and not
@@ -183,7 +210,7 @@ from itrea.ea.repair_clock import RepairClock
 from itrea.ea.seeding import LPWorker, immigrants, lp_round, seed_population
 from itrea.ea.selection import select_parents
 from itrea.problem import Problem, from_arrays
-from itrea.solvers.common import ORIGIN_EA_ECHO, SOURCE_CODES, band_select, vector_hash
+from itrea.solvers.common import ORIGIN_EA_ECHO, POST_CUOPT, SOURCE_CODES, band_select, vector_hash
 from itrea.trace import save_incumbents
 
 HEADROOM = 0.9                 # share of gpu_mem_gb the memory plan may fill (pool fragmentation, library workspaces)
@@ -861,7 +888,10 @@ class Engine:
         mb = self.mailbox
         self.from_solver = bool(mb is not None and ex.enabled and ex.from_solver)
         self.to_solver = bool(mb is not None and ex.enabled and ex.to_solver)
-        self.inc_external = math.inf             # solver incumbent (key) known to the EA
+        self.from_cuopt = bool(mb is not None and ex.enabled and ex.from_cuopt)     # arm A9 (module docstring)
+        self.inc_solver = math.inf               # solver incumbent (key) known to the EA: posts must beat it
+        self.inc_cuopt = math.inf                # cuOpt's incumbent (key); stays +inf unless from_cuopt
+        self.inc_external = math.inf             # min(inc_solver, inc_cuopt): the external incumbent
         self.dual_key = -math.inf                # solver's proven bound (key)
         self.lp_x: np.ndarray | None = None
         self.lp_info: dict = dict(source=cfg.seeding.lp_source, state="none")
@@ -901,6 +931,15 @@ class Engine:
         if self.lps is not None:
             self.c.update({k: 0 for k in ("lps_msgs", "lps_points", "lps_used", "lps_rows", "lps_dropped",
                                           "lps_missed")})
+        # arm A9: ids of the injected cuOpt rows, and of those posted to the solver unchanged (both empty while off)
+        self.cuopt_ids: set[int] = set()
+        self.cuopt_posted: set[int] = set()
+        self.dual_key_cuopt = -math.inf          # cuOpt's bound (key): recorded, never used
+        if self.from_cuopt:
+            self.c.update({k: 0 for k in ("cuopt_inject_msgs", "cuopt_inject_rows", "cuopt_injected",
+                                          "cuopt_injected_infeasible", "cuopt_injected_dup", "cuopt_info_msgs",
+                                          "cuopt_incumbents", "cuopt_posts", "cuopt_rows_accepted",
+                                          "cuopt_rows_rejected")})
         S = self.S
         self.sc: dict[str, np.ndarray] = {k: np.zeros(S, np.int64) for k in (
             "children", "best_events", "incumbents", "best_events_solver", "incumbents_solver", "repaired",
@@ -1295,14 +1334,18 @@ class Engine:
             if b.repair:
                 self._rc_pair(ev[0], ev[2])
             k = X.shape[0]
-            if b.src == "solver":
+            if b.src in ("solver", "cuopt"):
                 feas = self.bk.asnumpy(ev[2])
                 bad = int((~feas).sum())
-                self.c["injected_infeasible"] += bad
+                self.c["injected_infeasible" if b.src == "solver" else "cuopt_injected_infeasible"] += bad
                 if bad:
-                    self.trace.event("note", msg=f"{bad} of {k} injected solver solutions are infeasible under the "
+                    who = "solver" if b.src == "solver" else "cuOpt"
+                    self.trace.event("note", msg=f"{bad} of {k} injected {who} solutions are infeasible under the "
                                                  f"EA's test (tol_mode={self.cfg.ranks.tol_mode})")
-            parts.append(self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), self.idc.take(k),
+            ids = self.idc.take(k)
+            if b.src == "cuopt":                             # arm A9: the ids that carry cuOpt's vectors
+                self.cuopt_ids.update(int(i) for i in ids)
+            parts.append(self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), ids,
                                         np.full((k, 2), -1, np.int64), b.origin, self.gen, strat=b.strat))
             metas.append(dict(rank_pa=np.full(k, -1, np.int8), rank_pb=np.full(k, -1, np.int8),
                               t_first=np.full(k, b.t)))
@@ -1333,7 +1376,10 @@ class Engine:
                     if kk < Np:                                  # an existing member: its genealogy row exists
                         self.g_or[int(cand.ids[kk])] = self.g_or.get(int(cand.ids[kk]), 0) | bits
                 if (bits & ORIGIN_INJECTED) and kk < Np:
-                    self.c["injected_dup"] += 1
+                    if self.from_cuopt and int(cand.ids[b]) in self.cuopt_ids:
+                        self.c["cuopt_injected_dup"] += 1    # A9: SCIP's counter stays SCIP's
+                    else:
+                        self.c["injected_dup"] += 1
         # the previous Rank 1 (the ratchet of ranks.three_rank_survival): demotions below only hit NEW entrants (not in
         # r1_ids), and a member demoted by a solver verdict has left r1_ids already, so this mask stays valid
         prev_r1 = np.isin(cand.ids, np.fromiter(self.r1_ids, np.int64, len(self.r1_ids)))
@@ -1485,6 +1531,9 @@ class Engine:
         iid = int(pop.ids[i])
         bits = int(pop.origin[i])
         src = "solver" if _is_solver_find(bits) else "self"
+        if src == "solver" and iid in self.cuopt_ids:       # A9: an unchanged cuOpt vector
+            src = "cuopt"
+            self.c["cuopt_incumbents"] += 1
         t = self.trace.now()
         self.best_key, self.best_obj, self.best_x = key, obj, x
         self.inc_stack.append((iid, key, obj, x))
@@ -1495,15 +1544,17 @@ class Engine:
             self.part.write(hdr + row.idx.astype("<i4").tobytes() + row.val.astype("<f8").tobytes())
         self.c["n_incumbents"] += 1
         if self.strat_on:                                    # a solver find is not the strategy's (module docstring)
-            self.sc["incumbents_solver" if src == "solver" else "incumbents"][int(pop.strat[i])] += 1
+            ext = src in ("solver", "cuopt")
+            self.sc["incumbents_solver" if ext else "incumbents"][int(pop.strat[i])] += 1
         self.g_new_best.add(iid)
         self.trace.incumbent(obj, source=src, t=t, key=key, id=iid, gen=self.gen)
         self._best_event(i, feasible=True, obj=obj)
         if self.to_solver:
-            ie = self.inc_external
+            ie = self.inc_solver                             # the SOLVER's incumbent, not the min with cuOpt's (A9)
             gain = (ie - key) / max(1.0, abs(ie)) if math.isfinite(ie) else math.inf
             if gain > self.cfg.exchange.post_min_gain:
-                self._post(x[None, :], np.array([obj]), np.array([bits], np.int64), [iid], gain=gain)
+                org = bits | (POST_CUOPT if src == "cuopt" else 0)
+                self._post(x[None, :], np.array([obj]), np.array([org], np.int64), [iid], gain=gain)
 
     def _best_event(self, i: int, feasible: bool, obj: float) -> None:
         pop = self.pop
@@ -1518,6 +1569,8 @@ class Engine:
                 self.sc_since["best_events"][st_i] += 1
             else:
                 self.sc["best_events_solver"][st_i] += 1
+        if self.from_cuopt:
+            extra["cuopt"] = int(pop.ids[i]) in self.cuopt_ids
         self.trace.event("best", key=float(self.h_key[i]), obj=obj, feasible=feasible, rank=int(pop.rank[i]),
                          origin=bits, ops=origin_names(bits), anc_rank=pop.anc_rank[i].tolist(),
                          anc_ops=pop.anc_ops[i].tolist(), parents=pop.parents[i].tolist(), id=int(pop.ids[i]),
@@ -1530,8 +1583,15 @@ class Engine:
         self.posted_hashes[int(seq)] = [vector_hash(X[r]) for r in range(X.shape[0])]
         self.c["posts_frontier" if frontier else "posts"] += 1
         best = float(obj[np.argmin(self.prob.sense * obj)])
+        extra = {}
+        if self.from_cuopt:                                  # A9: rows that are unchanged cuOpt vectors
+            rows = [r for r in range(len(ids)) if int(origin[r]) & POST_CUOPT]
+            extra["cuopt_rows"] = rows[:64]
+            if rows:
+                self.c["cuopt_posts"] += 1
+                self.cuopt_posted.update(int(ids[r]) for r in rows)
         self.trace.event("post", seq=int(seq), obj=best, gain=gain, k=int(X.shape[0]), frontier=frontier,
-                         ids=[int(v) for v in ids][:64])
+                         ids=[int(v) for v in ids][:64], **extra)
         return int(seq)
 
     def _refresh_cutoff(self) -> None:
@@ -1698,7 +1758,10 @@ class Engine:
                     objs.append(res.objective)
                     ids.append(int(self.frontier.ids[r]))
             if rows:
-                self._post(np.vstack(rows), np.array(objs), np.zeros(len(rows), np.int64), ids, frontier=True)
+                org = np.zeros(len(rows), np.int64)
+                if self.from_cuopt:                          # A9: frontier rows are marked by entry (a cuOpt id)
+                    org = np.array([POST_CUOPT if i in self.cuopt_ids else 0 for i in ids], np.int64)
+                self._post(np.vstack(rows), np.array(objs), org, ids, frontier=True)
 
     # ------------------------------------------------------------------------------------------------ exchange
     def _exchange_in(self, force: bool = False) -> None:
@@ -1710,8 +1773,14 @@ class Engine:
             self.stop_reason = "stop"
         if self.lp_worker is not None and self.lp_x is None:
             self._poll_lp_worker()
-        if not self.from_solver:
-            return
+        if self.from_solver:
+            self._solver_in()
+        if self.from_cuopt:                      # after the solver's: a vector both delivered stays the solver's
+            self._cuopt_in()
+
+    def _solver_in(self) -> None:
+        """The solver's channels (`exchange.from_solver`): solutions, info, the LP point, the LP stream, verdicts."""
+        cfg, mb = self.cfg, self.mailbox
         ex = cfg.exchange
         msg = mb.to_ea.poll()
         if msg is not None:
@@ -1721,8 +1790,9 @@ class Engine:
             inc = info.get("incumbent")
             if inc is not None and math.isfinite(float(inc)):
                 k = self.prob.key_of_objective(float(inc))
-                if k < self.inc_external:
-                    self.inc_external = k
+                if k < self.inc_solver:
+                    self.inc_solver = k
+                self.inc_external = min(self.inc_solver, self.inc_cuopt)
             db = info.get("dual_bound")
             if ex.use_dual_bound and db is not None and math.isfinite(float(db)):
                 self.dual_key = max(self.dual_key, self.prob.key_of_objective(float(db)))
@@ -1745,30 +1815,55 @@ class Engine:
             if self.c["solver_rejections"] != n_rej and hasattr(self, "h_feas"):
                 self._refresh_cutoff()           # a demoted member may have been the cutoff's population best
 
-    def _receive(self, msg) -> None:
+    def _cuopt_in(self) -> None:
+        """Arm A9 (`exchange.from_cuopt`): cuOpt's channels — its incumbents injected like the solver's (src "cuopt"),
+        its incumbent in `inc_external`, its bound recorded only (module docstring, "Three-way arm A9")."""
+        mb = self.mailbox
+        msg = mb.to_ea_cuopt.poll()
+        if msg is not None:
+            self._receive(msg, src="cuopt")
+        info = mb.info_cuopt.poll()
+        if info is None:
+            return
+        self.c["cuopt_info_msgs"] += 1
+        inc = info.get("incumbent")
+        if inc is not None and math.isfinite(float(inc)):
+            self.inc_cuopt = min(self.inc_cuopt, self.prob.key_of_objective(float(inc)))
+            self.inc_external = min(self.inc_solver, self.inc_cuopt)
+        db = info.get("dual_bound")
+        if db is not None and math.isfinite(float(db)):
+            self.dual_key_cuopt = max(self.dual_key_cuopt, self.prob.key_of_objective(float(db)))
+        if hasattr(self, "h_feas"):
+            self._refresh_cutoff()
+
+    def _receive(self, msg, src: str = "solver") -> None:
+        """A solutions message (step 1): the solver's (`to_ea`), or cuOpt's (`to_ea_cuopt`, src "cuopt": its own
+        counters and trace kind, so the solver's stay comparable with A3)."""
         cfg, prob = self.cfg, self.prob
         ex = cfg.exchange
+        pre = "cuopt_" if src == "cuopt" else ""
         X = np.asarray(msg.X, dtype=np.float64)
         obj = np.asarray(msg.obj, dtype=np.float64)
         n_rows = X.shape[0]
         echo = (np.asarray(msg.origin) == ORIGIN_EA_ECHO) if msg.origin is not None else np.zeros(n_rows, bool)
-        self.c["inject_msgs"] += 1
-        self.c["inject_rows"] += n_rows
-        self.c["echoes"] += int(echo.sum())
+        self.c[pre + "inject_msgs"] += 1
+        self.c[pre + "inject_rows"] += n_rows
+        if src == "solver":                      # cuOpt never receives a vector, so it has no echoes
+            self.c["echoes"] += int(echo.sum())
         ok = np.flatnonzero(~echo & np.isfinite(obj) & np.all(np.isfinite(X), axis=1)) if n_rows else np.zeros(0, int)
         take = ok[band_select(obj[ok], prob.sense, ex.inject_band, ex.inject_k)] if ok.size else ok
         best = float(obj[take[np.argmin(prob.sense * obj[take])]]) if take.size else None
-        self.trace.event("inject", seq=int(msg.seq), k=int(take.size), rows=int(n_rows), echo=int(echo.sum()),
-                         best_obj=best)
+        self.trace.event("inject" if src == "solver" else "inject_cuopt", seq=int(msg.seq), k=int(take.size),
+                         rows=int(n_rows), echo=int(echo.sum()), best_obj=best)
         if take.size == 0:
             return
         Y = X[take].copy()
         if prob.ints.size:
             Y[:, prob.ints] = np.round(Y[:, prob.ints])
         Y = np.clip(Y, prob.lb, prob.ub)
-        self.c["injected"] += int(take.size)
+        self.c[pre + "injected"] += int(take.size)
         Xd = self.bk.xp.asarray(Y).astype(self.gene_dtype)
-        self.pending.append(_Batch(Xd, np.full(take.size, ORIGIN_INJECTED, np.uint16), repair=False, src="solver",
+        self.pending.append(_Batch(Xd, np.full(take.size, ORIGIN_INJECTED, np.uint16), repair=False, src=src,
                                    t=self.trace.now(), strat=self._random_strategies(int(take.size))))
 
     def _lps_receive(self, msg) -> None:
@@ -1914,6 +2009,8 @@ class Engine:
             if not ids or row >= len(ids):
                 continue
             iid = ids[row]
+            if iid in self.cuopt_posted:                     # A9: a verdict on an unchanged cuOpt vector
+                self.c["cuopt_rows_accepted" if v.get("accepted") else "cuopt_rows_rejected"] += 1
             if bool(v.get("accepted")):
                 self.c["solver_accepted"] += 1
                 self.g_accepted.add(iid)
@@ -1974,6 +2071,9 @@ class Engine:
                          lps_pool=len(self.lps_pool), lps_unused=sum(1 for q in self.lps_pool if not q["used"]))
         if self.rclock is not None:
             extra.update(self.rclock.gen_fields())
+        if self.from_cuopt:
+            extra.update(inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt, dual_key_cuopt=self.dual_key_cuopt,
+                         cuopt_pop=self._cuopt_members())
         self.trace.event(
             "gen", gen=self.gen, best_key=float(hk[hf].min()) if hf.any() else None,
             median_key=float(np.median(fin)) if fin.size else None, feas_share=float(hf.mean()) if hf.size else 0.0,
@@ -2027,8 +2127,17 @@ class Engine:
                 final_stream=int(np.sum((pop.origin & both) == both)))
         if self.rclock is not None:
             out["repair_clock"] = self.rclock.record()
+        if self.from_cuopt:
+            out.update(exchange_from_cuopt=True, inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt,
+                       dual_key_cuopt=self.dual_key_cuopt, final_cuopt_pop=self._cuopt_members())
         out["best_x"] = self.best_x
         return out
+
+    def _cuopt_members(self) -> int:
+        """A9: members of the population that entered as injected cuOpt rows."""
+        if not self.cuopt_ids:
+            return 0
+        return int(np.isin(self.pop.ids, np.fromiter(self.cuopt_ids, np.int64, len(self.cuopt_ids))).sum())
 
     # ------------------------------------------------------------------------------------------------- outputs
     def genealogy(self) -> dict:
@@ -2047,6 +2156,9 @@ class Engine:
                     g["origin"][pos[iid]] |= np.uint16(bits)
         g["is_new_best"] = np.isin(g["id"], np.fromiter(self.g_new_best, np.int64, len(self.g_new_best)))
         g["is_accepted_post"] = np.isin(g["id"], np.fromiter(self.g_accepted, np.int64, len(self.g_accepted)))
+        if getattr(self, "from_cuopt", False):              # A9: the row entered as an injected cuOpt vector
+            cu = getattr(self, "cuopt_ids", set())
+            g["cuopt"] = np.isin(g["id"], np.fromiter(cu, np.int64, len(cu)))
         return g
 
     def write_outputs(self, run_dir: str | os.PathLike, role: str = "ea") -> dict:
@@ -2110,7 +2222,7 @@ class _Info:
 class _WarmupMailbox:
     """In-memory partner for the warm-up: one solver message (a feasible point and an infeasible variant), one info
     message (incumbent and bound, so the cutoff row is armed), one LP point, one LP-stream ring, and a rejection of the
-    first post."""
+    first post; and cuOpt's channels (read only with `exchange.from_cuopt`, arm A9): one row and one info message."""
 
     def __init__(self, syn: Problem, rows: int = 3):
         from itrea.exchange.mailbox import Message
@@ -2133,6 +2245,11 @@ class _WarmupMailbox:
         pts = np.clip(pts, syn.lb, syn.ub)
         self.lps = _Chan([Message(X=pts, obj=np.array([syn.objective(r) for r in pts]), seq=1, t=0.0,
                                   origin=np.arange(1, pts.shape[0] + 1, dtype=np.int64))])
+        # cuOpt (A9): its one row is the feasible point as well, so it meets the solver's copy as a duplicate
+        self.to_ea_cuopt = _Chan([Message(X=x0[None, :], obj=np.array([obj0]), seq=1, t=0.0,
+                                          origin=np.array([ORIGIN_SOLVER], np.int64))])
+        self.info_cuopt = _Info(dict(incumbent=obj0, dual_bound=obj0 - syn.sense * 50.0, status="solving",
+                                     solver="cuopt"))
 
     def stopped(self) -> bool:
         return False

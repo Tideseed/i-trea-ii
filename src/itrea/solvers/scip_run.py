@@ -28,7 +28,9 @@ solution, or a solution SCIP does not keep, returns False); when not stored, a f
 {seq, obj, accepted} in the mailbox (`note` = JSON with stored, feasible, primal_before, primal_after, row, dup,
 obj_solver) and a `verdict` trace event. Rows are tried even when worse than SCIP's incumbent: the frontier-posting
 ablation (D-005) relies on SCIP storing non-improving solutions for its crossover heuristics. Rows are de-duplicated by
-`vector_hash` (a re-posted vector reuses its first verdict).
+`vector_hash` (a re-posted vector reuses its first verdict). An incumbent SCIP makes from a received row is recorded
+with source "ea" — or "cuopt" when the row's origin carries POST_CUOPT (arm A9, D-015: an unchanged cuOpt vector the
+EA passed on), so the analysis credits it to cuOpt; the verdict note then has `cuopt: true`.
 
 Sending (--send): the BESTSOLFOUND event handler records every incumbent (vector over the cached original variables;
 the objective is read from the solution itself — at BESTSOLFOUND `getPrimalbound()` still holds the previous value,
@@ -68,7 +70,7 @@ import time
 
 import numpy as np
 
-from itrea.solvers.common import (ORIGIN_EA_ECHO, ORIGIN_SOLVER, BadArguments, band_select, base_parser,
+from itrea.solvers.common import (ORIGIN_EA_ECHO, ORIGIN_SOLVER, POST_CUOPT, BadArguments, band_select, base_parser,
                                   finite_or_none, improves, run_main, validate_common, vector_hash, versions)
 
 MODULE = "itrea.solvers.scip_run"
@@ -158,6 +160,7 @@ class _Exchange:
         self.c_local = np.array([v.getObj() for v in orig_vars], dtype=np.float64)
         self.offset = float(model.getObjoffset(original=True))
         self.injecting = False
+        self.inject_source = "ea"                  # "cuopt" while trying a POST_CUOPT row (A9)
         self.dirty = False
         self.next_poll = 0.0
         self.last_inc: tuple[tuple[float, float], np.ndarray] | None = None   # ((sol time, obj), x local)
@@ -211,7 +214,7 @@ class _Exchange:
         sol = m.getBestSol()
         obj = float(m.getSolObjVal(sol))                         # NOT getPrimalbound(): it lags at this event
         x = self.read_x(sol)
-        source = "ea" if self.injecting else "self"
+        source = self.inject_source if self.injecting else "self"
         self.proc.record_incumbent(obj, x, source, stage=m.getStageName())
         self.last_inc = ((float(m.getSolTime(sol)), obj), x)
         self.dirty = True
@@ -288,8 +291,10 @@ class _Exchange:
         self.last_seq = max(self.last_seq, msg.seq)
         st.bytes_in += int(msg.X.nbytes + msg.obj.nbytes)
         found = False
+        org = msg.origin if msg.origin is not None and len(msg.origin) == msg.X.shape[0] else None
         for i in range(msg.X.shape[0]):
-            found |= self._try_row(heur, msg.seq, i, msg.X[i], float(msg.obj[i]))
+            cuopt = bool(org is not None and int(org[i]) & POST_CUOPT)
+            found |= self._try_row(heur, msg.seq, i, msg.X[i], float(msg.obj[i]), cuopt=cuopt)
         st.seconds += time.perf_counter() - tp
         return self.FOUNDSOL if found else self.DIDNOTFIND
 
@@ -300,11 +305,14 @@ class _Exchange:
             m.setSolVal(s, ov[j], float(x_local[j]))
         return s
 
-    def _try_row(self, heur, seq: int, row: int, x_can: np.ndarray, obj: float) -> bool:
+    def _try_row(self, heur, seq: int, row: int, x_can: np.ndarray, obj: float, cuopt: bool = False) -> bool:
         st, m, mb = self.proc.stats, self.m, self.proc.mailbox
         st.add("rows_in")
         before = self._best_obj()
         note = dict(row=row, primal_before=before)
+        if cuopt:                          # A9: an unchanged cuOpt vector the EA passed on
+            note["cuopt"] = True
+            st.add("rows_in_cuopt")
         if not (np.all(np.isfinite(x_can)) and np.isfinite(obj)):
             note.update(stored=False, feasible=False, dup=False, nonfinite=True, primal_after=before)
             self._verdict(seq, obj, False, note)
@@ -322,11 +330,13 @@ class _Exchange:
         s = self._make_sol(heur, x_local, nz)
         obj_solver = float(m.getSolObjVal(s))
         self.injecting = True              # trySol fires BESTSOLFOUND re-entrantly: the recorder labels it "ea"
+        self.inject_source = "cuopt" if cuopt else "ea"                 # (or "cuopt": A9)
         try:
             stored = bool(m.trySol(s, printreason=False, completely=False, checkbounds=True, checkintegrality=True,
                                    checklprows=True, free=True))
         finally:
             self.injecting = False
+            self.inject_source = "ea"
         if stored:
             feasible = True
         else:

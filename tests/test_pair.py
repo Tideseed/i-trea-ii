@@ -120,7 +120,7 @@ def test_run_id_format(toy, tmp_path):
     assert "__A3~one_way_ea_to_solver__" in pair.run_id_for(job(toy, "A3", ablation="one_way_ea_to_solver"), o)
     assert "__A5@c01__" in pair.run_id_for(job(toy, "A5", variant="c01"), o)
     with pytest.raises(pair.RunError, match="unknown arm"):
-        pair.run_id_for(job(toy, "A9"), o)
+        pair.run_id_for(job(toy, "A99"), o)
 
 
 # ------------------------------------------------------------------------------------------- process plans

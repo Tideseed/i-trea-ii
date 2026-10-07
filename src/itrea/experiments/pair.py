@@ -17,7 +17,15 @@ Why the runner is this strict (predecessor incidents, berkorbay/optopt):
 Footprint (D-002 §3): SCIP on one Cortex-X925 core (5–9, 15–19); the partner (EA on the GPU or the CPU, cuOpt) on the
 GPU plus 3 Cortex-A725 cores (1–4, 10–14); core 0 belongs to the Redis container. Every process runs inside
 `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (`use_systemd=False` for tests) under `taskset`, with
-OMP/OPENBLAS/MKL_NUM_THREADS = 1.
+OMP/OPENBLAS/MKL_NUM_THREADS = 1. The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) runs two partners, which must not
+share cores: SCIP on the lane's first X925 core, the EA on its second (`ProcSpec.x925`), cuOpt on the A725 cores
+(num_cpu_threads = 3 = their number on the GPU lane); two CUDA processes, so the memory gate counts the EA pool and
+cuOpt's RMM limit (both = gpu_mem_gb) plus two CUDA overheads. The runner gives the EA `exchange.from_cuopt: true`
+(arm-implied, like A5's "no exchange") and cuOpt `--send` (its own channels `to_ea_cuopt` / `info_cuopt`); SCIP gets
+A3's flags. GPU-health voiding treats every process the runner launched (and its descendants) as the run's own. A9's
+matched control is A3x (SCIP on x925[0], the EA on x925[1], no cuOpt), not A3: A3's EA runs on the three A725 cores,
+and its HiGHS LP worker (`seeding.lp_source: highs_async`, which inherits the EA's affinity) beside it, while A9's EA
+shares one faster X925 core with that worker.
 
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
@@ -89,9 +97,12 @@ class ProcSpec:
     kind: str                  # "scip" | "highs" | "cuopt" | "ea"
     role: str                  # mailbox role: "solver" | "solver2" | "ea" | "cuopt"
     seed_offset: int = 0
-    exchange: bool = False     # solver: --recv/--send derived from the EA configuration (A3, A4, H3)
+    exchange: bool = False     # solver: --recv/--send derived from the EA configuration (A3, A4, H3); cuOpt: --send
+                               # when the EA configuration has exchange.from_cuopt (A9)
     emphasis: bool = False     # solver: --emphasis from the job (A0*)
     backend: str | None = None  # ea: "cupy" | "numpy"
+    x925: bool = False         # ea: one X925 core of its own, after the solvers' (A9: cuOpt holds the A725 cores;
+                               # A3x: the same footprint without cuOpt)
 
     @property
     def gpu(self) -> bool:
@@ -120,11 +131,11 @@ class ArmSpec:
 
     @property
     def n_x925(self) -> int:
-        return sum(1 for p in self.procs if p.kind in SOLVER_KINDS)
+        return sum(1 for p in self.procs if p.kind in SOLVER_KINDS or p.x925)
 
     @property
     def needs_a725(self) -> bool:
-        return any(p.kind in ("ea", "cuopt") for p in self.procs)
+        return any((p.kind == "ea" and not p.x925) or p.kind == "cuopt" for p in self.procs)
 
 
 _SCIP = ProcSpec("scip", "solver")
@@ -134,6 +145,8 @@ _HIGHS_X = ProcSpec("highs", "solver", exchange=True)
 _EA_GPU = ProcSpec("ea", "ea", backend="cupy")
 _EA_CPU = ProcSpec("ea", "ea", backend="numpy")
 _CUOPT = ProcSpec("cuopt", "cuopt")
+_CUOPT_X = ProcSpec("cuopt", "cuopt", exchange=True)                  # A9: --send on cuOpt's own channels
+_EA_GPU_X925 = ProcSpec("ea", "ea", backend="cupy", x925=True)        # A9: the A725 cores belong to cuOpt
 _NOX = (("exchange.enabled", False), ("lp_stream.enabled", False))   # the stream needs the exchange (review 770df17)
 
 ARMS: dict[str, ArmSpec] = {a.name: a for a in [
@@ -153,6 +166,12 @@ ARMS: dict[str, ArmSpec] = {a.name: a for a in [
     ArmSpec("H0", (_HIGHS,), doc="HiGHS alone, harness-matched"),
     ArmSpec("H2", (_HIGHS, _CUOPT), lane="partner", doc="HiGHS || cuOpt race"),
     ArmSpec("H3", (_HIGHS_X, _EA_GPU), lane="partner", doc="HiGHS <-> I-TREA II on the GPU, two-way"),
+    ArmSpec("A9", (_SCIP_X, _EA_GPU_X925, _CUOPT_X), (("exchange.from_cuopt", True),), lane="partner",
+            doc="SCIP <-> I-TREA II on the GPU <- cuOpt (D-015): cuOpt (as shipped, never receives) streams its "
+                "incumbents to the EA, which exchanges with SCIP as in A3; development arm"),
+    ArmSpec("A3x", (_SCIP_X, _EA_GPU_X925), lane="partner",
+            doc="A3 with A9's EA footprint (the EA on the lane's second X925 core, no cuOpt): A9's matched control "
+                "(D-015 addendum); development arm"),
 ]}
 # canonical order (the Williams design permutes the arms of a block in this order)
 ARM_ORDER = tuple(ARMS)
@@ -175,8 +194,8 @@ def arm_spec(job: dict) -> ArmSpec:
 # --------------------------------------------------------------------------------------------------------- lanes
 @dataclass(frozen=True)
 class Lane:
-    """A fixed set of cores a run is pinned to. x925[0] = the solver, x925[1] = A1's second solver, a725 = the
-    partner (EA or cuOpt; cuOpt's num_cpu_threads = len(a725))."""
+    """A fixed set of cores a run is pinned to. x925[0] = the solver, x925[1] = A1's second solver or the EA of A9 /
+    A3x, a725 = the partner (EA or cuOpt; cuOpt's num_cpu_threads = PARTNER_THREADS = len(a725) on the GPU lane)."""
     name: str
     x925: tuple[int, ...]
     a725: tuple[int, ...] = ()
@@ -306,11 +325,18 @@ def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
 
 def run_hash(job: dict, opts: PairOptions | None = None) -> str:
     """<cfg-hash> of the run id: the effective EA configuration hash for arms with an EA (it equals the EA summary's
-    config_hash); a hash of the solver-side settings otherwise."""
+    config_hash); a hash of the solver-side settings otherwise. An arm with an EA AND cuOpt (A9) folds in cuOpt's
+    thread count when it is not the default PARTNER_THREADS, so a thread-count variant gets its own run id (the default
+    id stays the EA configuration hash; build_runs reads the EA hash from `run.json["config"]["ea_hash"]`)."""
     opts = opts or PairOptions()
     cfg, _ = effective_config(job, opts)
-    if arm_spec(job).has_ea:
-        return cfg.hash()
+    arm = arm_spec(job)
+    if arm.has_ea:
+        h = cfg.hash()
+        n = opts.cuopt_threads or PARTNER_THREADS
+        if any(p.kind == "cuopt" for p in arm.procs) and n != PARTNER_THREADS:
+            h = hashlib.sha256(json.dumps({"ea": h, "cuopt_threads": n}, sort_keys=True).encode()).hexdigest()[:12]
+        return h
     return hashlib.sha256(json.dumps(solver_settings(job, opts, cfg), sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -424,6 +450,14 @@ def _fmt_set(v) -> str:
     return json.dumps(v)
 
 
+def cuopt_flags(spec: ProcSpec, cfg: EAConfig | None) -> list[str]:
+    """`--send` for cuOpt only in an exchange arm whose EA reads cuOpt (A9: exchange.enabled and from_cuopt); the
+    controls A2 / A6 never send (cuOpt never receives in any arm)."""
+    if spec.exchange and cfg is not None and cfg.exchange.enabled and cfg.exchange.from_cuopt:
+        return ["--send"]
+    return []
+
+
 def solver_flags(spec: ProcSpec, cfg: EAConfig | None) -> list[str]:
     """--recv/--send/--inert for a solver process. Exchange arms follow the EA configuration (an ablation that turns a
     direction off turns the matching solver flag off); every other solver arm carries the inert plugin (D-006:
@@ -458,7 +492,7 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
     seed0 = int(job["seed"])
     gpu_gb = float(cfg.gpu_mem_gb)
     procs = []
-    n_solver = 0
+    n_x = 0                                          # X925 cores handed out: solvers first, then A9's EA
     for spec in arm.procs:
         if spec.kind in opts.module_override:
             argv = list(opts.module_override[spec.kind])
@@ -473,8 +507,8 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
         else:      # solver processes write <role>.sol.json.gz themselves and check the mailbox's run id
             argv += ["--run-id", run_dir.name]
         if spec.kind in SOLVER_KINDS:
-            cores = [lane.x925[n_solver]]
-            n_solver += 1
+            cores = [lane.x925[n_x]]
+            n_x += 1
             mem = opts.solver_mem_gb
             argv += ["--mem-mb", str(int(max(512, mem * 1024 - 1024)))]   # the solver's own limit below the cap
             argv += solver_flags(spec, cfg if arm.has_ea else None)
@@ -486,7 +520,11 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
                 argv += ["--emphasis", str(job["emphasis"])]
             g = None
         elif spec.kind == "ea":
-            cores = list(lane.a725)
+            if spec.x925:                            # A9: a core of its own; cuOpt keeps the A725 cores
+                cores = [lane.x925[n_x]]
+                n_x += 1
+            else:
+                cores = list(lane.a725)
             mem = opts.ea_mem_gb
             argv += ["--config", str(run_dir / "config.yaml")]
             g = gpu_gb if spec.gpu else None
@@ -494,6 +532,7 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             cores = list(lane.a725)
             mem = opts.cuopt_mem_gb
             argv += ["--cpu-threads", str(opts.cuopt_threads or PARTNER_THREADS), "--gpu-mem-gb", _fmt_set(gpu_gb)]
+            argv += cuopt_flags(spec, cfg if arm.has_ea else None)
             g = gpu_gb                                   # RMM limit = the EA's pool limit (D-002 §3)
         else:
             raise RunError(f"unknown process kind {spec.kind!r}")
@@ -574,8 +613,9 @@ def _remove_mailbox(mb, spec: str, opts: PairOptions) -> None:
         shutil.rmtree(p, ignore_errors=True)
 
 
-def _exchange_log(mb, opts: PairOptions, run_dir: Path) -> dict:
-    """Copy what the mailbox knows about the exchange into the run directory before the mailbox is removed."""
+def _exchange_log(mb, opts: PairOptions, run_dir: Path, cuopt: bool = False) -> dict:
+    """Copy what the mailbox knows about the exchange into the run directory before the mailbox is removed. `cuopt`:
+    cuOpt posted to the EA (A9), so its stream `to_ea_cuopt` is recorded too."""
     out: dict = {}
     try:
         verdicts = mb.verdicts()
@@ -590,7 +630,7 @@ def _exchange_log(mb, opts: PairOptions, run_dir: Path) -> dict:
     out["accepted"] = sum(1 for v in verdicts if v.get("accepted"))
     if opts.mailbox == "redis":
         hist = {}
-        for name in ("to_solver", "to_ea", "lp", "lps"):
+        for name in ("to_solver", "to_ea", "lp", "lps") + (("to_ea_cuopt",) if cuopt else ()):
             try:
                 hist[name] = [[t, seq, [float(o) for o in objs]] for t, seq, objs in getattr(mb, name).history()]
             except Exception:  # noqa: BLE001
@@ -906,7 +946,8 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         if sampler is not None and own_sampler:
             sampler.stop()
         try:
-            rec["exchange"] = _exchange_log(mb, opts, run_dir)
+            rec["exchange"] = _exchange_log(mb, opts, run_dir,
+                                            cuopt=any(p.spec.kind == "cuopt" and "--send" in p.argv for p in procs))
         finally:
             _remove_mailbox(mb, spec, opts)
         rec["stop"] = stop_info

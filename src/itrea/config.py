@@ -20,6 +20,11 @@ population (Berk 2026-10-06). Same hash rule: left out while disabled.
 `repair_clock` (`RepairClockCfg`, off by default) gives every repair call of a generation a lane-step horizon chosen
 from the measured gain per second of each horizon (vault `80-reviews/2026-10-06 Repair-depth design (workflow).md`);
 mode `shadow` only measures and logs. Same hash rule: left out while disabled.
+
+`exchange.from_cuopt` (off by default, D-015) lets the EA also read cuOpt's incumbents in the three-way arm A9; it is
+left out of the hash while false (`_LATE_DEFAULTS`), so every recorded hash stands. The runner switches it on for A9
+(an arm-implied change, `itrea.experiments.pair.ARMS`), so A9 and its matched control A3x (A9's EA footprint, no
+cuOpt; A3 differs from A9 by the EA's cores as well) share one configuration file.
 """
 from __future__ import annotations
 
@@ -155,6 +160,9 @@ class ExchangeCfg:
                                        # solution storage, where its crossover-type heuristics can use them)
     use_dual_bound: bool = True        # receive the solver's proven bound (needed by ranks.rank0_bound_demote)
     use_root_lp: bool = True           # receive the solver's root LP solution (seeding, toward_lp)
+    from_cuopt: bool = False           # arm A9 (D-015): also read cuOpt's own channels (`to_ea_cuopt`, `info_cuopt`):
+                                       # its incumbents are injected like the solver's, its incumbent counts in the
+                                       # external incumbent; its bound is recorded, not used. Off: never read
 
 
 @dataclass
@@ -267,7 +275,7 @@ class RepairClockCfg:
 
 
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
-_LATE_DEFAULTS = {"ranks.feas_alt_scale": "none"}
+_LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False}
 
 
 @dataclass
@@ -391,6 +399,7 @@ class EAConfig:
                "repair fj knobs: max_candidates in [4, 32], p_random_walk in [0, 1], row_scan_cap >= 0")
         _check(rp.continuous in ("auto", "gene", "lp_decode"), "repair.continuous in auto|gene|lp_decode")
         _check(e.poll_s > 0 and e.inject_k >= 1 and e.inject_band >= 0, "exchange parameters")
+        _check(isinstance(e.from_cuopt, bool), "exchange.from_cuopt is a bool")
         _check(0.0 <= sd.random <= 1.0 and 0.0 <= sd.lp_rounding <= 1.0, "seeding shares in [0, 1]")
         _check(sd.lp_source in ("solver", "highs_async", "none"), "seeding.lp_source in solver|highs_async|none")
         _check(st.gens >= 1 and 0.0 <= st.immigrant_frac <= 1.0, "stagnation parameters")

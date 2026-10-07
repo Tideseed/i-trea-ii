@@ -134,7 +134,7 @@ def test_e1_and_e4_caps():
 
 def test_job_rejects_unknown_arm_and_fields():
     with pytest.raises(mj.JobError):
-        mj.job("x.mps", "s", "A9", 0, 10)
+        mj.job("x.mps", "s", "A99", 0, 10)
     with pytest.raises(mj.JobError):
         mj.job("x.mps", "s", "A0", 0, 10, colour="red")
 

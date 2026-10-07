@@ -34,7 +34,21 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   passed), `posts_stored` = also kept by `trySol`; a post of several rows counts as accepted if any row is. Verdicts
   are read from the run directory's `verdicts.jsonl` (monotonic time, converted with t0) only when the solver wrote
   no verdict events.
-- **Crashes are kept and truncated** (no event after the crash exists to count); `crashed`, `crashed_roles`.
+- **Three-way arm A9** (SCIP <-> EA <- cuOpt, D-015): the portfolio is the best of all three processes and each has
+  its own per-role P (`solver_*`, `ea_*`, `cuopt_*`), as for every run. cuOpt's contribution through the EA is counted
+  up to T (`cuopt_attribution`): `cuopt_inject_msgs` / `cuopt_injected` (cuOpt messages the EA read / rows it
+  injected, `inject_cuopt` events), `ea_inc_from_cuopt` (checked EA incumbents that are unchanged cuOpt vectors, source
+  `cuopt`), `cuopt_posts` (EA posts carrying such a vector, `post` events' `cuopt_rows`), `cuopt_posts_accepted` /
+  `cuopt_posts_became_incumbent` (those posts SCIP accepted / took as its incumbent, from verdicts with `cuopt: true`,
+  one per post), `solver_inc_from_cuopt` (checked SCIP incumbent records made from one: SCIP records them with source
+  `cuopt`, so `solver_inc_from_ea` counts only EA-made vectors). The post columns (`posts`, `posts_accepted`,
+  `posts_became_incumbent` …) count EVERY EA post, cuOpt's unchanged vectors included: in A9 the EA-made share is
+  `posts_*` minus `cuopt_posts*`. Units in `cuopt_attribution`. Runs whose EA does not read cuOpt's channels
+  (`reads_cuopt`: decided from the EA's own record) leave these columns missing (-1), not 0. A9's matched control is
+  A3x (A3 with A9's EA footprint, no cuOpt); A3 differs from A9 by the EA's cores as well.
+- **Crashes are kept and truncated** (no event after the crash exists to count); `crashed`, `crashed_roles`. A
+  process the runner killed after a partner's proven outcome (`processes[*].stopped_by_runner`, e.g. cuOpt in A2 / A9
+  after SCIP proved optimality) is not a crash.
 - **GPU-health voiding:** a GPU run whose `run.json["gpu_health"]` verdict is "void" (median busy SM clock < 2,000 MHz
   or foreign GPU processes in > 2 % of samples; `itrea.experiments.gpu_health`) sets `gpu_void`, and every run of its
   block (instance × seed × budget) gets `block_void`.
@@ -65,6 +79,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from itrea.analysis import metrics as M
 from itrea.analysis.check_solutions import CHECKER_VERSION, ModelCache, check_incumbents, file_sha256, producer_of
@@ -74,8 +89,9 @@ from itrea.trace import read_events
 
 ROLES = ("solver", "solver2", "ea", "cuopt")
 SOLVER_ROLE, EA_ROLE = "solver", "ea"
-GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3")
-EA_GPU_ARMS = ("A3", "A3r", "A5", "A5x0", "A5y0", "H3")
+GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x")
+EA_GPU_ARMS = ("A3", "A3r", "A5", "A5x0", "A5y0", "H3", "A9", "A3x")
+CUOPT_X_ARMS = ("A9",)                    # the EA reads cuOpt's channels (exchange.from_cuopt, D-015)
 EA_CPU_ARMS = ("A4",)
 SCREEN_ARM = "SCREEN"
 REF_ARMS = (SCREEN_ARM, "REF")
@@ -450,6 +466,91 @@ def post_accounting(run: Run, T: float) -> dict:
     return out
 
 
+def reads_cuopt(run: Run) -> bool:
+    """The run's EA read cuOpt's channels (A9: `exchange.enabled` and `exchange.from_cuopt`), decided from what the EA
+    recorded: its summary's `exchange_from_cuopt` (written only then), else the configuration in its summary. Only an
+    EA without a recorded configuration (crashed before writing one) falls back to the runner's `config.yaml`, and last
+    to the base arm or `inject_cuopt` events, unless the run record's overrides turn the exchange off. So an A9 job
+    whose ablation sets `exchange.enabled: false` (cuOpt then gets no --send) is not counted as reading cuOpt."""
+    s = run.summary(EA_ROLE)
+    if s.get("exchange_from_cuopt"):
+        return True
+    cfg = s.get("config") if isinstance(s.get("config"), dict) else None
+    if cfg is None:
+        try:
+            cfg = yaml.safe_load((Path(run.path) / "config.yaml").read_text())
+        except (OSError, TypeError, yaml.YAMLError):
+            cfg = None
+    if isinstance(cfg, dict):
+        ex = cfg.get("exchange") if isinstance(cfg.get("exchange"), dict) else {}
+        return bool(ex.get("enabled", True) and ex.get("from_cuopt", False))
+    rc = run.run_json.get("config") if isinstance(run.run_json.get("config"), dict) else {}
+    if (rc.get("overrides") or {}).get("exchange.enabled") is False:
+        return False
+    base = str(run.run_json.get("base_arm") or run.arm).split("~")[0].split("@")[0]
+    return base in CUOPT_X_ARMS or any(e.get("kind") == "inject_cuopt" for e in run.events.get(EA_ROLE, []))
+
+
+def _verdict_rows(run: Run) -> list[dict]:
+    """The solvers' verdicts, one dict per received row (seq, t, obj, accepted and the note's fields: row, dup,
+    primal_after, cuopt …): the `verdict` events, or — only when the solvers wrote none — the runner's
+    `verdicts.jsonl` (monotonic t converted with t0), as in post_accounting."""
+    vs = [e for r in ROLES if r.startswith("solver") for e in run.events.get(r, []) if e.get("kind") == "verdict"]
+    vf = run.path / "verdicts.jsonl"
+    if vs or not vf.exists():
+        return vs
+    t0 = _fl(run.run_json.get("t0", run.summary(SOLVER_ROLE).get("t0")))
+    for line in vf.read_text().splitlines():
+        try:
+            v = json.loads(line)
+            note = json.loads(v["note"]) if str(v.get("note", "")).startswith("{") else {}
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(v, dict) or v.get("seq") is None:
+            continue
+        vs.append(dict(note, **{k: x for k, x in v.items() if k not in ("note", "t")},
+                       t=(_fl(v.get("t")) - t0) if not math.isnan(t0) else math.nan))
+    return vs
+
+
+def cuopt_attribution(run: Run, inc: pd.DataFrame, T: float) -> dict:
+    """A9: what cuOpt contributed through the EA, up to T (module docstring). {} for a run that does not read cuOpt's
+    channels (the columns stay missing).
+
+    Units: `cuopt_posts`, `cuopt_posts_accepted` and `cuopt_posts_became_incumbent` count EA POSTS (seq) under
+    post_accounting's rules (a post counts once, accepted if any of its cuOpt rows is — a `dup` verdict included, as
+    for `posts_accepted` — and became the incumbent if such a row's `primal_after` equals that row's posted objective
+    within 1e-9 relative), so they are the cuOpt share of `posts`, `posts_accepted`, `posts_became_incumbent` (the EA's
+    own share = the difference). For a single-row post (every incumbent post) this is post_accounting's match; for a
+    several-row frontier post it matches on the cuOpt row, not on the post's best objective. `ea_inc_from_cuopt` and
+    `solver_inc_from_cuopt` count checked incumbent RECORDS with source `cuopt`, the unit of `solver_inc_from_ea`: one
+    SCIP `trySol` can record two (BESTSOLFOUND fires twice, the second on SCIP's slightly adjusted copy)."""
+    if not reads_cuopt(run):
+        return {}
+    ev = [e for e in run.events.get(EA_ROLE, []) if _fl(e.get("t")) <= T]
+    inj = [e for e in ev if e.get("kind") == "inject_cuopt"]
+    posts = {int(e["seq"]) for e in ev if e.get("kind") == "post" and e.get("cuopt_rows") and e.get("seq") is not None}
+    acc, became = set(), set()
+    for v in _verdict_rows(run):
+        if not (v.get("cuopt") and v.get("accepted") and v.get("seq") is not None and _fl(v.get("t")) <= T):
+            continue
+        seq = int(v["seq"])
+        if seq not in posts:
+            continue
+        acc.add(seq)
+        pa, obj = _fl(v.get("primal_after")), _fl(v.get("obj"))
+        if not math.isnan(pa) and not math.isnan(obj) and abs(pa - obj) <= 1e-9 * max(1.0, abs(obj)):
+            became.add(seq)
+    out = dict(cuopt_inject_msgs=len(inj), cuopt_injected=int(sum(int(e.get("k") or 0) for e in inj)),
+               cuopt_posts=len(posts), cuopt_posts_accepted=len(acc), cuopt_posts_became_incumbent=len(became),
+               ea_inc_from_cuopt=0, solver_inc_from_cuopt=0)
+    if len(inc):
+        g = inc[(inc["run_id"] == run.run_id) & inc["ok"] & (inc["source"] == "cuopt") & (inc["t"] <= T)]
+        out["ea_inc_from_cuopt"] = int((g["role"] == EA_ROLE).sum())
+        out["solver_inc_from_cuopt"] = int((g["role"] == SOLVER_ROLE).sum())
+    return out
+
+
 def _exit_codes(rj: dict) -> dict[str, int | None]:
     out: dict[str, int | None] = {}
     procs = rj.get("processes")
@@ -464,10 +565,22 @@ def _exit_codes(rj: dict) -> dict[str, int | None]:
     return out
 
 
+def _stopped_by_runner(rj: dict) -> set[str]:
+    """Roles the runner killed after a partner ended the race with a proven outcome (`processes[*].stopped_by_runner`;
+    cuOpt has no interrupt API, so it is SIGKILLed after `kill_after_s`): not crashes of their own."""
+    procs = rj.get("processes")
+    if isinstance(procs, dict):
+        procs = [dict(v, role=k) for k, v in procs.items() if isinstance(v, dict)]
+    return {str(p["role"]) for p in procs or [] if isinstance(p, dict) and p.get("role") and p.get("stopped_by_runner")}
+
+
 def crash_flags(run: Run) -> dict:
     codes = _exit_codes(run.run_json)
+    stopped = _stopped_by_runner(run.run_json)
     crashed = []
     for role in sorted(set(run.summaries) | set(codes)):
+        if role in stopped:                      # the runner's kill, not a crash (pair.run_pair)
+            continue
         c = codes.get(role)
         s = run.summaries.get(role, {})
         if c is not None:
@@ -681,6 +794,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         row.update(post_accounting(run, T))
         row["solver_inc_from_ea"] = int(((inc["run_id"] == run.run_id) & (inc["role"] == SOLVER_ROLE) & inc["ok"] &
                                          (inc["source"] == "ea") & (inc["t"] <= T)).sum()) if len(inc) else 0
+        row.update(cuopt_attribution(run, inc, T))
         row.update(crash_flags(run))
         row.update(gpu_flags(run))
         row.update(_resource_cols(run))
@@ -893,6 +1007,9 @@ RUN_COLUMNS = {
     "posts_pending": "int", "posts_stored": "int", "posts_became_incumbent": "int", "posts_after_T": "int",
     "verdicts_unmatched": "int",
     "verdict_source": "str", "solver_inc_from_ea": "int",
+    # A9 (D-015): cuOpt's contribution through the EA, up to T; -1 for runs that do not read cuOpt's channels
+    "cuopt_inject_msgs": "int", "cuopt_injected": "int", "ea_inc_from_cuopt": "int", "cuopt_posts": "int",
+    "cuopt_posts_accepted": "int", "cuopt_posts_became_incumbent": "int", "solver_inc_from_cuopt": "int",
     "crashed": "bool", "crashed_roles": "str", "crash_t": "float", "exit_codes": "str",
     "gpu_arm": "bool", "gpu_health": "str", "gpu_median_sm_mhz": "float", "gpu_foreign_share": "float",
     "gpu_void": "bool", "block_void": "bool",

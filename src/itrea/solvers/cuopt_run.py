@@ -6,7 +6,10 @@ cuOpt 26.08 (installed in this venv; `--cuopt-python` in the runner can point at
 receives solutions: registering a `SetSolutionCallback` disables cuOpt's presolve (optopt X1, and cuOpt's own
 `set_mip_callback` documentation), which would turn the "as-shipped cuOpt" control (A2/A6) into something else. It
 only reports incumbents, through a `GetSolutionCallback`: every one is recorded (vector + objective + bound), and with
---send also posted to `to_ea` (ORIGIN_SOLVER; cuOpt never sees an EA vector, so there are no echoes).
+--send also posted to the EA on cuOpt's OWN channels `to_ea_cuopt` (the vector, ORIGIN_SOLVER; cuOpt never sees an EA
+vector, so there are no echoes) and `info_cuopt` (incumbent, bound, status) — the three-way arm A9 (D-015), where SCIP
+writes `to_ea` / `info` beside it and the channels keep only their latest message. The runner passes --send only in
+A9; the controls A2 and A6 never do.
 
 Before the barrier (start-up, recorded, never on the clock):
 - parse the instance (`ParseMps`, timed as `read_s`);
@@ -65,7 +68,8 @@ def build_parser():
                      exchange=False)
     ap.add_argument("--cpu-threads", type=int, default=3, help="cuOpt num_cpu_threads (>= 2; partner footprint)")
     ap.add_argument("--gpu-mem-gb", type=float, default=4.0, help="RMM LimitingResourceAdaptor limit (GB)")
-    ap.add_argument("--send", action="store_true", help="post every new incumbent (and bound) to the EA")
+    ap.add_argument("--send", action="store_true",
+                    help="post every new incumbent (and bound) to the EA on to_ea_cuopt / info_cuopt (arm A9)")
     ap.add_argument("--no-warmup", action="store_true", help="skip the synthetic warm-up solve (tests only)")
     return ap
 
@@ -191,9 +195,9 @@ def body(proc):
             if args.send:
                 tp = time.perf_counter()
                 xc = proc.namemap.to_canonical(x)
-                seq = proc.mailbox.to_ea.post(xc[None, :], np.array([obj]),
-                                              origin=np.array([ORIGIN_SOLVER], dtype=np.int64))
-                proc.mailbox.info.post(incumbent=obj, dual_bound=bound, status="solving", solver="cuopt")
+                seq = proc.mailbox.to_ea_cuopt.post(xc[None, :], np.array([obj]),
+                                                    origin=np.array([ORIGIN_SOLVER], dtype=np.int64))
+                proc.mailbox.info_cuopt.post(incumbent=obj, dual_bound=bound, status="solving", solver="cuopt")
                 proc.stats.add("posts_out")
                 proc.stats.add("rows_out")
                 proc.stats.add("info_posts")
@@ -230,8 +234,8 @@ def body(proc):
     if proc.sigterm:
         reason = "sigterm"
     if args.send:                                    # final status and bound, as scip_run / highs_run do
-        proc.mailbox.info.post(incumbent=proc.best_obj, dual_bound=finite_or_none(ms.get("solution_bound")),
-                               status=status, solver="cuopt")
+        proc.mailbox.info_cuopt.post(incumbent=proc.best_obj, dual_bound=finite_or_none(ms.get("solution_bound")),
+                                     status=status, solver="cuopt")
         proc.stats.add("info_posts")
     return reason, dict(status=status, termination_status=st, wall_s=round(t_end, 6),
                         overrun_s=round(max(0.0, t_end - args.budget), 6),

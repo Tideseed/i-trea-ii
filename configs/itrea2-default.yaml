@@ -17,6 +17,8 @@
 # default "none"; fields added later are left out of the hash while at their default (_LATE_DEFAULTS in config.py).
 # 2026-10-06 (hash unchanged): the `repair_clock` section (a lane-step horizon per repair call, chosen from the
 # measured gain per second of each horizon; vault 80-reviews, repair-depth design) was added OFF, under the same rule.
+# 2026-10-07 (hash unchanged): exchange.from_cuopt (arm A9, D-015: the EA also reads cuOpt's incumbents) added at its
+# default false, under the _LATE_DEFAULTS rule.
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -95,6 +97,7 @@ exchange:
   post_frontier: false
   use_dual_bound: true
   use_root_lp: true
+  from_cuopt: false
 seeding:
   random: 0.5
   lp_rounding: 0.5

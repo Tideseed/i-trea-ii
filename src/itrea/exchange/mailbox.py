@@ -15,6 +15,10 @@ Files in a run's mailbox directory:
     to_ea_lps.npz      solver -> EA, the LP stream (D-011): X (r, n) the solver's last r node LP points (a ring, newest
                        last), obj (r,), origin (r,) = POINT IDS (increasing), not origin bits — a snapshot, so a
                        reader that misses a post still sees the points in the ring and takes the ids it has not seen
+    to_ea_cuopt.npz    cuOpt -> EA (arm A9, D-015; `cuopt_run --send`): X (1, n), obj (1,), seq, t, origin
+                       ORIGIN_SOLVER — cuOpt's own channel, so the solver's `to_ea` (latest message wins) is never
+                       overwritten by the third process
+    to_ea_cuopt_info.json  cuOpt -> EA: {"seq", "t", "incumbent", "dual_bound", "status", "solver": "cuopt"}
     ready.<role>       a process has read the instance and is waiting at the barrier
     start              the runner releases both: {"t0": monotonic seconds, "epoch"}
     stop               written when the pair must end (budget, failure); both sides stop promptly
@@ -140,7 +144,7 @@ class InfoChannel:
 
 
 class Mailbox:
-    """All channels of one pair run, seen from one role ("solver" or "ea")."""
+    """All channels of one run, seen from one role ("solver", "solver2", "ea", "cuopt" or "runner")."""
 
     def __init__(self, directory: str | os.PathLike, role: str, create: bool = False, run_id: str | None = None):
         """create=True (runner only): make a NEW directory (error if it exists) and write `run_id`.
@@ -160,6 +164,8 @@ class Mailbox:
         self.info = InfoChannel(self.dir / "to_ea_info.json")
         self.lp = Channel(self.dir / "to_ea_lp.npz")
         self.lps = Channel(self.dir / "to_ea_lps.npz")
+        self.to_ea_cuopt = Channel(self.dir / "to_ea_cuopt.npz")        # arm A9 (D-015): cuOpt's own channels
+        self.info_cuopt = InfoChannel(self.dir / "to_ea_cuopt_info.json")
 
     # ------------------------------------------------------------ order
     def write_order(self, names) -> None:

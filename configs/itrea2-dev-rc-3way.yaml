@@ -1,0 +1,28 @@
+# I-TREA II -- the development default since the repair clock's Stage 2 (2026-10-07, D-012 addendum 2):
+# itrea2-adaptive-lps-rc with the repair clock ACTIVE (`repair_clock.mode: active`). The same effective configuration
+# as Stage 2's rc1 runs (`itrea2-adaptive-lps-rc.yaml` + the override `repair_clock.mode=active`, hash 1d12ad490dd0).
+# Development only (D-010), never a confirmatory configuration.
+#
+# The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) uses this file: the runner adds `exchange.from_cuopt: true` for
+# A9 itself (an arm-implied change, like A5's "no exchange"); `exchange.from_cuopt` is left out here on purpose. A9's
+# matched control is an A3x job with this file (A3 with A9's EA footprint: SCIP on the lane's first X925 core, the EA
+# on its second, no cuOpt), which differs from A9 only by cuOpt's process and its solutions. An A3 job with this file
+# is NOT: A3's EA runs on the three A725 cores (2.8 GHz) with the HiGHS LP worker of `seeding.lp_source: highs_async`
+# beside it, A9's on one X925 core (3.9 GHz) that it shares with that worker for up to lp_time_limit (60 s).
+#
+# Partial file over the defaults. Equivalent overrides:
+#   --set strategy.enabled=true seeding.lp_source=highs_async lp_stream.enabled=true repair.max_steps=20000
+#         repair.stall_steps=1000 repair_clock.enabled=true repair_clock.mode=active
+name: itrea2-dev-rc-3way
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: active
