@@ -1,8 +1,11 @@
 # DRAFT — NVIDIA/cuopt feature request: SetSolutionCallback with presolve enabled
 
-**Status:** draft, NOT filed. Berk suggested it (2026-10-07: "we might add an issue to cuopt repo to want such
-feature"); filing needs his explicit yes for this post (host rule: per-post permission). Would be filed from his `gh`
-account (`berkorbay`), stating that Claude Code wrote it.
+**Status:** FILED 2026-10-07 as **NVIDIA/cuopt#2073** (https://github.com/NVIDIA/cuopt/issues/2073) from Berk's
+`gh` account (`berkorbay`), on his yes ("yeah go ahead with your recommendation"), stating that Claude Code wrote it.
+Filed text = the draft below reflowed for GitHub, with two phrases softened to what is known (not measured by us):
+"presolve is a large part of cuOpt's strength … cannot inject" → "Turning presolve off changes the solver we are
+trying to help, so in practice we do not inject"; "which since #1104 survives presolve" → "which #1104 made
+compatible with Papilo presolve". No comment was added to #186.
 
 **Prior art checked (2026-10-07, `gh issue list -R NVIDIA/cuopt --state all` + `gh search issues`):**
 - #482 "[FEA] Support get/set solution callbacks with presolve" — closed 2026-02-10: "get side is DONE / set side is
