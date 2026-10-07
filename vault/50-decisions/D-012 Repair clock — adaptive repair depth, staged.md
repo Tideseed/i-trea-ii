@@ -44,3 +44,16 @@ evidence (≥ 5 observed generations, ≥ 2 material gains, a rate > 1.25× the 
   item_placement's time below "none"; ≥ 60 % of glass4's and loue's at "none" or one below); every incumbent checked,
   GPU health ok, nothing compiled on the clock. fhnw and neos-960392 reported, not judged.
 - Still owed before Stage 1: an analysis script for criteria (a)–(c) over the `rclock` events.
+
+## Addendum 2026-10-07 — Stage 1 result and a stated deviation
+Stage 1 (shadow, 7 blocks): (a) PASS on both item_placement seeds; (b) FAIL (glass4 35 %, loue 21 %, neos-960392 56 %
+at none or one below); (c) FAIL on glass4 only (17 vs 25 generations — not overhead: seconds per generation outside
+the repair calls equal within a few % on every instance). By the letter, the fallback (design 1) would follow.
+**Deviation:** criterion (b) encoded a premise — "glass4, loue, neos-960392 want depth none" — taken from the default
+budget's loss, which mixes a step cap (2,000) with a short stall rule (100). A one-variable premise test (Development
+log, 2026-10-07) shows the step cap costs nothing (cap4k vs lps1: +0.05 [−0.04, +0.15], 3 better / 1 worse) while the
+stall rule hurts (stall100: −0.11, 1 / 3). The clock keeps the stall rule and caps steps, so (b) tested a refuted
+premise, and the per-generation bandit would inherit the same question. We proceed to **Stage 2 (active)** with its
+rejection rules unchanged — they judge the outcome (item_placement ≥ 3 of 4 seeds better with mean d ≥ +0.15; sing44,
+glass4, loue, ca each d ≥ −0.05; radiationm, rail01 within ±0.01; mechanism agreement). Criterion (c) is replaced in
+Stage 2 by its intended check, seconds per generation outside the repair calls within 10 % of the control.

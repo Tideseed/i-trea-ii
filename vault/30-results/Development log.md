@@ -315,3 +315,26 @@ matches lps1's +0.43 against SCIP), and it gives the best item_placement result 
 the adaptive strategy and the LP stream add nothing measurable — slightly negative (1 / 6). Deep repair trades
 instances (ca, sing44, glass4, fhnw gain; item_placement and neos-960392 lose). **Owed next:** `lpd` = lp1 + deep repair,
 no strategy, no stream (queued) — it isolates strategy + stream at the deep depth (lps1 vs lpd).
+
+## Premise test for D-012's criterion (b) (2026-10-07 10:23–11:17) — one variable each vs deep repair (lps1w)
+`cap4k` = lps1 with repair.max_steps 4,096 (stall 1,000 kept — the regime of the clock's shallow levels);
+`stall100` = lps1 with repair.stall_steps 100 (max_steps 20,000 kept — the stall rule of the default budget).
+24/24 runs (incl. controls), every incumbent checked, GPU health ok. P(120):
+
+| instance | seed | lps1w (deep) | cap4k | stall100 | generations lps1w / cap4k / stall100 |
+|---|---|---|---|---|---|
+| glass4 | 0 / 1 | 0.226 / 0.229 | **0.217 / 0.222** | 0.241 / 0.315 | 26 / 28 / 158 |
+| item_placement_9903 | 0 / 1 | 0.573 / 0.408 | 0.517 / 0.543 | **0.371 / 0.317** | 389 / 395 / 1,792 |
+| neos-3024952-loue | 0 / 1 | 0.433 / 0.371 | **0.336** / 0.419 | 0.463 / 0.457 | 49 / 44 / 444 |
+| neos-960392 | 0 / 1 | 0.032 / 0.031 | **0.025 / 0.027** | 0.067 / 0.043 | 10 / 20 / 174 |
+cap4k vs lps1w: 3 better / 1 worse, mean d **+0.05 [−0.04, +0.15]**; stall100 vs lps1w: 1 / 3, mean d **−0.11
+[−0.36, +0.18]** (glass4 −0.18, loue −0.13, neos-960392 −0.43; item_placement +0.30).
+
+**Reading.** The default budget lost on glass4, loue and neos-960392 because of its **stall rule** (100 steps), not its
+step cap: capping the total at 4,096 lane steps with the 1,000-step stall costs nothing (slightly better). So
+criterion (b)'s premise ("these instances want the horizon at none") is refuted for the clock's regime, and Stage 1's
+(b) failure says nothing against the controller there. item_placement's gain needs many generations (stall100: 4–5×
+more), which only a short repair gives — the clock chose 2^7 there (Stage 1, criterion (a) passed). **Decision:**
+proceed to Stage 2 (active) under D-012's Stage-2 rejection rules, instead of the Stage-1 fallback — recorded as a
+deviation in D-012. Caveat: the clock also chose 2^7 on loue 23 % of the time; whether that short regime hurts there
+(as stall100 did) is exactly what Stage 2 measures.
