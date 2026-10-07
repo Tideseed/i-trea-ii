@@ -1,0 +1,9 @@
+instance,name,group,lp_1thread_s,why
+data/miplib/inst/neos-3004026-krka.mps.gz,neos-3004026-krka,sparse_obj,0.2,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/neos-3656078-kumeu.mps.gz,neos-3656078-kumeu,sparse_obj,0.3,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/chromaticindex1024-7.mps.gz,chromaticindex1024-7,sparse_obj,124.8,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/cryptanalysiskb128n5obj16.mps.gz,cryptanalysiskb128n5obj16,sparse_obj,13.5,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/comp21-2idx.mps.gz,comp21-2idx,dense_obj,0.4,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/neos-4763324-toguru.mps.gz,neos-4763324-toguru,dense_obj,6.9,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/neos-2657525-crna.mps.gz,neos-2657525-crna,chains,0.0,D-014 class probe; excluded from the confirmatory test selection
+data/miplib/inst/neos-2746589-doon.mps.gz,neos-2746589-doon,chains,3.4,D-014 class probe; excluded from the confirmatory test selection
