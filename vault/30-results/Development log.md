@@ -285,3 +285,33 @@ Reading: two-scale survival keeps the rhs-repaired members alive (236–244 of 2
 but does not change the solve rate measurably (1/4 vs 0/4; n is tiny). The configuration that solved fhnw every time
 is the pure rhs scale — in the adaptive strategy rhs is one of four strategies, and selection does not concentrate on
 it within 120 s. Hygiene: 8/8 completed, every incumbent checked, GPU health ok.
+
+## The EA's own LP alone (2026-10-07 09:51–10:23) — A3@lp1 = coupled default + `seeding.lp_source: highs_async`, 9 × seeds 0–1
+One variable against the coupled default (18/18 runs; 1 from 2026-10-06), every incumbent checked, GPU health ok.
+
+| instance | SCIP alone | coupled default | **+ own LP (lp1)** | lps0 (+ strategy + stream, default depth) | lps1 (+ strategy + stream + deep) | cuOpt alone |
+|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 1.000 | 1.000 | 0.509 | 0.395 | **0.300** | 0.647 |
+| fhnw-binpack4-48 | 1.000 | 1.000 | 1.000 | 1.000 | 0.651 | **0.005** |
+| glass4 | 0.344 | 0.247 | 0.300 | 0.323 | **0.228** | 0.308 |
+| item_placement_9903 | 0.660 | 0.400 | **0.218** | 0.358 | 0.569 | 0.666 |
+| neos-3024952-loue | 1.000 | **0.344** | 0.369 | 0.440 | 0.369 | 0.760 |
+| neos-960392 | 1.000 | 0.042 | **0.027** | 0.039 | 0.032 | 0.571 |
+| radiationm18-12-05 | 0.229 | 0.237 | 0.224 | 0.235 | 0.234 | **0.009** |
+| rail01 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **0.927** |
+| sing44 | 0.525 | 0.651 | 0.492 | 0.551 | **0.362** | 0.726 |
+
+| comparison | better / worse | mean d [95 % CI] | Wilcoxon p | D-002 rule |
+|---|---|---|---|---|
+| lp1 vs coupled default | 5 / 2 | +0.19 [+0.01, +0.37] | 0.156 | inconclusive |
+| lp1 vs SCIP alone | **7 / 0** | **+0.43 [+0.19, +0.68]** | **0.016** | supported |
+| lps1 vs lp1 | 4 / 4 | +0.06 [−0.17, +0.25] | 0.64 | inconclusive |
+| **lps0 vs lp1** (strategy + stream at default depth) | 1 / 6 | **−0.12 [−0.25, +0.01]** | 0.156 | **negative** |
+| lps1 vs lps0 (deep vs default depth) | 7 / 1 | +0.15 [−0.02, +0.28] | 0.195 | inconclusive |
+| lp1 vs cuOpt alone | 6 / 3 | +0.05 [−0.38, +0.44] | 0.65 | inconclusive |
+
+**Reading.** The EA solving its own LP right after t0 is the single change that carries the gain over SCIP alone (lp1
+matches lps1's +0.43 against SCIP), and it gives the best item_placement result so far (0.218). At the default depth
+the adaptive strategy and the LP stream add nothing measurable — slightly negative (1 / 6). Deep repair trades
+instances (ca, sing44, glass4, fhnw gain; item_placement and neos-960392 lose). **Owed next:** `lpd` = lp1 + deep repair,
+no strategy, no stream (queued) — it isolates strategy + stream at the deep depth (lps1 vs lpd).
