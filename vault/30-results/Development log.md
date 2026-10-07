@@ -374,3 +374,43 @@ D-013 weak sets: SCIP's (7) mean P 0.88 → 0.54 (−39 %, 5 of 7 improved); cuO
 the LP stream add little: +0.07 at deep depth (fhnw +0.35 — one solved seed —, loue +0.18, neos-960392 +0.16; glass4
 −0.15), −0.12 at the default depth. Repair depth is a clean instance trade (deep: ca +0.40, glass4 +0.36, sing44 +0.30;
 default: item_placement +0.64, neos-960392 +0.27, loue +0.18) — the target of the repair clock (Stage 2 running).
+
+## Class probe — D-014 result (2026-10-07 13:21–15:13) — 8 new public instances, A0 / A6 / A3@lp1 × seeds 0–1
+48/48 runs completed, every incumbent checked, GPU health ok; predictions committed at 12:04 (01dacce), before the runs.
+P(120), seed means:
+
+| instance | SCIP alone | cuOpt alone | coupled (lp1) | prediction | outcome |
+|---|---|---|---|---|---|
+| neos-3004026-krka | 0.659 | **0.004** | 0.662 | lose to cuOpt | HIT (d −0.99) |
+| neos-3656078-kumeu | 1.000 | **0.102** | 1.000 | lose to cuOpt | HIT (d −0.90) |
+| chromaticindex1024-7 | 1.000 | **0.075** | 1.000 | lose to cuOpt; no gain vs SCIP (LP 124.8 s) | HIT (d −0.93); (b) holds (0.0 / 0.0) |
+| comp21-2idx | 0.891 | **0.498** | 0.656 | beat cuOpt | MISS (d −0.24; vs SCIP +0.26) |
+| neos-4763324-toguru | 0.772 | **0.583** | 0.772 | beat cuOpt | MISS (d −0.24) |
+| neos-2657525-crna | 0.833 | 0.782 | **0.578** | — | vs SCIP +0.31, vs cuOpt +0.26 |
+| cryptanalysiskb128n5obj16 | 1.000 | 1.000 | 1.000 | — | nobody |
+| neos-2746589-doon | 1.000 | 1.000 | 1.000 | — | nobody |
+
+**D-014 verdict: INCONCLUSIVE** — (a) 3 of 5 (needed ≥ 4 to support, ≤ 2 refutes), (b) holds. The "cuOpt closes early ⇒
+we lose" half held on all three; the "cuOpt stalls ⇒ we win" half failed on both — on comp21-2idx and toguru cuOpt
+stalled at 0.50–0.58 but the coupled system was worse still. **Out of sample the coupling is far weaker than on the
+development set:** vs SCIP alone 3 better / 1 worse of 4 informative instances, mean d +0.14 [−0.00, +0.28]; SCIP's
+weak set (8 of 8) improves only on 2 (comp21-2idx −26 %, crna −31 %), mean P 0.89 → 0.83; vs cuOpt alone 1 / 5,
+mean d −0.51 [−0.84, −0.12]. The development set (chosen by looking, tuned on) overstates the effect — the expected
+optimism of development data, now measured.
+
+## Repair clock, Stage 2 — first 8 blocks (2026-10-07 12:23–13:21) — A3@rc1 (active) vs same-day A3@lps1w
+16/16 completed, every incumbent checked. rc1 vs lps1w: **item_placement s0 0.279 vs 0.570 (d +0.51; 2,087 vs ~390
+generations; 91.5 % of the post-feasible time below "none")**; glass4 s0 0.148 vs 0.220 (+0.33) and s1 0.235 vs 0.243
+(+0.03) — the clock played "none" throughout on glass4, so this is trajectory noise, not the clock; ca s0/s2 −0.003 /
+−0.004 (stayed "none", 13–14 cap hits); loue s1 −0.014 (88.6 % below none); neos-960392 s0 +0.014; fhnw s0 1.0 / 1.0.
+No guard instance below −0.05 so far. The remaining 14 blocks run in the evening window (16:48–19:10).
+
+## cuOpt MIP start — verification on the GPU (2026-10-07 16:46, glass4, `tools/cuopt_verify_mipstart.py`)
+cuOpt 26.08 with `DataModel.set_initial_primal_solution`, 3-s solves: **the start is used** (final 1.6000131e9 =
+the start's objective, echoed; control without a start 2.1e9; a second Solve on the same DataModel the same);
+**presolve stays on** (PaPILO in the log, no "presolve disabled"); partial (NaN) starts are refused ("Error cannot add
+the provided initial solution"); an out-of-bounds start is a ValidationError; SIGTERM is handled only after Solve
+returns; deterministic mode ignores the start. **Wall time of a 3-s solve was 12–17 s** on this 322-variable model
+(deterministic mode: 3.0 s) — each restart costs ~10 s beyond its time limit, which the restart design's slice
+lengths must absorb. (The script's own summary line "start_used: False" uses a stricter echo test; the objectives above
+are the evidence.)
