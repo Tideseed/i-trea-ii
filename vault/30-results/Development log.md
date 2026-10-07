@@ -273,3 +273,15 @@ Both LLM servers stopped (Berk 09:0x), GPU otherwise idle. Stage 0b first: full 
 loue, neos-960392, item_placement × seeds 0–1, against lps1w. If cap4k ≈ lps1 there, the controller's shallow choice
 is harmless and Stage 2 (active) is the real test; if cap4k loses, the counterfactual is myopic and D-012's fallback
 (the per-generation bandit) follows.
+
+## fhnw-binpack4-48: deep repair + two-scale survival (2026-10-07 09:27–09:51) — A3@alt2 vs in-window A3@lps1w, seeds 0–3
+| arm | s0 | s1 | s2 | s3 | solved |
+|---|---|---|---|---|---|
+| alt2 = lps1 + `ranks.feas_alt_scale: rhs` | 1.000 | **0.214** (first feasible 25.7 s) | 1.000 | 1.000 | 1/4 |
+| lps1w (deep repair, one scale) | 1.000 | 1.000 | 1.000 | 1.000 | 0/4 |
+All fhnw runs so far — solved / runs: adaptive + deep repair (lps1, lps1w, alt2) **2 / 10**; adaptive + default depth (lps0,
+alt1) 0 / 4; **pure rhs scale on repair and survival, no adaptive strategy (c04: A5 at 30 s, A3 at 76 s) 2 / 2**.
+Reading: two-scale survival keeps the rhs-repaired members alive (236–244 of 256 at the end of the unsolved alt2 runs)
+but does not change the solve rate measurably (1/4 vs 0/4; n is tiny). The configuration that solved fhnw every time
+is the pure rhs scale — in the adaptive strategy rhs is one of four strategies, and selection does not concentrate on
+it within 120 s. Hygiene: 8/8 completed, every incumbent checked, GPU health ok.
