@@ -1,5 +1,10 @@
 # Roadmap (living; updated 2026-10-06 evening)
 
+**Aim refined (Berk, 2026-10-07, [[D-013 Aim — lift each solver's weakest cases]]):** "help both SCIP, cuOpt (and
+Highs if possible) in some of the hardest problems where they are the weakest. Our performance metric is improvement
+upon the worst performances, of course with a regard to mean to some degree." → primary = improvement on each solver's
+weak set (P ≥ 0.5 alone, chosen on separate seeds), guard = the mean (non-inferiority).
+
 **Aim (Berk, 2026-10-06):** make the **hardest** problems easier — a GPU EA coupled with an exact solver beats either
 alone ([[D-007 Main claim — the coupling beats either method alone]]). Being **head to head with cuOpt** (NVIDIA's GPU
 heuristics + B&B) is the bar; a split result against it is a strong position, not a setback. **Time to first solution
@@ -18,6 +23,8 @@ better, mean d +0.43 [+0.23, +0.65]; vs cuOpt alone 6 of 9 better ([[Quantificat
 - #18 LP stream follow-ups; #19 owed one-variable runs; #20 pool guard (infra)
 - #16 islands — scale demes, then region islands from SCIP's open nodes (Berk's "large chunks"; draft
   [[Islands (draft)]])
+
+- D-013 follow-ups: HiGHS alone (H0) and HiGHS ↔ EA (H3) on the development set; a cuOpt + EA coupling design.
 
 ## 2. Practice → scale
 - More seeds on the development set (4 per instance), then the larger problem set: finish the stage-2 screening and
