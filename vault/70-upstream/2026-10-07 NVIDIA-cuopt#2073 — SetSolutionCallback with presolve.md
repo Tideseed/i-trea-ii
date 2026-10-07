@@ -45,3 +45,13 @@ disabling presolve entirely.
 Prior art we found: #482 (closed — "set side is tracked separately"; we could not find that tracker, apologies if this
 duplicates it), #513 / #1060 / #1104 (initial-solution crush), #186. This issue was drafted by Claude Code (Anthropic's
 AI coding assistant) for Berk Orbay, as part of a research project on coupling GPU heuristics with MIP solvers.
+
+## Edit 2026-10-07 (Berk: "you may also edit the issue to add how scip solves this problem as an example")
+Section added before "Additional context" — "How SCIP handles this (for reference)": SCIP accepts original-space
+solutions mid-solve with presolve on — `SCIPcreateOrigSol` (scip_sol.h L237, v10.0.0) + `SCIPtrySol` from a heuristic;
+`SCIPtrySol` (scip_sol.c L4047) does not crush: "SCIPprimalTrySol() can only be called on transformed solutions;
+therefore check solutions in original problem" → `SCIPsolCheckOrig` then `SCIPprimalAddSol`; the objective becomes
+the primal bound / cutoff even where the point cannot be mapped into the presolved space. Our evidence: glass4, 227 of
+228 posted EA solutions accepted, 213 became SCIP's incumbent (Development log, baselines). Suggested cuOpt
+equivalent: accept original-space solutions mid-solve, check on the original model, use the objective as
+incumbent/cutoff, crush into the presolved space when possible (#1104).
