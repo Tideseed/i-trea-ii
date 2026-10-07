@@ -338,3 +338,10 @@ more), which only a short repair gives — the clock chose 2^7 there (Stage 1, c
 proceed to Stage 2 (active) under D-012's Stage-2 rejection rules, instead of the Stage-1 fallback — recorded as a
 deviation in D-012. Caveat: the clock also chose 2^7 on loue 23 % of the time; whether that short regime hurts there
 (as stall100 did) is exactly what Stage 2 measures.
+
+## fhnw-binpack4-48 with the pure rhs scale (2026-10-07 11:17–11:20) — A3@c04 (default config + deep repair + `ranks.viol_norm: rhs`), seeds 0–3
+P(120): s0 0.635 (first feasible 76 s; run of 2026-10-06), **s1 0.229 (27 s), s2 0.460 (55 s)**, s3 1.000 → **solved
+3 of 4**. All fhnw arms so far, solved / runs: pure rhs (A3@c04, A5@c04) **4 / 5**; adaptive strategy + deep repair
+(lps1, lps1w, alt2) 2 / 10; adaptive at the default depth 0 / 4; SCIP alone 0 / 2; cuOpt alone 1 / 1 (P 0.005).
+Reading: on fhnw the single rhs scale works where the adaptive mix of four strategies rarely does — selection does
+not concentrate on rhs within 120 s. This argues for per-scale demes (#16) over the strategy gene for the row scale.
