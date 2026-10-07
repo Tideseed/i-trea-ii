@@ -24,7 +24,9 @@ better, mean d +0.43 [+0.23, +0.65]; vs cuOpt alone 6 of 9 better ([[Quantificat
 - #16 islands — scale demes, then region islands from SCIP's open nodes (Berk's "large chunks"; draft
   [[Islands (draft)]])
 
-- D-013 follow-ups: HiGHS alone (H0) and HiGHS ↔ EA (H3) on the development set; a cuOpt + EA coupling design.
+- D-013 follow-ups: HiGHS alone (H0) and HiGHS ↔ EA (H3) on the development set (#22).
+- D-015: three-way arm A9 (SCIP ↔ EA ← cuOpt) — use cuOpt's feasible solutions (#23); then cuOpt restarts from the EA's best.
+- D-012: the repair clock (active) is the development default for repair depth (Stage 2, 2026-10-07).
 
 ## 2. Practice → scale
 - More seeds on the development set (4 per instance), then the larger problem set: finish the stage-2 screening and
