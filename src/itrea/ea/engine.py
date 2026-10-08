@@ -204,7 +204,8 @@ from itrea.ea.mutation import mutate
 from itrea.ea.population import (NO_RANK, ORIGIN_IMMIGRANT, ORIGIN_INJECTED, ORIGIN_REPAIR,
                                   ORIGIN_SEED_LP, ORIGIN_SEED_RANDOM, R0, R1, R2, DupHasher, IdCounter, Population,
                                   child_ancestry, gene_dtype_for, origin_names, src_bits_of_origin)
-from itrea.ea.ranks import Survival, three_rank_survival
+from itrea.ea.elite import clearing_pick, elite_spread, min_diff_auto
+from itrea.ea.ranks import Survival, rank1_cap, three_rank_survival
 from itrea.ea.repair import LocalSearch
 from itrea.ea.repair_clock import RepairClock
 from itrea.ea.seeding import LPWorker, immigrants, lp_round, seed_population
@@ -654,6 +655,18 @@ class Engine:
             self.decoder = dec if len(dec) else None
         self.dup = DupHasher(bk, prob.n, salt=12345)
         self.frontier = Frontier(bk, self.dp, cfg.frontier) if cfg.frontier.enabled else None
+        n_int = int(self.dp.ints.shape[0])
+        self.r1_k = None                                         # D-016: Rank 1 by clearing (None: "top")
+        self.rk_eff = cfg.ranks                                  # the rank settings survival uses
+        mode = cfg.ranks.rank1_mode
+        if mode == "clearing" and n_int > 0:
+            self.r1_k = cfg.ranks.rank1_min_diff or min_diff_auto(n_int)
+        elif mode == "clearing":                                 # no integer variable: no distance exists -> "top"
+            self.rk_eff = dataclasses.replace(cfg.ranks, rank1_mode="top")
+            mode = "top (clearing requested, no integer variables)"
+        self.r1_cleared_last = 0
+        rec["rank1"] = dict(mode=mode, min_diff=self.r1_k, n_int=n_int,
+                            size=rank1_cap(cfg.ranks, self.P) if self.r1_k is not None else None)
         rec["operators_s"] = time.monotonic() - t
         rec["local_search"] = self.ls.impl_name
         rec["decoded_columns"] = len(self.decoder) if self.decoder is not None else 0
@@ -772,6 +785,7 @@ class Engine:
             self.pop = self.pop.take(bk, np.arange(keep))
             self.h_key, self.h_viol, self.h_feas = self.h_key[:keep], self.h_viol[:keep], self.h_feas[:keep]
         self._after_survival()
+        self._warm_elite()
         if not one:
             return
         fr = self.frontier
@@ -791,6 +805,20 @@ class Engine:
         for copies in (1, 2):                                   # duplicate groups of two and of three
             Xn = bk.xp.concatenate([self.pop.X[:1]] * copies)
             self._admit(Xn, np.full(copies, ORIGIN_IMMIGRANT, np.uint16), replace=None)
+
+    def _warm_elite(self) -> None:
+        """Warm-up only: compile the D-016 distance kernels on this run's gene dtype whatever `ranks.rank1_mode` is
+        (`elite_spread` runs at every gen record in both modes): the spread's (rows, n_int) comparison on two and three
+        rows, and the clearing's (chunk, m, n_int) comparison with one-row and two-row chunks over two and three
+        candidates. Rows need not be feasible or distinct for compilation."""
+        bk, n = self.bk, self.pop.size
+        if n < 3 or int(self.dp.ints.shape[0]) == 0:
+            return
+        X, ints, key = self.pop.X, self.dp.ints, self.h_key
+        for r in (2, 3):
+            elite_spread(bk, X, np.arange(r), key[:r], ints, band=self.cfg.frontier.band)
+            for block, budget in ((1, 1), (2, 1), (r, 1 << 30)):
+                clearing_pick(bk, X, np.arange(r), ints, 1 << 30, r, block=block, budget=budget)
 
     def _warm_violation_guided(self) -> int:
         """Warm-up only. violation_guided draws "the r-th violated row of a child" with cumsum / searchsorted / take
@@ -1388,12 +1416,17 @@ class Engine:
         if self.dp_alt is not None and not hf.any() and not math.isfinite(self.inc_external):
             with self.phase("evaluate"):                     # feasibility phase only: V on the second row scale
                 viol_alt = bk.asnumpy(self._evaluate_on(self.dp_alt, cand.X).viol)
+        pick = None
+        pick_stats: dict = {}
+        if self.r1_k is not None:                            # D-016: clearing over this candidate set's vectors
+            def pick(F, cap, _X=cand.X):
+                return clearing_pick(bk, _X, F, self.dp.ints, self.r1_k, cap, stats=pick_stats)
         # every failing round demotes at least one feasible candidate and the float64 checks are cached by id, so at
         # most #feasible + 1 rounds are needed; the last round always ends with a Rank 1 that passed the re-check
         for _ in range(int(hf.sum()) + 1):
-            surv = three_rank_survival(hk, hv, hf, self.P, rk, inc_external=self.inc_external,
+            surv = three_rank_survival(hk, hv, hf, self.P, self.rk_eff, inc_external=self.inc_external,
                                        dual_bound=self.dual_key, rng=self.rng_host, dup=dup, ids=cand.ids,
-                                       is_new=is_new, prev_r1=prev_r1, viol_alt=viol_alt)
+                                       is_new=is_new, prev_r1=prev_r1, viol_alt=viol_alt, rank1_pick=pick)
             r1 = surv.idx[surv.rank == R1]
             failed = [int(i) for i in r1 if int(cand.ids[i]) not in self.r1_ids
                       and not self._check_candidate(cand, int(i))[0]]
@@ -1406,6 +1439,9 @@ class Engine:
                              ids=[int(cand.ids[i]) for i in failed])
         if np.any(~hf[surv.idx[surv.rank == R1]]):
             raise RuntimeError("survival left a demoted (infeasible) candidate in Rank 1")
+        if self.r1_k is not None:                            # the distance rule's work in the final round
+            self.r1_cleared_last = int(pick_stats.get("cleared", 0))
+            self.c["rank1_cleared"] = self.c.get("rank1_cleared", 0) + self.r1_cleared_last
         idx = surv.idx
         self.pop = cand.take(bk, idx, rank=surv.rank)
         self.h_key, self.h_viol, self.h_feas = hk[idx], hv[idx], hf[idx]
@@ -2074,6 +2110,9 @@ class Engine:
         if self.from_cuopt:
             extra.update(inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt, dual_key_cuopt=self.dual_key_cuopt,
                          cuopt_pop=self._cuopt_members())
+        extra.update(self._r1_spread())                     # both Rank 1 modes (D-016's mechanism check)
+        if self.r1_k is not None:
+            extra["r1_cleared"] = self.r1_cleared_last          # candidates the distance rule skipped, last survival
         self.trace.event(
             "gen", gen=self.gen, best_key=float(hk[hf].min()) if hf.any() else None,
             median_key=float(np.median(fin)) if fin.size else None, feas_share=float(hf.mean()) if hf.size else 0.0,
@@ -2086,6 +2125,11 @@ class Engine:
             feasibility_phase=bool(surv.feasibility_phase) if surv else True, seconds=phases,
             ls_moves=self.c["ls_moves"], oom_retries=self.c["oom_retries"],
             best_viol=self.best_viol if not hf.any() else 0.0, **extra)
+
+    def _r1_spread(self) -> dict:
+        """Rank 1's size and spread (`elite.elite_spread`): logged with every `gen` event and in the summary."""
+        rows = np.flatnonzero(self.pop.rank == R1)
+        return elite_spread(self.bk, self.pop.X, rows, self.h_key[rows], self.dp.ints, band=self.cfg.frontier.band)
 
     def finish(self) -> dict:
         """Final records and the summary (call once, after the last step)."""
@@ -2108,6 +2152,7 @@ class Engine:
             peak_gpu_used_mb=round(self.peak_used / 2 ** 20, 2), peak_gpu_pool_mb=round(self.peak_pool / 2 ** 20, 2),
             exchange_from_solver=self.from_solver, exchange_to_solver=self.to_solver,
             genealogy_rows=int(sum(len(r["id"]) for r in self.gen_rows)), **c)
+        out.update({f"final_{k}": v for k, v in self._r1_spread().items()})
         if self.strat_on:
             out["strategy"] = dict(names=list(self.strat_names), row_scale=[sc for sc, _ in self.strat_list],
                                    lp_guidance=[bool(lp) for _, lp in self.strat_list],

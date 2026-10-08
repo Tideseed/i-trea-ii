@@ -25,6 +25,10 @@ mode `shadow` only measures and logs. Same hash rule: left out while disabled.
 left out of the hash while false (`_LATE_DEFAULTS`), so every recorded hash stands. The runner switches it on for A9
 (an arm-implied change, `itrea.experiments.pair.ARMS`), so A9 and its matched control A3x (A9's EA footprint, no
 cuOpt; A3 differs from A9 by the EA's cores as well) share one configuration file.
+
+`ranks.rank1_mode` (default "top", D-016) chooses Rank 1 either as before or by cuOpt's clearing rule ("clearing": a
+distinct elite of up to `rank1_size` feasible members, any two differing in at least `rank1_min_diff` integer
+variables); the three fields are in `_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
 """
 from __future__ import annotations
 
@@ -59,6 +63,13 @@ class RankCfg:
     y: float = 0.10                    # Rank 1: the best ceil(y * basis) feasible individuals are protected
     elite_basis: str = "feasible"      # "feasible": ceil(y * #feasible) | "population": ceil(y * P)
     rank1_twins: str = "drop"          # "drop" (I-TREA: equal-objective twins leave Rank 1 for Rank 2) | "keep"
+    rank1_mode: str = "top"            # "top": the best n1 feasible by (key, age) with the twin rule and the ratchet
+                                       # (above) | "clearing" (D-016, cuOpt's population rule): best-first, a feasible
+                                       # candidate joins Rank 1 only if it differs from every member already chosen in
+                                       # at least rank1_min_diff integer variables; twins rule and ratchet do not apply
+    rank1_size: int = 0                # clearing: at most this many members; 0 = ceil(y * P)
+    rank1_min_diff: int = 0            # clearing: k, the minimum number of differing integer variables; 0 = cuOpt's
+                                       # rule from n_int (1 / 2 / 4 / 8 / 10 for n_int < 50 / 80 / 200 / 1000 / beyond)
     rank0_select: str = "itrea"        # over the quota: "itrea" (Pareto in (key, V), then nearest-distance thinning)
                                        # | "violation" (ascending V) | "rank_prob" (rank-weighted sampling without
                                        # replacement, the optopt X2 idea; fills the quota)
@@ -275,7 +286,8 @@ class RepairClockCfg:
 
 
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
-_LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False}
+_LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False,
+                  "ranks.rank1_mode": "top", "ranks.rank1_size": 0, "ranks.rank1_min_diff": 0}
 
 
 @dataclass
@@ -363,6 +375,8 @@ class EAConfig:
         _check(0.0 <= r.y <= 1.0, "ranks.y in [0, 1]")
         _check(r.elite_basis in ("feasible", "population"), "ranks.elite_basis in feasible|population")
         _check(r.rank1_twins in ("drop", "keep"), "ranks.rank1_twins in drop|keep")
+        _check(r.rank1_mode in ("top", "clearing"), "ranks.rank1_mode in top|clearing")
+        _check(r.rank1_size >= 0 and r.rank1_min_diff >= 0, "ranks.rank1_size >= 0 and ranks.rank1_min_diff >= 0")
         _check(r.rank0_select in ("itrea", "violation", "rank_prob"), "ranks.rank0_select in itrea|violation|rank_prob")
         _check(r.rank2_select in ("itrea", "key_then_violation"), "ranks.rank2_select")
         _check(r.rank2_replacement in ("generational", "plus"), "ranks.rank2_replacement in generational|plus")

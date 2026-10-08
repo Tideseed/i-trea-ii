@@ -21,6 +21,11 @@ Survival from a candidate set (population ∪ offspring ∪ injected) to at most
      i.e. it is displaced by strictly better ones (or by an older equal-key one with `rank1_twins="keep"`). So under
      "feasible" n1 never shrinks below the previous Rank 1 still present and grows towards ceil(y * min(#feasible, P));
      once enough feasible solutions have appeared it behaves like "population". With y = 0, n1 = 0.
+     `rank1_mode="clearing"` (D-016, cuOpt's population rule) replaces this step: the feasible candidates in (key, age)
+     order are passed to a picker (`elite.clearing_pick`) that accepts one only when it differs from every member
+     already accepted in at least `rank1_min_diff` integer variables, up to `rank1_size` (0: ceil(y * P)) members.
+     The best feasible candidate always joins; no twin rule, no ratchet (the cap is fixed, so a member leaves only when
+     a better candidate lies within the distance or enough better distinct ones exist).
   2. Rank 0: infeasible candidates with key < inc − imp_tol·max(1,|inc|) (inc = best feasible key known, the
      population's or the solver's); bound-demoted ones are eliminated. At most floor(x * P). Over the quota,
      `rank0_select`: "itrea" — non-dominated fronts in (key, V) first (I-TREA's first Rank 0 elimination), the
@@ -49,6 +54,7 @@ from __future__ import annotations
 
 import bisect
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -177,12 +183,18 @@ def _by_violation(idx: np.ndarray, key: np.ndarray, viol: np.ndarray, ids: np.nd
     return idx[np.lexsort((-ids[idx], key[idx], viol[idx]))]
 
 
+def rank1_cap(cfg: RankCfg, P: int) -> int:
+    """Rank 1's size cap under `rank1_mode="clearing"` (D-016): `rank1_size`, or ceil(y * P) when it is 0; never above P."""
+    return min(P, cfg.rank1_size if cfg.rank1_size > 0 else math.ceil(cfg.y * P - 1e-12))
+
+
 # ------------------------------------------------------------------------------------------------------- survival
 def three_rank_survival(key: np.ndarray, viol: np.ndarray, feasible: np.ndarray, P: int, cfg: RankCfg,
                         inc_external: float = np.inf, dual_bound: float = -np.inf,
                         rng: np.random.Generator | None = None, dup: np.ndarray | None = None,
                         ids: np.ndarray | None = None, is_new: np.ndarray | None = None,
-                        prev_r1: np.ndarray | None = None, viol_alt: np.ndarray | None = None) -> Survival:
+                        prev_r1: np.ndarray | None = None, viol_alt: np.ndarray | None = None,
+                        rank1_pick: Callable[[np.ndarray, int], np.ndarray] | None = None) -> Survival:
     """Choose at most P survivors and their ranks.
 
     key/viol/feasible: host arrays over the candidate set (key lower is better). dup: True = drop (duplicate vector).
@@ -192,7 +204,10 @@ def three_rank_survival(key: np.ndarray, viol: np.ndarray, feasible: np.ndarray,
     prev_r1: True for the members of the previous generation's Rank 1 (the Rank 1 ratchet, step 1); default none.
     viol_alt: V of every candidate on a second row scale (`ranks.feas_alt_scale`); used only in the feasibility phase
     with the "violation" policy — non-dominated fronts over (V, viol_alt), crowding on the overflowing front, so each
-    scale's least-violated candidate survives; ignored otherwise."""
+    scale's least-violated candidate survives; ignored otherwise.
+    rank1_pick: required when `cfg.rank1_mode == "clearing"` (D-016): called as rank1_pick(F, cap) with the feasible
+    alive candidates in (key, age) order and the size cap; returns Rank 1 (a subsequence of F, best first), e.g.
+    `elite.clearing_pick` bound to the candidates' vectors. The twin rule and the ratchet do not apply then."""
     key = np.asarray(key, dtype=np.float64)
     viol = np.asarray(viol, dtype=np.float64)
     feasible = np.asarray(feasible, dtype=bool)
@@ -214,7 +229,16 @@ def three_rank_survival(key: np.ndarray, viol: np.ndarray, feasible: np.ndarray,
 
     # ---- Rank 1: protected feasible elite (twins removed first if asked)
     r1 = np.empty(0, dtype=np.int64)
-    if F.size and cfg.y > 0:
+    if cfg.rank1_mode == "clearing":
+        if rank1_pick is None:
+            raise ValueError("ranks.rank1_mode='clearing' needs rank1_pick (the engine binds elite.clearing_pick)")
+        cap = rank1_cap(cfg, P)
+        if F.size and cap > 0:
+            r1 = np.asarray(rank1_pick(F, cap), dtype=np.int64)
+            if r1.size > cap or not np.all(np.isin(r1, F)):
+                raise RuntimeError("rank1_pick returned rows outside the feasible candidates or over the cap")
+            in_r1[r1] = True
+    elif F.size and cfg.y > 0:
         cand = F
         if cfg.rank1_twins == "drop":
             _, first = np.unique(key[F], return_index=True)   # F is key-sorted, so `first` keeps the oldest twin

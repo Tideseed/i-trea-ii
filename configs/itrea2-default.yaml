@@ -19,6 +19,8 @@
 # measured gain per second of each horizon; vault 80-reviews, repair-depth design) was added OFF, under the same rule.
 # 2026-10-07 (hash unchanged): exchange.from_cuopt (arm A9, D-015: the EA also reads cuOpt's incumbents) added at its
 # default false, under the _LATE_DEFAULTS rule.
+# 2026-10-08 (hash unchanged): ranks.rank1_mode / rank1_size / rank1_min_diff (D-016: Rank 1 by cuOpt's clearing rule)
+# added at their defaults ("top", 0, 0), under the _LATE_DEFAULTS rule.
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -32,6 +34,9 @@ ranks:
   y: 0.1
   elite_basis: feasible
   rank1_twins: drop
+  rank1_mode: top
+  rank1_size: 0
+  rank1_min_diff: 0
   rank0_select: itrea
   rank0_bound_demote: true
   rank2_select: itrea
