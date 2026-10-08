@@ -55,3 +55,11 @@ the primal bound / cutoff even where the point cannot be mapped into the presolv
 228 posted EA solutions accepted, 213 became SCIP's incumbent (Development log, baselines). Suggested cuOpt
 equivalent: accept original-space solutions mid-solve, check on the original model, use the objective as
 incumbent/cutoff, crush into the presolved space when possible (#1104).
+
+## Response (seen 2026-10-08)
+NVIDIA labelled the issue **improvement, P1**; Akif Çördük (cuOpt, author of the GPU primal-heuristics paper we cite,
+arXiv:2510.20499) on 2026-10-07 14:29 UTC: "Thank you @berkorbay for reporting that issue. I think it is doable, we are
+close to the release so it might not make it to 26.10 but we can prioritize this for 26.12." Releases at that time:
+v26.08.00 is the latest (installed here); the tag v26.10.00a marks the 26.10 development branch (RAPIDS convention), not
+a release. Our arm A9 (one-way cuOpt → EA) does not depend on the feature; when it ships, mid-run injection into cuOpt
+(EA → cuOpt) becomes possible without restarts. Installing a new cuOpt is a download → Berk's word first.
