@@ -83,15 +83,17 @@ plus our own run data.
 
 ## Ranked for our measured gaps — each a one-variable development test (D-010; reported in D-013 terms)
 1. **A genotype-diverse elite reserve (1 + 3, issue #25).** Rank 1 becomes a reserve of r feasible solutions
-   (r = 32, cuOpt's MIP size), any two differing in at least k integer variables, clearing as in `add_solution` (a
+   (r = 32, cuOpt's MIP size), any two differing in at least k integer variables (cuOpt's k: 1 / 2 / 4 / 8 / 10 for
+   n_int < 50 / 80 / 200 / 1000 / beyond), clearing as in `add_solution` (a
    better newcomer evicts every similar worse member, a worse one is refused), the best feasible always kept; reserve
    members are protected and enter tournaments at Rank 1's order; shortfall immigrants draw a share from the reserve
    (perturbed by mutation). First variant = the MIP solver's live rule (fixed k from n_int, `get_max_var_threshold`);
    the routing schedule (k measured from the first feasible solutions, relaxed by T) is a second, separate variant.
    This is Berk's "keep a percentage of good feasible solutions as well as the best … aim for more diversity" made
    literal: today we keep ~1. **Test:** A3@rc1 + reserve vs A3@rc1, 9 development instances × seeds 0–1, interleaved.
-   **Mechanism (pre-stated):** median pairwise distance in the reserve ≥ 5× the control's frontier at T on the
-   instances that reach feasibility. **Outcome:** D-013 weak-set improvement over the control; guard mean d ≥ −0.05;
+   **Mechanism (pre-stated):** the reserve's farthest member from the incumbent at T ≥ 5× the control's frontier's
+   farthest member, on the instances that reach feasibility (a pairwise median is undefined where the control's
+   frontier has one member — sing44, radiationm). **Outcome:** D-013 weak-set improvement over the control; guard mean d ≥ −0.05;
    per-instance bands from the control's measured seed spread (D-012 addendum 2), set before the run. Expected not to
    matter on the few-generation instances (fhnw, glass4, ca).
 2. **Recombine each new partner incumbent with the whole elite (4).** When SCIP's or cuOpt's incumbent arrives, the
