@@ -551,6 +551,31 @@ def cuopt_attribution(run: Run, inc: pd.DataFrame, T: float) -> dict:
     return out
 
 
+LPD_INT_COLS = ("lpd_offers", "lpd_rows_offered", "lpd_solved", "lpd_ok", "lpd_infeasible", "lpd_time_limit",
+                "lpd_range_fail", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_entered", "lpd_incumbents", "lpd_posts",
+                "lpd_lost", "lpd_failed")
+
+
+def lp_decode_cols(run: Run) -> dict:
+    """The LP decode's record (`repair.continuous: lp_decode`, D-017) from the EA's summary: its state, the counters
+    in LPD_INT_COLS, the EA-thread seconds (`lpd_host_s`, `lpd_host_s_max`), the worker's ready time and its priming
+    and time-limit statistics. Runs without the decode leave every column missing (-1 / NaN / ""); an instance on which
+    it was inert has `lpd_state` "inert" and nothing else."""
+    s = run.summary(EA_ROLE)
+    blk = s.get("lp_decode")
+    if not isinstance(blk, dict):
+        st = (s.get("startup") or {}).get("lp_decode") if isinstance(s.get("startup"), dict) else None
+        return {"lpd_state": str(st.get("state") or "")} if isinstance(st, dict) else {}
+    w = blk.get("worker") if isinstance(blk.get("worker"), dict) else {}
+    out: dict = {"lpd_state": str(blk.get("state") or "")}
+    out.update({k: _counter(s, k) for k in LPD_INT_COLS})
+    out.update(lpd_host_s=_fl(blk.get("host_s")), lpd_host_s_max=_fl(blk.get("host_s_max")),
+               lpd_ready_t=_fl(blk.get("ready_t")), lpd_priming_s=_fl(w.get("priming_s")),
+               lpd_worker_solves=_fl(w.get("solves")), lpd_worker_time_limit_hits=_fl(w.get("time_limit_hits")),
+               lpd_worker_maxrss_mb=_fl(w.get("ru_maxrss_mb")))
+    return out
+
+
 def _exit_codes(rj: dict) -> dict[str, int | None]:
     out: dict[str, int | None] = {}
     procs = rj.get("processes")
@@ -795,6 +820,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         row["solver_inc_from_ea"] = int(((inc["run_id"] == run.run_id) & (inc["role"] == SOLVER_ROLE) & inc["ok"] &
                                          (inc["source"] == "ea") & (inc["t"] <= T)).sum()) if len(inc) else 0
         row.update(cuopt_attribution(run, inc, T))
+        row.update(lp_decode_cols(run))
         row.update(crash_flags(run))
         row.update(gpu_flags(run))
         row.update(_resource_cols(run))
@@ -1010,6 +1036,10 @@ RUN_COLUMNS = {
     # A9 (D-015): cuOpt's contribution through the EA, up to T; -1 for runs that do not read cuOpt's channels
     "cuopt_inject_msgs": "int", "cuopt_injected": "int", "ea_inc_from_cuopt": "int", "cuopt_posts": "int",
     "cuopt_posts_accepted": "int", "cuopt_posts_became_incumbent": "int", "solver_inc_from_cuopt": "int",
+    # D-017: the LP decode (repair.continuous: lp_decode); missing (-1 / NaN / "") for runs without it
+    "lpd_state": "str", **{k: "int" for k in LPD_INT_COLS}, "lpd_host_s": "float", "lpd_host_s_max": "float",
+    "lpd_ready_t": "float", "lpd_priming_s": "float", "lpd_worker_solves": "int",
+    "lpd_worker_time_limit_hits": "int", "lpd_worker_maxrss_mb": "float",
     "crashed": "bool", "crashed_roles": "str", "crash_t": "float", "exit_codes": "str",
     "gpu_arm": "bool", "gpu_health": "str", "gpu_median_sm_mhz": "float", "gpu_foreign_share": "float",
     "gpu_void": "bool", "block_void": "bool",

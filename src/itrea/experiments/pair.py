@@ -521,6 +521,12 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             g = None
         elif spec.kind == "ea":
             if spec.x925:                            # A9: a core of its own; cuOpt keeps the A725 cores
+                if cfg.repair.continuous == "lp_decode":
+                    # D-017: the LP decode worker would share the EA's one core (with the LP worker of
+                    # seeding.lp_source highs_async) and a pending batch more takes the candidate set's concatenate
+                    # to CuPy's 8-part limit; refused until a decision allows it
+                    raise RunError(f"arm {arm.name} runs the EA on one X925 core: repair.continuous 'lp_decode' is "
+                                   "refused there (D-017) until a decision allows it")
                 cores = [lane.x925[n_x]]
                 n_x += 1
             else:

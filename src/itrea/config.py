@@ -29,6 +29,11 @@ cuOpt; A3 differs from A9 by the EA's cores as well) share one configuration fil
 `ranks.rank1_mode` (default "top", D-016) chooses Rank 1 either as before or by cuOpt's clearing rule ("clearing": a
 distinct elite of up to `rank1_size` feasible members, any two differing in at least `rank1_min_diff` integer
 variables); the three fields are in `_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
+
+`repair.continuous: "lp_decode"` (D-017, issue #27) is "auto" plus the LP decode: a HiGHS worker process started at
+t0 fixes the integer part of a few candidates per generation and solves the LP over the continuous variables
+(`ea.lp_decode`). Its two later fields `repair.lp_decode_cold_limit` and `repair.lp_decode_infeasible` are in
+`_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
 """
 from __future__ import annotations
 
@@ -153,9 +158,17 @@ class RepairCfg:
     row_scan_filter: bool = False      # fj, GPU only: inside that window skip variables that cannot move in the
                                        # direction that reduces the row's violation (breaks CPU/GPU equivalence)
     continuous: str = "auto"           # "auto": singleton continuous columns decoded in closed form on the device, other
-                                       # continuous variables moved by FJ jump values | "gene" | "lp_decode"
-    lp_decode_per_gen: int = 4         # lp_decode: CPU LP decodes per generation (candidates for Rank 1 / posting)
-    lp_time_limit: float = 2.0         # seconds per LP decode
+                                       # continuous variables moved by FJ jump values | "gene" | "lp_decode": "auto"
+                                       # plus the LP decode (D-017, `ea.lp_decode`): a HiGHS worker process fixes the
+                                       # integers of a few candidates per generation and solves the LP over the
+                                       # continuous variables; the copies join the next candidate set
+    lp_decode_per_gen: int = 4         # lp_decode: at most this many LPs per batch (N), at most one batch outstanding
+    lp_time_limit: float = 2.0         # lp_decode: seconds per warm LP of a feasible source; half of it for an
+                                       # infeasible source (the completion LPs)
+    lp_decode_cold_limit: float = 10.0 # lp_decode: seconds for the worker's first ("priming") LP, and for every LP
+                                       # while no optimal basis exists to warm-start from
+    lp_decode_infeasible: bool = True  # lp_decode: also offer infeasible candidates better than the incumbent
+                                       # (completion); false = feasible sources only (polish)
 
 
 @dataclass
@@ -287,7 +300,8 @@ class RepairClockCfg:
 
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
 _LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False,
-                  "ranks.rank1_mode": "top", "ranks.rank1_size": 0, "ranks.rank1_min_diff": 0}
+                  "ranks.rank1_mode": "top", "ranks.rank1_size": 0, "ranks.rank1_min_diff": 0,
+                  "repair.lp_decode_cold_limit": 10.0, "repair.lp_decode_infeasible": True}
 
 
 @dataclass
@@ -412,6 +426,13 @@ class EAConfig:
         _check(4 <= rp.max_candidates <= 32 and 0.0 <= rp.p_random_walk <= 1.0 and rp.row_scan_cap >= 0,
                "repair fj knobs: max_candidates in [4, 32], p_random_walk in [0, 1], row_scan_cap >= 0")
         _check(rp.continuous in ("auto", "gene", "lp_decode"), "repair.continuous in auto|gene|lp_decode")
+        _check(isinstance(rp.lp_decode_per_gen, int) and not isinstance(rp.lp_decode_per_gen, bool)
+               and rp.lp_decode_per_gen >= 1, "repair.lp_decode_per_gen is an integer >= 1")
+        _check(isinstance(rp.lp_time_limit, (int, float)) and not isinstance(rp.lp_time_limit, bool)
+               and rp.lp_time_limit > 0, "repair.lp_time_limit > 0")
+        _check(isinstance(rp.lp_decode_cold_limit, (int, float)) and not isinstance(rp.lp_decode_cold_limit, bool)
+               and rp.lp_decode_cold_limit >= rp.lp_time_limit, "repair.lp_decode_cold_limit >= repair.lp_time_limit")
+        _check(isinstance(rp.lp_decode_infeasible, bool), "repair.lp_decode_infeasible is a bool")
         _check(e.poll_s > 0 and e.inject_k >= 1 and e.inject_band >= 0, "exchange parameters")
         _check(isinstance(e.from_cuopt, bool), "exchange.from_cuopt is a bool")
         _check(0.0 <= sd.random <= 1.0 and 0.0 <= sd.lp_rounding <= 1.0, "seeding shares in [0, 1]")

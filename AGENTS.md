@@ -101,6 +101,7 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/ea/ls_fj_gpu.py` | feasibility jump as a CuPy `RawKernel`, one thread block per individual | built |
 | `src/itrea/ea/ls_dense.py` | vectorised full rescore (baseline only) | built |
 | `src/itrea/ea/continuous.py` | closed-form decoding of singleton continuous columns (`repair.continuous: auto`) | built |
+| `src/itrea/ea/lp_decode.py` | the LP decode (`repair.continuous: lp_decode` = auto + a HiGHS worker process that fixes the integers of a few candidates per generation and solves the LP over the continuous variables; D-017, issue #27): pure selection / budget / screen functions and the `LPDecoder` worker; the runner refuses it for A9 / A3x — 2026-10-08, CPU-tested, not yet run on an instance (`tools/probe_lp_decode.py` probes the worker on stored vectors) | built |
 | `src/itrea/ea/repair_clock.py` | the repair clock's controller: one lane-step horizon per generation from each horizon's measured gain per second (`repair_clock`, off by default; shadow mode logs only) — 2026-10-06, CPU-tested, not yet run on an instance | built |
 | `src/itrea/ea/engine.py` | the generation loop, exchange in/out, genealogy, frontier updates | built |
 | `src/itrea/ea/run.py` | EA process: `python -m itrea.ea.run …` | built |
