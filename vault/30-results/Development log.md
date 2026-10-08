@@ -473,3 +473,51 @@ slower beside the EA**: cuOpt inside A9 reached 0.545 on chromaticindex1024-7 ag
 0.73 on sing44 — GPU contention, the effect optopt's A4 measured (continuous GPU work beside cuOpt doubled its P).
 **Next:** the EA should yield the GPU to cuOpt when it is not contributing (a back-off / duty-cycle rule) — the D-010
 "EA back-off" item, now with a measured cost; then seeds 1–2 and the D-013 weak-set report.
+
+## Rank 1 as a distinct elite — D-016 result (2026-10-08 11:26–14:04) — A3@rc1d / A3@cl1 / A3@tp1 × 9 × seeds 0–1
+[[D-016 Rank 1 as a distinct elite — cuOpt's clearing rule, development test]]. Pool 20261008-112631, commit 6ae6a6f,
+54/54 completed, 0 void, every incumbent checked, `compiled_on_clock` false in all 54 (a first attempt's block at
+11:11 was voided for kernels compiled on the clock — `60-incidents`). rc1d = the development default re-run in the
+window (`1d12ad490dd0`); cl1 = + `ranks.rank1_mode: clearing` (`8d01ac13f25f`); tp1 = + `ranks.elite_basis:
+population`, the size-only control (`e0483418b66d`). Both LLM servers stopped. `tools/d016_report.py`.
+
+| instance | P rc1d | P cl1 | P tp1 | d cl1 vs rc1d (band) | d tp1 vs rc1d | gens rc1d / cl1 / tp1 |
+|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 0.297 | 0.298 | 0.298 | −0.002 (0.10) | −0.001 | 21 / 21 / 21.5 |
+| fhnw-binpack4-48 | 1.000 | **0.653** | 1.000 | **+0.347** (0.02) | 0.000 | 34 / 22 / 33.5 |
+| glass4 | 0.166 | 0.224 | 0.242 | −0.257 (0.37) | −0.312 | 36.5 / 27 / 26.5 |
+| item_placement_9903 | 0.347 | 0.547 | 0.391 | −0.367 (0.68) | −0.113 | 1908 / 1316 / 1781 |
+| neos-3024952-loue | 0.381 | 0.332 | 0.313 | +0.128 (0.13) | **+0.178** | 89.5 / 180.5 / 246.5 |
+| neos-960392 | 0.031 | 0.033 | 0.031 | −0.032 (0.04) | +0.010 | 22 / 34.5 / 23 |
+| radiationm18-12-05 | 0.235 | 0.235 | 0.230 | +0.002 (0.46) | +0.024 | 294.5 / 280.5 / 261.5 |
+| rail01 | 1.000 | 1.000 | 1.000 | 0 (0.02) | 0 | 675.5 / 675 / 675.5 |
+| sing44 | 0.360 | 0.339 | 0.275 | +0.060 (0.11) | **+0.238** | 80 / 120.5 / 93.5 |
+
+| comparison | better / worse (of 9) | mean d [95 % CI] | Wilcoxon p |
+|---|---|---|---|
+| cl1 vs rc1d (D-016's test) | 4 / 4 | −0.013 [−0.141, +0.109] | 1.00 |
+| tp1 vs rc1d (size only) | 4 / 3 | +0.003 [−0.096, +0.096] | 0.81 |
+| cl1 vs tp1 (distinctness beyond size) | 2 / 6 | −0.019 [−0.120, +0.095] | 0.55 |
+
+**Mechanism (amended D-016): HOLDS.** On the 7 instances feasible in both arms, median Rank 1 size 26 (cl1) vs 5
+(rc1d); median banded spread `r1_dmax_band` 0.0296 vs 0.0007 (42×, gate 5×); the distance rule cleared candidates on
+every one (`rank1_cleared` 35–3,570 per run). The clearing does what cuOpt's rule does: Rank 1 now holds up to 26
+solutions that differ in ≥ k integers instead of 1–9 near-copies.
+
+**Outcome (D-016's rule): INCONCLUSIVE** — mean d −0.013, no instance worse than its band, so seeds 2–3 follow on the
+instances inside their band. Reading:
+- **Diversity alone did not pay on average.** The elite is far more diverse, but the mean P did not move; the effect is
+  instance-specific and large in both directions.
+- **item_placement loses 0.18–0.22 in P on both seeds** (within its very wide 0.68 band) and runs **31 % fewer
+  generations** (s0: 954 vs 1,823) — distant Rank 1 parents give children with larger disagreement sets, so more repair
+  per generation; the size-only arm loses only 7 % of its generations. Checked on the phase timers: it is not the
+  clearing's own cost — survival time FELL (3.6 / 5.7 s vs 11.4 / 10.4 s in rc1d) — but repair time rose (72.8 / 59.9 s vs
+  50.9 / 48.5 s): children of distant parents need more repair, so diversity is paid for in generations.
+- **fhnw (+0.347):** in cl1 seed 0 the EA found its own feasible point on fhnw (P 0.306) — the first time in any rc-family
+  run; seed 1 did not. One seed: chance until replicated.
+- **Size, not distinctness, helped sing44 and loue:** tp1 is better than rc1d beyond the band on both (+0.238, +0.178)
+  and better than cl1 on sing44 (−0.189 for cl1 vs tp1, beyond band). Keeping more good feasible solutions (Berk's "a
+  percentage of good feasible solutions") helps there even without the distance rule.
+- glass4: all three arms are within its 0.37 band; the control's seed 0 (0.113) was its luckiest seed so far.
+**Next:** seeds 2–3 on the in-band instances for cl1 AND tp1 (tp1 was not a pre-registered candidate for adoption; if it
+holds up, it becomes its own decision); look at item_placement's repair time per generation under clearing.

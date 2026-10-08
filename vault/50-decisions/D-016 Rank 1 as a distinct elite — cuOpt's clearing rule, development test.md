@@ -1,6 +1,6 @@
 # D-016 Rank 1 as a distinct elite — cuOpt's clearing rule, development test (2026-10-08, AgentRA on Berk's word)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
+**Status:** built 2026-10-08; first test INCONCLUSIVE (mechanism holds; seeds 2–3 owed) — see Result. Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
 get to work" on [[2026-10-08 cuOpt population and diversity — what transfers]]; open to a superseding decision on
 evidence. Issue #25. Development only (D-010) — never a confirmatory configuration without prereg-v2.
 
@@ -73,3 +73,11 @@ record, the GPU test). Three concern this test and change it before any run:
    distinct Rank 1". Interleaved in the same blocks (54 runs). The D-016 decision reads cl1 vs rc1d (rules above);
    cl1 vs tp1 is reported with the same statistics and decides whether the distance rule, rather than the size, is
    the active ingredient (if tp1 ≥ cl1 within the bands, the record says "size, not distinctness").
+
+## Result (2026-10-08 14:0x) — mechanism HOLDS, outcome INCONCLUSIVE
+54/54 runs, 0 void, no compile on the clock ([[Development log]], "Rank 1 as a distinct elite — D-016 result").
+Mechanism: Rank 1 median 26 vs 5 members, banded spread 42× the control's, the distance rule cleared candidates on all 7
+feasible instances. Outcome: cl1 vs rc1d mean d −0.013 [−0.141, +0.109], 4 better / 4 worse, no instance worse than its
+band → **inconclusive**: seeds 2–3 on the in-band instances. Not adopted; the development default stays rc1. The
+size-only control tp1 (+0.003 overall) was better than the control beyond the band on sing44 (+0.238) and loue (+0.178);
+clearing cost item_placement 31 % of its generations and 0.18–0.22 in P (inside its 0.68 band).
