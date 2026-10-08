@@ -661,6 +661,9 @@ class Engine:
         mode = cfg.ranks.rank1_mode
         if mode == "clearing" and n_int > 0:
             self.r1_k = cfg.ranks.rank1_min_diff or min_diff_auto(n_int)
+            if self.r1_k > n_int:
+                raise ValueError(f"ranks.rank1_min_diff = {self.r1_k} exceeds the {n_int} integer variables: Rank 1 "
+                                 "could never hold more than one member")
         elif mode == "clearing":                                 # no integer variable: no distance exists -> "top"
             self.rk_eff = dataclasses.replace(cfg.ranks, rank1_mode="top")
             mode = "top (clearing requested, no integer variables)"
@@ -745,7 +748,8 @@ class Engine:
             res = w.finish()
             out[name] = dict(generations=res["generations"], feasible_found=res["feasible_found"],
                              posts=res["posts"], immigrants=res["immigrants_admitted"],
-                             violation_guided_forced=int(getattr(w, "vg_warm", 0)))
+                             violation_guided_forced=int(getattr(w, "vg_warm", 0)),
+                             elite_warmed=int(w.c.get("warm_elite", 0)))
         if self.bk.is_gpu:
             out["scan_ladder_max"] = self._warm_scans()
         self.bk.synchronize()
@@ -810,15 +814,19 @@ class Engine:
         """Warm-up only: compile the D-016 distance kernels on this run's gene dtype whatever `ranks.rank1_mode` is
         (`elite_spread` runs at every gen record in both modes): the spread's (rows, n_int) comparison on two and three
         rows, and the clearing's (chunk, m, n_int) comparison with one-row and two-row chunks over two and three
-        candidates. Rows need not be feasible or distinct for compilation."""
-        bk, n = self.bk, self.pop.size
-        if n < 3 or int(self.dp.ints.shape[0]) == 0:
+        candidates. The rows are copies of the population's first vector — the warm-up population of a small
+        synthetic problem can hold as few as two distinct members (2026-10-08: with "pop.size >= 3" as the condition
+        the kernels were never warmed and compiled on the clock) — and need not be feasible or distinct."""
+        bk = self.bk
+        if self.pop.size < 1 or int(self.dp.ints.shape[0]) == 0:
             return
-        X, ints, key = self.pop.X, self.dp.ints, self.h_key
+        X = bk.xp.concatenate([self.pop.X[:1]] * 3)
+        ints, key = self.dp.ints, np.array([0.0, 1.0, 2.0])
         for r in (2, 3):
             elite_spread(bk, X, np.arange(r), key[:r], ints, band=self.cfg.frontier.band)
             for block, budget in ((1, 1), (2, 1), (r, 1 << 30)):
                 clearing_pick(bk, X, np.arange(r), ints, 1 << 30, r, block=block, budget=budget)
+        self.c["warm_elite"] = self.c.get("warm_elite", 0) + 1
 
     def _warm_violation_guided(self) -> int:
         """Warm-up only. violation_guided draws "the r-th violated row of a child" with cumsum / searchsorted / take
@@ -1386,7 +1394,6 @@ class Engine:
         """Duplicates (provenance merged), three-rank survival with the float64 re-check of new Rank 1 entrants, the
         new population, genealogy rows for the entrants, the frontier update (while the candidates exist)."""
         cfg, bk = self.cfg, self.bk
-        rk = cfg.ranks
         hk, hv, hf = cand.host_scores(bk)
         hf = hf.copy()
         hv = hv.copy()
@@ -1424,6 +1431,7 @@ class Engine:
         # every failing round demotes at least one feasible candidate and the float64 checks are cached by id, so at
         # most #feasible + 1 rounds are needed; the last round always ends with a Rank 1 that passed the re-check
         for _ in range(int(hf.sum()) + 1):
+            pick_stats.clear()                               # a round with no feasible candidate leaves it empty
             surv = three_rank_survival(hk, hv, hf, self.P, self.rk_eff, inc_external=self.inc_external,
                                        dual_bound=self.dual_key, rng=self.rng_host, dup=dup, ids=cand.ids,
                                        is_new=is_new, prev_r1=prev_r1, viol_alt=viol_alt, rank1_pick=pick)

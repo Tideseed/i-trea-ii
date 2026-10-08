@@ -50,12 +50,18 @@ DEFAULT_BUDGET = 64 * 1024 ** 2        # bytes of the (chunk, m, n_int) comparis
 
 def _distances(bk: Backend, Xi, a: int, b: int, budget: int) -> np.ndarray:
     """Host (b - a, m) array: the number of differing integer genes between rows a..b-1 of Xi and every row of Xi.
-    Computed in chunks of rows so that the comparison temporaries stay within `budget` bytes; one copy to the host."""
+    Computed in chunks of c = max(1, budget // (m * n_int)) rows (the comparison temporary is c * m * n_int bytes, so
+    at least m * n_int when one row exceeds the budget), written into one preallocated array by slice assignment — no
+    concatenate: with more than 8 parts CuPy 14.2 switches to a pointer-array concatenate kernel that nothing warms
+    (review, 2026-10-08) — and copied to the host once."""
     xp = bk.xp
     m, n_int = int(Xi.shape[0]), int(Xi.shape[1])
     c = max(1, budget // max(1, m * n_int))
-    parts = [(Xi[r:min(r + c, b), None, :] != Xi[None, :, :]).sum(axis=2) for r in range(a, b, c)]
-    return bk.asnumpy(parts[0] if len(parts) == 1 else xp.concatenate(parts))
+    out = xp.empty((b - a, m), dtype=xp.int64)
+    for r in range(a, b, c):
+        e = min(r + c, b)
+        out[r - a:e - a] = (Xi[r:e, None, :] != Xi[None, :, :]).sum(axis=2)
+    return bk.asnumpy(out)
 
 
 def clearing_pick(bk: Backend, X, order: np.ndarray, ints, k: int, cap: int, stats: dict | None = None,
@@ -77,9 +83,11 @@ def clearing_pick(bk: Backend, X, order: np.ndarray, ints, k: int, cap: int, sta
     if n_int == 0 or k <= 0:
         return order[:cap]
     m = order.size
+    if m == 1 or cap == 1:                                    # the best row only: no distance is needed (and a one-row
+        return order[:1]                                      # gather is a degenerate kernel shape nothing warms)
     Xi = _int_genes(bk, X, order, ints)                       # (m, n_int), rows in `order`
-    D = np.zeros((m, m), dtype=np.int64)                      # rows filled lazily, block by block
-    have = 0                                                  # rows [0, have) of D are filled
+    D = np.zeros((m, m), dtype=np.int64)                      # the rows of accepted candidates, filled block by block
+    have = 0                                                  # end of the last block fetched
     chosen: list[int] = []
     cleared = 0
     for j in range(m):
@@ -89,7 +97,7 @@ def clearing_pick(bk: Backend, X, order: np.ndarray, ints, k: int, cap: int, sta
         chosen.append(j)
         if len(chosen) == cap:
             break
-        if j >= have:                                         # this row's distances are needed from now on
+        if have <= j < m - 1:                                 # this row's distances are needed by later rows
             b = min(m, j + max(1, block))
             D[j:b] = _distances(bk, Xi, j, b, budget)
             have = b

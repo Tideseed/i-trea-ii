@@ -47,7 +47,7 @@ def test_clearing_pick_is_greedy_clearing(dtype, k):
     order = rng.permutation(m)
     ref = None
     for cap, block, budget in ((1, 32, 1 << 26), (4, 32, 1 << 26), (m, 32, 1 << 26), (m, 1, 1), (m, 3, 50),
-                               (m, m, 1 << 30)):
+                               (m, m, 1 << 30), (m, 9, 1)):
         st = {}
         got = clearing_pick(BK, X, order, ints, k, cap, stats=st, block=block, budget=budget)
         if cap == m:                                          # blocks and chunks never change the result
@@ -65,6 +65,21 @@ def test_clearing_pick_is_greedy_clearing(dtype, k):
                     continue
                 earlier = [g for g in got if pos[int(g)] < pos[int(r)]]
                 assert any(_diff(X[g, ints], X[r, ints]) < k for g in earlier), (r, earlier)
+
+
+def test_clearing_pick_one_row_or_cap_one_needs_no_distance():
+    X = np.zeros((4, 3), np.int8)
+    st = {}
+    assert np.array_equal(clearing_pick(BK, X, np.array([2]), np.arange(3), 1, 5, stats=st), [2]) and st["cleared"] == 0
+    assert np.array_equal(clearing_pick(BK, X, np.array([3, 1, 0]), np.arange(3), 1, 1, stats=st), [3])
+    assert st["cleared"] == 0
+
+
+def test_min_diff_above_n_int_is_refused():
+    p = toy.knapsack(30)
+    with pytest.raises(ValueError, match="rank1_min_diff"):
+        Engine(p, REF.config("numpy", **{"ranks.rank1_mode": "clearing", "ranks.rank1_min_diff": 31}), seed=1,
+               warmup=False).prepare()
 
 
 def test_clearing_pick_without_integers_is_top():
@@ -229,10 +244,11 @@ def test_clearing_on_cupy_equals_numpy(dtype):
     ints = np.arange(25)
     order = rng.permutation(60)
     for k in (1, 4, 9):
-        for block, budget in ((32, 1 << 26), (1, 1), (3, 100)):
+        for block, budget in ((32, 1 << 26), (1, 1), (3, 100), (9, 1), (32, 1)):
             want = clearing_pick(BK, X, order, ints, k, 20)
             got = clearing_pick(gb, gb.xp.asarray(X), order, gb.xp.asarray(ints), k, 20, block=block, budget=budget)
             assert np.array_equal(want, got), (k, block)
+    assert np.array_equal(clearing_pick(gb, gb.xp.asarray(X), order[:1], gb.xp.asarray(ints), 1, 5), order[:1])
     keys = rng.normal(size=60)
     assert elite_spread(BK, X, order[:7], keys[order[:7]], ints, band=0.5) == elite_spread(
         gb, gb.xp.asarray(X), order[:7], keys[order[:7]], gb.xp.asarray(ints), band=0.5)
@@ -286,11 +302,17 @@ def test_cupy_cold_cache_compiles_the_elite_kernels_before_the_clock(mode, tmp_p
         rd = tmp_path / f"run_{dt}"
         env = {k: v for k, v in _env(CUPY_CACHE_DIR=str(tmp_path / f"cache_{dt}")).items()
                if k != "CUPY_ACCELERATORS"}
+        # y = 0.5 makes Rank 1 large on these small runs, so the timed run really reaches the spread's comparison
+        # and the clearing's distance fetches after t0 (with the default y the earlier version of this test passed
+        # without ever reaching them — 2026-10-08)
         pr = subprocess.run([PY, "-m", MODULE, "--instance", str(inst), "--seed", "0", "--budget", "4", "--run-dir",
                              str(rd), "--no-barrier", "--backend", "cupy", "--set", f"ranks.rank1_mode={mode}",
-                             "--set", "log_every=1", *SMALL], env=env, capture_output=True, timeout=300)
+                             "--set", "ranks.y=0.5", "--set", "log_every=1", *SMALL], env=env, capture_output=True,
+                            timeout=300)
         assert pr.returncode == 0, (pr.stdout + pr.stderr).decode(errors="replace")
         s = _summary(rd)
         assert s["gene_dtype"] == dt, (dt, s["gene_dtype"])
+        assert all(s["startup"]["warmup"][p]["elite_warmed"] >= 1 for p in ("many", "one")), s["startup"]["warmup"]
+        gens = [e for e in read_events(rd / "ea.events.jsonl") if e["kind"] == "gen"]
+        assert any((e.get("r1_n") or 0) >= 3 and e.get("r1_dmax") is not None for e in gens), (dt, "never reached")
         assert s["compiled_on_clock"] is False and s["cupy_cache"]["new_after_t0"] == [], (dt, s["cupy_cache"])
-        assert s["generations"] >= 1
