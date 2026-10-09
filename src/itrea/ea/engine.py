@@ -170,33 +170,49 @@ counter, no event, no extra random number; the start-up record says `lp_decode.s
     `lp_decode_warmed_batches` their number.
   - begin (t0): the `LPDecoder` worker process starts beside the LP worker; `lpd_*` counters.
   - the pick site, every generation between the survival and `_after_survival`, over the whole candidate set: poll
-    the worker; if it is not idle count `lpd_busy`, else select one batch from the survival's host arrays (after the
+    the worker; if it is not idle count `lpd_busy`; if this poll read a reply that kept copies, offer nothing in this
+    generation (`lpd_skip_pending`, below); else select one batch from the survival's host arrays (after the
     demotions) with `select_offers`, wait for the device (`bk.synchronize()`, timed apart as `lpd_sync_s`: the
     survival's last gather is not the decode's cost), copy the rows to the host one by one and offer the rounded,
     clipped integer parts. At most one request is outstanding. A source counts as offered (never offered again) once a
     reply screened or solved it — rows left NOT_SOLVED or AFTER_DEADLINE by the worker's budget stay eligible.
   - reading replies: the worker is polled at every exchange tick, just before the candidate set takes the pending
-    batches (`_with_pending`, after the children are evaluated) and at the pick site; `finish` reads the last one. At
-    most ONE decoded batch joins a candidate set: while a decoded batch is pending, the exchange and pre-candidate polls
-    leave the worker's messages in the pipe. A batch's copies join the candidate set of the generation that reads the
-    reply before its `_with_pending` — the generation after the offer when the worker answers within a generation, the
-    usual case — or, when a pick site reads it (it arrived during that generation's survival), the next generation's;
-    the pick site reads before it offers, so the worker never idles a generation. The result event records the read
-    `site` and `gen_enters`.
+    batches (`_with_pending`, after the children are evaluated) and at the pick site; `finish` reads the last one. A
+    batch's copies join the candidate set of the generation that reads the reply before its `_with_pending`, or the
+    next generation's when the pick site reads it (the reply arrived after the pre-candidate poll: during
+    `_with_pending` or the survival). A pick-site read that kept copies sends no request in that generation
+    (`lpd_skip_pending`): the next request goes out at the next pick site, after those copies joined, and when the
+    worker answers within a generation its reply is read at the following exchange tick or pre-candidate poll, so the
+    copies join one generation after their offer again; a pick-site read costs the worker one idle generation. (Offered
+    in the same tick instead, that request's reply would be held by the polls below while the batch is pending and
+    read at the next pick site too: every later batch two generations late.) So at most ONE decoded batch joins a
+    candidate set, and no request is outstanding while a decoded batch is pending; as a guard, the exchange and
+    pre-candidate polls still leave the worker's messages in the pipe while one is (`plan_memory`'s N rows hold either
+    way). The result event records the read `site` and `gen_enters` (the candidate set the copies are to join); a
+    batch still pending when the run ends — read at the last pick site, at the exchange tick of a generation cut short
+    during the repair (its `gen_enters` names that generation), or by `finish` — never joins one: `finish` counts its
+    rows (`lpd_dropped`) and names it by an `lp_decode` event "dropped" with its `req`.
   - a reply: per row a code (ok / infeasible / time_limit / other / range_fail / cached / not_solved /
-    after_deadline); a copy = the source's integer part + the LP's continuous values clipped to their bounds; a polish
-    (F) copy is kept only if its key beats its source's by imp_tol (`lpd_no_gain` otherwise), a completion (I) copy
-    always; the kept copies join a candidate set as one `_Batch` (src "lp_decode", never repaired) with origin
-    ORIGIN_LP_DECODE (an EA bit: their incumbents have source "self"), their source's strategy (no draw), ancestry =
-    `child_ancestry` with the source as both parents (its rank in that survival, NO_RANK if eliminated), pa = pb = -1;
-    genealogy column `lpd_src` = the source's id. One `lp_decode` trace event per reply (and at "ready" / "failed").
-  - incumbents and posts made from a copy are counted by id, pooled and per kind of its source (`lpd_incumbents`,
-    `lpd_posts`, `_F` / `_I`); so are the copies that entered the population (`lpd_entered`, `_F` / `_I`). `gen`
-    events add `lpd_state` and the counters in `LPD_GEN_FIELDS`, `lpd_host_s`, `lpd_host_s_max`, `lpd_sync_s`; the
-    summary an `lp_decode` block: state, the EA's read time of "ready" (`ready_t`) and the worker's own ready time
-    (`ready_t_worker`, M0), EA-thread seconds `host_s` / `host_s_max` (perf_counter; the device wait before the row
-    copies excluded — it is `sync_s` / `sync_s_max`), the reply wait (`wait_s_total` / `wait_s_max`: worker send to
-    EA read), the IPC times (`ipc`, `LPDecoder.ipc`), the largest decoded batch, the worker's statistics.
+    after_deadline), HiGHS's status, the limit and `cold` (a priming solve); a copy = the source's integer part + the
+    LP's continuous values clipped to their bounds; a polish (F) copy is kept only if its key beats its source's by
+    imp_tol (`lpd_no_gain` otherwise), a completion (I) copy always; the kept copies join a candidate set as one
+    `_Batch` (src "lp_decode", never repaired) with origin ORIGIN_LP_DECODE (an EA bit: their incumbents have source
+    "self"), their source's strategy (no draw), ancestry = `child_ancestry` with the source as both parents (its rank
+    in that survival, NO_RANK if eliminated), pa = pb = -1, and their relative gain (key_src - key) / max(1,
+    |key_src|) on the float64 keys; genealogy column `lpd_src` = the source's id. One `lp_decode` trace event per reply
+    (and at "ready" / "failed" / "dropped").
+  - the funnel per kind of source (D-017 M3 / M4): rows offered (`lpd_rows_F` / `_I`: row offers, CACHED rows and
+    re-offered NOT_SOLVED rows included), distinct sources screened or solved (`lpd_srcs_F` / `_I`), rows the cache
+    answered (`lpd_cached_F` / `_I`), I rows the range screen looked at (`lpd_screened_I`; F rows are never screened),
+    solved, LP feasible, kept; incumbents and posts made from a copy are counted by id (`lpd_incumbents`, `lpd_posts`,
+    `_F` / `_I`); so are the copies that entered the population (`lpd_entered`, `_F` / `_I`), whose relative gains give
+    the summary's `gain_F_entered_median` / `_n` and `gain_I_entered_median` / `_n`. `gen` events add `lpd_state` and
+    the counters in `LPD_GEN_FIELDS`, `lpd_host_s`, `lpd_host_s_max`, `lpd_sync_s`; the summary an `lp_decode` block:
+    state, the EA's read time of "ready" (`ready_t`) and the worker's own ready time (`ready_t_worker`, M0), EA-thread
+    seconds `host_s` / `host_s_max` (perf_counter; the device wait before the row copies excluded — it is `sync_s` /
+    `sync_s_max`), the reply wait (`wait_s_total` / `wait_s_max`: worker send to EA read), the IPC times (`ipc`,
+    `LPDecoder.ipc`), the largest decoded batch, the gains above, the worker's statistics (those of the last reply
+    read; the result events' rows recount them: see the Trace format note).
   - a failed worker (digest mismatch, exception, death, a failed send) stays failed for the run and is recorded
     (`lpd_failed`, `lp_decode` event "failed", the error); the EA never waits on it (the worker is signalled, not
     joined). `finish` reads a reply waiting at the end and then stops it (`run`'s finally stops it after an
@@ -561,16 +577,19 @@ class _Batch:
     anc_ops: np.ndarray | None = None
     src_ids: np.ndarray | None = None    # (k,) LP decode copies: the id of each copy's source
     src_kinds: np.ndarray | None = None  # (k,) LP decode copies: the kind of each copy's source (KIND_F / KIND_I)
+    src_gains: np.ndarray | None = None  # (k,) LP decode copies: (key_src - key) / max(1, |key_src|), float64 keys
+    lpd_meta: dict | None = None         # LP decode batch: the reply's req, read site and gen_enters
 
 
-LPD_COUNTERS = ("lpd_offers", "lpd_rows_offered", "lpd_rows_F", "lpd_rows_I", "lpd_busy", "lpd_replies", "lpd_solved",
-                "lpd_solved_F", "lpd_solved_I", *(f"lpd_{nm}" for nm in lpdec.CODE_NAMES), "lpd_ok_F", "lpd_ok_I",
-                "lpd_no_gain", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_batches", "lpd_entered",
+LPD_COUNTERS = ("lpd_offers", "lpd_rows_offered", "lpd_rows_F", "lpd_rows_I", "lpd_busy", "lpd_skip_pending",
+                "lpd_replies", "lpd_solved", "lpd_solved_F", "lpd_solved_I", *(f"lpd_{nm}" for nm in lpdec.CODE_NAMES),
+                "lpd_cached_F", "lpd_cached_I", "lpd_screened_I", "lpd_srcs_F", "lpd_srcs_I", "lpd_ok_F", "lpd_ok_I",
+                "lpd_no_gain", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_batches", "lpd_dropped", "lpd_entered",
                 "lpd_entered_F", "lpd_entered_I", "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I",
                 "lpd_posts", "lpd_posts_F", "lpd_posts_I", "lpd_lost", "lpd_failed")
 # the counters every `gen` event carries in lp_decode mode (cumulative)
-LPD_GEN_FIELDS = ("lpd_offers", "lpd_solved", "lpd_kept", "lpd_entered", "lpd_entered_F", "lpd_entered_I",
-                  "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I", "lpd_posts")
+LPD_GEN_FIELDS = ("lpd_offers", "lpd_skip_pending", "lpd_solved", "lpd_kept", "lpd_entered", "lpd_entered_F",
+                  "lpd_entered_I", "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I", "lpd_posts")
 
 
 def _lp_decoder_for(eng: "Engine") -> lpdec.LPDecoder:
@@ -1480,7 +1499,7 @@ class Engine:
             if b.src == "cuopt":                             # arm A9: the ids that carry cuOpt's vectors
                 self.cuopt_ids.update(int(i) for i in ids)
             if b.src_ids is not None:                        # LP decode copies: id -> its source's id and kind
-                self._lpd_entering(ids, b.src_ids, b.src_kinds)
+                self._lpd_entering(ids, b.src_ids, b.src_kinds, b.src_gains)
             parts.append(self._make_pop(X, ev, np.full(k, NO_RANK, np.int8), ids,
                                         np.full((k, 2), -1, np.int64), b.origin, self.gen, b.anc_rank, b.anc_ops,
                                         strat=b.strat))
@@ -1565,7 +1584,11 @@ class Engine:
                     if kind is not None:
                         self.c["lpd_entered"] += 1
                         self.c["lpd_entered_F" if kind == lpdec.KIND_F else "lpd_entered_I"] += 1
+                        gn = self._lpd_new_gain.get(int(i))  # its relative gain over its source (D-017 M3)
+                        if gn is not None and math.isfinite(gn):
+                            self.lpd_gain_entered[kind].append(gn)
                 self._lpd_new = {}
+                self._lpd_new_gain = {}
         if ent.size:
             j = ent - Np
             self.gen_rows.append(dict(
@@ -2244,6 +2267,8 @@ class Engine:
         self.lpd_src_of: dict[int, int] = {}         # copy id -> source id (genealogy column lpd_src)
         self.lpd_kind_of: dict[int, int] = {}        # copy id -> its source's kind (KIND_F / KIND_I)
         self._lpd_new: dict[int, int] = {}           # copies in the current candidate set -> kind (for lpd_entered)
+        self._lpd_new_gain: dict[int, float] = {}    # ... -> relative gain over the source (float64 keys)
+        self.lpd_gain_entered: dict[int, list[float]] = {lpdec.KIND_F: [], lpdec.KIND_I: []}   # copies that entered
         self._lpd_surv = None
         self.lpd_host_s = 0.0                        # EA-thread seconds spent on the decode (perf_counter)
         self.lpd_host_s_max = 0.0
@@ -2268,17 +2293,28 @@ class Engine:
         self.lpd_host_s += dt
         self.lpd_host_s_max = max(self.lpd_host_s_max, dt)
 
+    def _lpd_pending_batches(self) -> int:
+        return sum(1 for b in self.pending if b.src == "lp_decode")
+
     def _lpd_tick(self, cand: Population) -> None:
-        """The pick site (after the survival): read what the worker sent; if it is idle, send one batch. The device
+        """The pick site (after the survival): read what the worker sent; if it is idle, send one batch — unless this
+        read appended a decoded batch (`lpd_skip_pending`): that batch joins the next candidate set, and a request sent
+        now would be answered while it is pending, so the exchange and pre-candidate polls would hold its reply and
+        every later reply would be read at a pick site too (copies two generations after their offer). Skipping costs
+        the worker one generation per pick-site read; the next reply is read before a candidate set again. The device
         wait before the row copies (`_lpd_offer`) is timed apart (`lpd_sync_s`) and left out of `lpd_host_s`."""
         t = time.perf_counter()
         self._lpd_sync_dt = 0.0
         try:
-            self._lpd_poll(timed=False, site="pick")         # no decoded batch is pending here (_with_pending ran)
+            n0 = self._lpd_pending_batches()                 # 0: _with_pending ran (and the hold never fires here)
+            self._lpd_poll(timed=False, site="pick")
             st = self.lpd.state
             if st != "idle":
                 if st in ("starting", "busy"):
                     self.c["lpd_busy"] += 1
+                return
+            if self._lpd_pending_batches() > n0:             # the read kept copies: no offer in this generation
+                self.c["lpd_skip_pending"] += 1
                 return
             self._lpd_offer(cand)
         finally:
@@ -2367,7 +2403,8 @@ class Engine:
     def _lpd_poll(self, timed: bool = True, site: str = "exchange", hold: bool = True) -> None:
         """Handle what the worker sent: "ready", a result (the copies join a candidate set), a failure. `hold`: while a
         decoded batch is pending, leave the worker's messages in the pipe, so at most one decoded batch joins a
-        candidate set (module docstring); `finish` reads with hold=False. `site` goes into the result event."""
+        candidate set (module docstring; with the pick site's skip no request is outstanding while a decoded batch is
+        pending, so the hold is a guard); `finish` reads with hold=False. `site` goes into the result event."""
         if self.lpd is None:
             return
         if hold and any(b.src == "lp_decode" for b in self.pending):
@@ -2417,10 +2454,20 @@ class Engine:
         okm = codes == lpdec.OK
         self.c["lpd_ok_F"] += int((okm & is_f).sum())
         self.c["lpd_ok_I"] += int((okm & ~is_f).sum())
+        # the funnel per kind (D-017 M3 / M4): rows the cache answered; I rows the range screen looked at (F rows are
+        # never screened; NOT_SOLVED I rows were beyond the screen's need)
+        cached = codes == lpdec.CACHED
+        self.c["lpd_cached_F"] += int((cached & is_f).sum())
+        self.c["lpd_cached_I"] += int((cached & ~is_f).sum())
+        self.c["lpd_screened_I"] += int((~np.isin(codes, (lpdec.CACHED, lpdec.NOT_SOLVED)) & ~is_f).sum())
         # a source counts as offered once the worker screened or solved it; NOT_SOLVED / AFTER_DEADLINE stay eligible
-        # (only one request is ever outstanding, and the pick site reads before it offers: no source is offered twice)
+        # (only one request is ever outstanding, and the pick site reads before it offers: no source is offered twice);
+        # lpd_srcs_F / _I count the distinct sources so recorded
         done = ~np.isin(codes, (lpdec.NOT_SOLVED, lpdec.AFTER_DEADLINE))
-        self.lpd_offered.update(int(v) for v in np.asarray(info["ids"])[:k][done])
+        for v, f in zip(np.asarray(info["ids"])[:k][done], is_f[done]):
+            if int(v) not in self.lpd_offered:
+                self.lpd_offered.add(int(v))
+                self.c["lpd_srcs_F" if f else "lpd_srcs_I"] += 1
         wait = None
         t_sent, t_read = rep.get("t_sent"), rep.get("t_read")
         if isinstance(t_sent, (int, float)) and isinstance(t_read, (int, float)):
@@ -2446,33 +2493,40 @@ class Engine:
                         continue
                 kept.append(j)
         kept_rows = ok_rows[np.asarray(kept, np.int64)] if kept else np.zeros(0, np.int64)
+        # the candidate set the copies join: this generation's when read before `_with_pending`, the next one's when
+        # read at the pick site; none when read by finish (or when nothing was kept). A batch that never joins one
+        # (pending when the run ends) is named by a "dropped" event at finish (`_lpd_drop_pending`)
+        gen_enters = None if (not kept or site == "finish") else self.gen + (1 if site == "pick" else 0)
         if kept:
             kj = np.asarray(kept, np.int64)
             X = self.bk.xp.asarray(Y[kj]).astype(self.gene_dtype)
+            sk = np.asarray(info["key"], np.float64)[kept_rows]
+            with np.errstate(invalid="ignore"):              # a non-finite source key gives a NaN gain (not counted)
+                gains = (sk - keys[kept_rows]) / np.maximum(1.0, np.abs(sk))
             self.pending.append(_Batch(X, np.full(kj.size, ORIGIN_LP_DECODE, np.uint16), repair=False, src="lp_decode",
                                        t=self.trace.now(), strat=info["strat"][kept_rows],
                                        anc_rank=info["anc_rank"][kept_rows], anc_ops=info["anc_ops"][kept_rows],
                                        src_ids=info["ids"][kept_rows],
-                                       src_kinds=np.asarray(info["kinds"], np.uint8)[kept_rows]))
+                                       src_kinds=np.asarray(info["kinds"], np.uint8)[kept_rows], src_gains=gains,
+                                       lpd_meta=dict(req=int(req_id), site=site, gen_enters=gen_enters)))
             nf = int(np.sum(info["kinds"][kept_rows] == lpdec.KIND_F))
             self.c["lpd_kept"] += int(kj.size)
             self.c["lpd_kept_F"] += nf
             self.c["lpd_kept_I"] += int(kj.size) - nf
         ks = set(int(r) for r in kept_rows)
-        # the candidate set the copies join: this generation's when read before `_with_pending`, the next one's when
-        # read at the pick site; none when read by finish (or when nothing was kept)
-        gen_enters = None if (not kept or site == "finish") else self.gen + (1 if site == "pick" else 0)
 
         def num(v):
             v = float(v)
             return v if math.isfinite(v) else None
         cpu = rep.get("cpu")
+        cold = rep.get("cold")                               # priming solves (the worker's; None from a stub)
         rows = [dict(src=int(info["ids"][r]), kind="F" if info["kinds"][r] == lpdec.KIND_F else "I",
                      code=lpdec.CODE_NAMES[int(codes[r])], key_src=num(info["key"][r]), V_src=num(info["V"][r]),
                      rank_src=int(info["rank"][r]), key=num(keys[r]), obj=num(rep["obj"][r]),
                      iters=int(rep["iters"][r]), s=round(float(rep["secs"][r]), 6),
                      cpu_s=round(float(cpu[r]), 6) if cpu is not None else None, limit=num(rep["limit"][r]),
-                     status=str(rep["status"][r]), kept=int(r) in ks) for r in range(k)]
+                     status=str(rep["status"][r]), cold=bool(cold[r]) if cold is not None else None,
+                     kept=int(r) in ks) for r in range(k)]
         rs = rep.get("read_s")
         self.trace.event("lp_decode", what="result", req=int(req_id), gen_offered=int(info["gen"]),
                          t_offered=info["t"], gen=self.gen, site=site, gen_enters=gen_enters, kept=len(kept),
@@ -2480,16 +2534,33 @@ class Engine:
                          read_s=round(float(rs), 6) if isinstance(rs, (int, float)) else None, rows=rows,
                          stats=self.lpd_stats)
 
-    def _lpd_entering(self, ids: np.ndarray, src_ids: np.ndarray, kinds: np.ndarray | None = None) -> None:
-        """A decoded batch joins the candidate set (`_with_pending`): copy id -> source id and kind."""
+    def _lpd_entering(self, ids: np.ndarray, src_ids: np.ndarray, kinds: np.ndarray | None = None,
+                      gains: np.ndarray | None = None) -> None:
+        """A decoded batch joins the candidate set (`_with_pending`): copy id -> source id, kind and relative gain."""
         kinds = np.full(len(ids), lpdec.KIND_I, np.uint8) if kinds is None else np.asarray(kinds, np.uint8)
-        for i_new, i_src, kd in zip(ids, src_ids, kinds):
+        gains = np.full(len(ids), np.nan) if gains is None else np.asarray(gains, np.float64)
+        for i_new, i_src, kd, gn in zip(ids, src_ids, kinds, gains):
             self.lpd_src_of[int(i_new)] = int(i_src)
             self.lpd_kind_of[int(i_new)] = int(kd)
             self._lpd_new[int(i_new)] = int(kd)
+            self._lpd_new_gain[int(i_new)] = float(gn)
         self.lpd_ids.update(int(i) for i in ids)
         self.lpd_batch_rows_max = max(self.lpd_batch_rows_max, int(len(ids)))
         self.c["lpd_batches"] += 1
+
+    def _lpd_drop_pending(self) -> None:
+        """At finish: a decoded batch still pending never joined a candidate set — read at the last pick site, at the
+        exchange tick of a generation cut short (its `gen_enters` names that generation), or by finish itself. Its rows
+        count as `lpd_dropped` and an `lp_decode` event "dropped" names its reply (`req`), so the result event's copies
+        can be excluded from what entered (lpd_kept = rows that joined a candidate set + lpd_dropped)."""
+        for b in self.pending:
+            if b.src != "lp_decode":
+                continue
+            m = b.lpd_meta or {}
+            rows = int(b.X.shape[0])
+            self.c["lpd_dropped"] += rows
+            self.trace.event("lp_decode", what="dropped", req=m.get("req"), site=m.get("site"),
+                             gen_enters=m.get("gen_enters"), rows=rows, gen=self.gen)
 
     def _lpd_fail(self, err: str, tb: str = "") -> None:
         """The worker failed (digest mismatch, an exception, death): recorded, never retried; the EA never waits."""
@@ -2527,10 +2598,21 @@ class Engine:
                     wait_s_max=round(self.lpd_wait_s_max, 6),
                     ipc={k: (round(v, 6) if isinstance(v, float) else v) for k, v in ipc.items()} if ipc else None,
                     batch_rows_max=int(self.lpd_batch_rows_max), worker=dict(self.lpd_stats),
+                    **self._lpd_gain_fields(),
                     active_columns=int(self.lpd_cols.size), cont_obj=self.lpd_cont_obj,
                     per_gen=int(rp.lp_decode_per_gen), time_limit=float(rp.lp_time_limit),
                     cold_limit=float(rp.lp_decode_cold_limit), infeasible=bool(rp.lp_decode_infeasible),
                     int_dtype=self.lpd_int_dtype.name, constants=lpdec.constants())
+
+    def _lpd_gain_fields(self) -> dict:
+        """D-017 M3: the median relative gain (key_src - key) / max(1, |key_src|) of the decoded copies that ENTERED the
+        population, per kind of source, and how many (finite gains only; positive = the copy is better)."""
+        out = {}
+        for nm, kd in (("F", lpdec.KIND_F), ("I", lpdec.KIND_I)):
+            g = self.lpd_gain_entered[kd]
+            out[f"gain_{nm}_entered_median"] = float(np.median(g)) if g else None
+            out[f"gain_{nm}_entered_n"] = len(g)
+        return out
 
     # ------------------------------------------------------------------------------------------------ records
     def _gen_record(self) -> None:
@@ -2597,6 +2679,7 @@ class Engine:
             self.lp_worker.stop()
         if self.lpd is not None:                             # the last reply's statistics (after the clock; a pending
             self._lpd_poll(timed=False, site="finish", hold=False)   # decoded batch never enters now), then stop
+            self._lpd_drop_pending()
             self._lpd_stop()
         if self.logged_gen != self.gen:
             self._gen_record()

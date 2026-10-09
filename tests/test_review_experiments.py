@@ -497,12 +497,9 @@ def test_launcher_failure_before_ready_is_void_and_halts_the_pool(toy, fake, tmp
 
 # ======================================================================== F12: runner process, sampler
 def test_runner_env_and_pinning_in_a_fresh_process():
-    if not set(pair.RUNNER_CORES) & os.sched_getaffinity(0):
-        # pin_runner() pins to RUNNER_CORES within the caller's affinity and returns None when they do not overlap
-        # (its documented behaviour); a test process confined to other cores (e.g. `taskset -c 15,16,17` beside a
-        # timed run) cannot check the pinning, so the test is skipped there rather than failed
-        pytest.skip(f"this process's CPU affinity {sorted(os.sched_getaffinity(0))} excludes pair.RUNNER_CORES "
-                    f"{sorted(pair.RUNNER_CORES)}: the runner's pinning cannot be checked here")
+    """Importing the pool runner sets the thread variables to 1 (checked every time), and `pin_runner()` pins to
+    RUNNER_CORES within the caller's affinity. It returns None when they do not overlap (its documented behaviour), so
+    in a test process confined to other cores (e.g. `taskset -c 15,16,17` beside a timed run) only that is checked."""
     env = {k: v for k, v in os.environ.items() if k not in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                                                               "MKL_NUM_THREADS")}
     code = ("import os; from itrea.experiments import pool, pair; "
@@ -513,7 +510,10 @@ def test_runner_env_and_pinning_in_a_fresh_process():
     lines = out.stdout.splitlines()
     assert lines[0] == "1 1"
     pinned = set(json.loads(lines[1].split("] ")[0] + "]"))
-    assert pinned and pinned <= set(pair.RUNNER_CORES)
+    if set(pair.RUNNER_CORES) & os.sched_getaffinity(0):
+        assert pinned and pinned <= set(pair.RUNNER_CORES)
+    else:                                                  # no RUNNER_CORES core in this process's affinity
+        assert pinned == set()
 
 
 def test_run_pair_uses_and_never_stops_a_shared_sampler(toy, fake, tmp_path):

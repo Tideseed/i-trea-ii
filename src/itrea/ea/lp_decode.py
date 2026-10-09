@@ -50,7 +50,9 @@ and, for D-017's M2, the priming / warm split: `priming_solves`, `priming_s`, `p
 `priming_first_s` (the FIRST cold solve, set once), `priming_last_status`, `priming_time_limit_hits`, `warm_solves`,
 `warm_time_limit_hits` (warm = an anchor basis existed), `time_limit_hits` (all) and `time_limit_hits_starved` (a hit
 whose solve got less than STARVED_CPU_SHARE of a core: the worker was starved, not the LP slow — HiGHS's limit is wall
-time). Per row the reply has the wall seconds `secs`, the CPU seconds `cpu` and the limit. The worker stamps its own
+time). Per row the reply has the wall seconds `secs`, the CPU seconds `cpu`, the limit, HiGHS's model status and `cold`
+(True for a priming solve: no anchor basis existed), so the priming / warm split can be recounted from the rows of the
+replies read (a time-limit hit is the status "Time limit reached", also when the row is OK). The worker stamps its own
 clock (`time.monotonic()`, system-wide) as `t_sent` on "ready" and on every reply, so the EA records when the worker
 was ready and how long a finished reply waited before it was read (D-017 M0).
 
@@ -309,6 +311,7 @@ class _DecodeSolver:
         cpu = np.zeros(k)
         limit = np.full(k, np.nan)
         status = [""] * k
+        cold = np.zeros(k, bool)                          # a priming solve (no anchor basis yet)
         hashes = [hashlib.blake2b(np.ascontiguousarray(rows[r]).tobytes(), digest_size=16).digest()
                   for r in range(k)]
         seen: set[bytes] = set()
@@ -338,9 +341,10 @@ class _DecodeSolver:
                 codes[r] = AFTER_DEADLINE
                 st["after_deadline"] += 1
                 continue
-            code, o, it, dt, dc, L, s, vals = self._solve_one(rows[r], kind)
+            code, o, it, dt, dc, L, s, vals, prim = self._solve_one(rows[r], kind)
             self._remember(hashes[r])
             codes[r], obj[r], iters[r], secs[r], cpu[r], limit[r], status[r] = code, o, it, dt, dc, L, s
+            cold[r] = prim
             if code == OK:
                 ok_rows.append(r)
                 conts.append(vals)
@@ -355,7 +359,7 @@ class _DecodeSolver:
         n_c = int(self.cont_idx.size)
         return dict(codes=codes, ok_rows=np.asarray(ok_rows, np.int64),
                     conts=np.vstack(conts) if conts else np.zeros((0, n_c)), obj=obj, iters=iters, secs=secs,
-                    cpu=cpu, limit=limit, status=status, stats=dict(st))
+                    cpu=cpu, limit=limit, status=status, cold=cold, stats=dict(st))
 
     def _remember(self, hsh: bytes) -> None:
         if self.cache_cap <= 0:
@@ -430,7 +434,7 @@ class _DecodeSolver:
             st["ok"] += 1
             vals = np.asarray(h.getSolution().col_value, dtype=np.float64)[self.cont_idx]
             o = float(info.objective_function_value)
-        return code, o, it, dt, dc, L, s, vals
+        return code, o, it, dt, dc, L, s, vals, priming
 
 
 def _decoder_main(conn, path: str, digest: str, int_dtype: str, time_limit: float, cold_limit: float,

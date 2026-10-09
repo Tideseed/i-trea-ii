@@ -551,17 +551,22 @@ def cuopt_attribution(run: Run, inc: pd.DataFrame, T: float) -> dict:
     return out
 
 
-LPD_INT_COLS = ("lpd_offers", "lpd_rows_offered", "lpd_rows_F", "lpd_rows_I", "lpd_busy", "lpd_replies",
-                "lpd_solved", "lpd_solved_F", "lpd_solved_I", "lpd_ok", "lpd_ok_F", "lpd_ok_I", "lpd_infeasible",
-                "lpd_time_limit", "lpd_other", "lpd_range_fail", "lpd_cached", "lpd_not_solved", "lpd_after_deadline",
-                "lpd_no_gain", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_batches", "lpd_entered", "lpd_entered_F",
-                "lpd_entered_I", "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I", "lpd_posts", "lpd_posts_F",
-                "lpd_posts_I", "lpd_lost", "lpd_failed")
-# (column, key in the summary's lp_decode block) and (column, key in its worker statistics), float columns
+LPD_INT_COLS = ("lpd_offers", "lpd_rows_offered", "lpd_rows_F", "lpd_rows_I", "lpd_busy", "lpd_skip_pending",
+                "lpd_replies", "lpd_solved", "lpd_solved_F", "lpd_solved_I", "lpd_ok", "lpd_ok_F", "lpd_ok_I",
+                "lpd_infeasible", "lpd_time_limit", "lpd_other", "lpd_range_fail", "lpd_cached", "lpd_not_solved",
+                "lpd_after_deadline", "lpd_cached_F", "lpd_cached_I", "lpd_screened_I", "lpd_srcs_F", "lpd_srcs_I",
+                "lpd_no_gain", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_batches", "lpd_dropped", "lpd_entered",
+                "lpd_entered_F", "lpd_entered_I", "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I", "lpd_posts",
+                "lpd_posts_F", "lpd_posts_I", "lpd_lost", "lpd_failed")
+# (column, key in the summary's lp_decode block) and (column, key in its worker statistics): float columns, but
+# LPD_BLOCK_INT_COLS and the worker counts are int
 LPD_BLOCK_COLS = (("lpd_host_s", "host_s"), ("lpd_host_s_max", "host_s_max"), ("lpd_sync_s", "sync_s"),
                   ("lpd_sync_s_max", "sync_s_max"), ("lpd_ready_t", "ready_t"),
                   ("lpd_ready_t_worker", "ready_t_worker"), ("lpd_wait_s_total", "wait_s_total"),
-                  ("lpd_wait_s_max", "wait_s_max"), ("lpd_batch_rows_max", "batch_rows_max"))
+                  ("lpd_wait_s_max", "wait_s_max"), ("lpd_batch_rows_max", "batch_rows_max"),
+                  ("lpd_gain_F_entered_median", "gain_F_entered_median"), ("lpd_gain_F_entered_n", "gain_F_entered_n"),
+                  ("lpd_gain_I_entered_median", "gain_I_entered_median"), ("lpd_gain_I_entered_n", "gain_I_entered_n"))
+LPD_BLOCK_INT_COLS = ("lpd_batch_rows_max", "lpd_gain_F_entered_n", "lpd_gain_I_entered_n")
 LPD_IPC_COLS = (("lpd_offer_s_max", "offer_s_max"), ("lpd_offer_s_total", "offer_s_total"),
                 ("lpd_offer_bytes_max", "offer_bytes_max"), ("lpd_read_s_max", "read_s_max"),
                 ("lpd_read_s_total", "read_s_total"), ("lpd_read_bytes_max", "read_bytes_max"))
@@ -578,7 +583,8 @@ LPD_WORKER_COLS = (("lpd_priming_s", "priming_s"), ("lpd_priming_first_s", "prim
 def lp_decode_cols(run: Run) -> dict:
     """The LP decode's record (`repair.continuous: lp_decode`, D-017) from the EA's summary: its state, the counters
     in LPD_INT_COLS (per kind of source where D-017's M3 / M4 need it), the block's EA-side times (LPD_BLOCK_COLS: host
-    and device-sync seconds for M1, the worker's own ready time for M0, the replies' wait in the pipe), the pipe's
+    and device-sync seconds for M1, the worker's own ready time for M0, the replies' wait in the pipe) and the median
+    relative gain of the decoded copies that entered the population, per kind (M3), the pipe's
     send / read times and bytes (LPD_IPC_COLS) and the worker's statistics (LPD_WORKER_COLS, with the priming / warm
     split for M2), plus `lpd_priming_first_status`. Runs without the decode leave every column missing (-1 / NaN /
     ""); an instance on which it was inert has `lpd_state` "inert" and nothing else."""
@@ -1060,7 +1066,7 @@ RUN_COLUMNS = {
     "cuopt_posts_accepted": "int", "cuopt_posts_became_incumbent": "int", "solver_inc_from_cuopt": "int",
     # D-017: the LP decode (repair.continuous: lp_decode); missing (-1 / NaN / "") for runs without it
     "lpd_state": "str", **{k: "int" for k in LPD_INT_COLS},
-    **{c: ("int" if c == "lpd_batch_rows_max" else "float") for c, _ in LPD_BLOCK_COLS},
+    **{c: ("int" if c in LPD_BLOCK_INT_COLS else "float") for c, _ in LPD_BLOCK_COLS},
     **{c: ("int" if c.endswith("_bytes_max") else "float") for c, _ in LPD_IPC_COLS},
     **{c: ("float" if c.endswith(("_s", "_mb")) else "int") for c, _ in LPD_WORKER_COLS},
     "lpd_priming_first_status": "str",

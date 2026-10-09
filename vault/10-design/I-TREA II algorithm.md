@@ -73,17 +73,24 @@ marked infeasible in the population (it moves to Rank 2) and counted — part I'
 6. **Continuous variables** (`repair.continuous: auto | gene | lp_decode`): `auto` (default) sets singleton
    continuous columns in closed form on the device and moves every other continuous variable by feasibility-jump
    moves; `gene` treats them as real genes (moves to make a violated row tight); `lp_decode` ([[D-017 LP decode —
-   re-optimise the continuous variables of selected candidates]], issue #27; built 2026-10-08, review fixes
-   2026-10-09, not yet run on an instance) is `auto` plus an LP decode. A persistent HiGHS worker process (1 thread,
-   niced, started at t0) fixes the integer part of a few candidates and solves the LP over the continuous variables.
+   re-optimise the continuous variables of selected candidates]], issue #27; built 2026-10-08, two rounds of
+   review fixes 2026-10-09, not yet run on an instance) is `auto` plus an LP decode. A persistent HiGHS worker
+   process (1 thread, niced, started at t0) fixes the integer part of a few candidates and solves the LP over the
+   continuous variables.
    Every generation, after the survival, over the whole candidate set, it is offered at most one batch (one request
    outstanding at a time): feasible candidates by key to **polish** (only when some continuous column carries cost)
    and infeasible candidates better than the incumbent, in D-011's (V, key) order, to **complete**
    (`lp_decode_infeasible`); the worker solves at most N = `lp_decode_per_gen` (4) of them, 2 + 2 when both kinds
    exist, after a cache and a range screen. A polish copy is kept only if its key beats its source's by `imp_tol`; a
    completion copy always. The copies (source's integer part + the LP's continuous values) enter a later candidate
-   set as ordinary rows — at most one decoded batch per candidate set, normally the next generation's — with origin
-   `ORIGIN_LP_DECODE`, the source's strategy and ancestry, and pass the same float64 re-check and survival. Inert
+   set as ordinary rows — at most one decoded batch per candidate set — with origin `ORIGIN_LP_DECODE`, the source's
+   strategy and ancestry, and pass the same float64 re-check and survival. The worker is polled at the exchange tick,
+   just before the candidate set takes its pending rows, and at the pick site. A reply that arrives before the next
+   generation's candidate set (the worker answered within about a generation) is read there and its copies join that
+   set: one generation after the offer. A reply that arrives later, while that set is assembled or survives, is read
+   at the pick site; its copies join the following generation's set (two generations after the offer), and that pick
+   site sends no new request, so the worker idles one generation and its next reply is again read before a candidate
+   set (sending one in the same tick would keep every later reply two generations late). Inert
    (no worker) on an instance without an active column (continuous, lb < ub, in two or more rows). Trace fields:
    [[Trace format and metrics]] ("LP decode").
 7. **Evaluate** offspring on the device (`eval_dtype`: float64 default; float32 measured in E1 for speed and its

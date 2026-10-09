@@ -517,6 +517,7 @@ def test_worker_rebases_the_cumulative_time_limit(files):
     late = [s for b in after for s in reps[b]["status"]]
     assert "Optimal" in late and set(late) <= {"Optimal", "Time limit reached"}, late
     assert st["time_limit_hits"] == sum(s == "Time limit reached" for r in reps for s in r["status"])
+    assert st["time_limit_hits"] == st["warm_time_limit_hits"] + st["priming_time_limit_hits"]
 
 
 @pytest.mark.solver
@@ -541,6 +542,7 @@ def test_worker_priming_limit_and_basis_restore(files):
             assert r2["limit"][0] == 10.0 and r2["status"][0] == "Optimal"     # still priming: the cold limit
             r3 = _solve(dec, [B2])
             assert r3["limit"][0] == 5.0 and r3["status"][0] == "Optimal"
+            assert [r["cold"].tolist() for r in (r1, r2, r3)] == [[True], [True], [False]]   # priming, per row
             ok = _solve(dec, [A, B])
             bad = _solve(dec, [A, C, B])
         assert [L.CODE_NAMES[c] for c in bad["codes"]] == ["ok", "infeasible", "ok"]
@@ -557,6 +559,25 @@ def test_worker_priming_limit_and_basis_restore(files):
     ok_n, bad_n = sequence({"cold_limits": [0.0], "no_restore": True})
     assert ok_n["iters"][1] == ok["iters"][1] and bad_n["stats"]["restores"] == 0
     assert bad_n["iters"][2] != ok_n["iters"][1], (ok_n["iters"], bad_n["iters"])
+
+
+@pytest.mark.solver
+def test_worker_counts_warm_time_limit_hits(files):
+    """D-017 M2's numerator: an optimal priming solve sets the anchor; two later rows run warm under a zero limit and
+    stop at it. The warm, priming and pooled hit counters and the per-row `cold` flag say exactly that."""
+    path, prob = files["gen"]
+    rows = _distinct_rows(13, 3)
+    with _decoder(path, prob, time_limit=0.0, cold_limit=10.0) as dec:
+        _wait(dec)
+        r1 = _solve(dec, rows[:1])
+        r2 = _solve(dec, rows[1:])
+    assert r1["status"][0] == "Optimal" and r1["limit"][0] == 10.0 and r1["cold"].tolist() == [True], r1
+    assert list(r2["status"]) == ["Time limit reached"] * 2 and r2["limit"].tolist() == [0.0, 0.0], r2
+    assert r2["cold"].tolist() == [False, False]
+    st = r2["stats"]
+    assert st["priming_solves"] == 1 and st["warm_solves"] == 2 and st["solves"] == 3
+    assert st["warm_time_limit_hits"] == 2 and st["priming_time_limit_hits"] == 0
+    assert st["time_limit_hits"] == st["warm_time_limit_hits"] + st["priming_time_limit_hits"] == 2
 
 
 @pytest.mark.solver
@@ -736,20 +757,40 @@ def _run_until(eng, cond, timeout=60.0):
         time.sleep(0.002)
 
 
+class _PostMailbox:
+    """A partner that sends nothing and takes the EA's posts: `to_solver` is on, so incumbents made from decoded
+    copies are posted (with no solver incumbent every new incumbent beats it) and `lpd_posts` counts."""
+
+    def __init__(self):
+        self.to_ea, self.lp, self.lps, self.to_solver = E._Chan(), E._Chan(), E._Chan(), E._Chan()
+        self.info = E._Info(None)
+
+    def stopped(self) -> bool:
+        return False
+
+    def verdicts(self) -> list:
+        return []
+
+
+SOLVED_CODES = ("ok", "infeasible", "time_limit", "other")   # rows that reached HiGHS
+
+
 @pytest.mark.solver
 def test_engine_decoded_copies(files, tmp_path, monkeypatch):
     """The real worker on the generated toy: copies carry ORIGIN_LP_DECODE, their source's strategy, no parents and
     `lpd_src`; their integer parts are their sources' (rounded), their continuous values LP-optimal; polish copies beat
     their sources by imp_tol; every decoded incumbent passes the float64 check; the counters add up; the genealogy
-    goes through the lineage analysis; at most one decoded batch joins a candidate set; the per-kind counters and the
-    M0 / M1 / M2 fields are there; the worker is gone after finish."""
+    goes through the lineage analysis; at most one decoded batch joins a candidate set; the per-kind counters agree
+    with independent counts (entered: genealogy + the result rows' kinds; posts: the posted ids), the worker's M2
+    statistics are recounted from the result rows, M0's ready time is the worker's own stamp, M3's gains of the copies
+    that entered are recomputed from the rows; the worker is gone after finish."""
     from scipy.optimize import linprog
     from itrea.analysis.lineage import run_tables
     from itrea.trace import Trace, read_events
     path, prob = files["gen"]
     cfg = cfg_for(**{"strategy.enabled": True, "log_every": 1})
     tr = Trace(tmp_path, "ea")
-    eng = Engine(prob, cfg, seed=5, trace=tr, warmup=False)
+    eng = Engine(prob, cfg, seed=5, mailbox=_PostMailbox(), trace=tr, warmup=False)
     eng.prepare()
     assert eng.startup["lp_decode"]["state"] == "configured" and eng.startup["lp_decode"]["active_columns"] == 60
     src_x, batches = {}, []
@@ -776,14 +817,38 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
         d = [b for b in eng.pending if b.src == "lp_decode"]
         per_set.append((eng.gen, len(d), sum(int(b.X.shape[0]) for b in d)))
         return real_with(cand, meta)
+    # per survival: the increments of lpd_entered_F / _I and the ids that entered; per new incumbent: its id and the
+    # increments of lpd_posts_F / _I; every post's ids — checked below against the kinds of the result rows
+    ent_log, inc_log, posted = [], [], []
+    real_survive, real_new_inc, real_post = eng._survive, eng._new_incumbent, eng._post
+
+    def survive(cand, Np, meta):
+        f0, i0, n0 = eng.c["lpd_entered_F"], eng.c["lpd_entered_I"], len(eng.gen_rows)
+        real_survive(cand, Np, meta)
+        ent_log.append((eng.c["lpd_entered_F"] - f0, eng.c["lpd_entered_I"] - i0,
+                        [int(v) for r in eng.gen_rows[n0:] for v in r["id"]]))
+
+    def new_inc(i, x, obj, key):
+        f0, i0, iid = eng.c["lpd_posts_F"], eng.c["lpd_posts_I"], int(eng.pop.ids[i])
+        real_new_inc(i, x, obj, key)
+        inc_log.append((iid, eng.c["lpd_posts_F"] - f0, eng.c["lpd_posts_I"] - i0))
+
+    def post(X, obj, origin, ids, gain=math.nan, frontier=False):
+        posted.append(([int(v) for v in ids], bool(frontier)))
+        return real_post(X, obj, origin, ids, gain=gain, frontier=frontier)
     monkeypatch.setattr(eng, "_lpd_offer", offer)
     monkeypatch.setattr(eng, "_lpd_result", result)
     monkeypatch.setattr(eng, "_with_pending", with_pending)
+    monkeypatch.setattr(eng, "_survive", survive)
+    monkeypatch.setattr(eng, "_new_incumbent", new_inc)
+    monkeypatch.setattr(eng, "_post", post)
     before = _children()
     eng.begin(time.monotonic(), 3600.0)
+    assert eng.to_solver
     pid = eng.lpd.pid
+    # ... and until some survival admitted unequal numbers of F and I copies (a swapped split then shows)
     _run_until(eng, lambda e: e.c["lpd_entered"] >= 3 and e.c["lpd_incumbents"] >= 1 and e.c["lpd_kept_F"] >= 2
-               and e.c["lpd_replies"] >= 5)
+               and e.c["lpd_replies"] >= 5 and e.c["lpd_posts"] >= 1 and any(a != b for a, b, _ in ent_log))
     out = eng.finish()
     eng.write_outputs(tmp_path)
     tr.close(sense=prob.sense, **{k: v for k, v in out.items() if k not in ("best_x", "frontier")})
@@ -817,9 +882,9 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
     # a source is screened or solved at most once (NOT_SOLVED / AFTER_DEADLINE rows may be offered again)
     done = [r["src"] for r in rows if r["code"] not in ("not_solved", "after_deadline")]
     assert len(done) == len(set(done))
-    # at most one decoded batch (at most N rows) per candidate set; copies enter one generation after their offer
-    # when the reply came before that generation's candidate set (read there: site "candidates" / "exchange"), two
-    # when it was read at the pick site
+    # at most one decoded batch (at most N rows) per candidate set; copies enter the candidate set of the generation
+    # that read the reply (site "candidates" / "exchange"), or the next one when it was read at the pick site, which
+    # then offers nothing (lpd_skip_pending); a batch never joins one only when the run ends first (lpd_dropped)
     N = cfg.repair.lp_decode_per_gen
     assert max(n for _, n, _ in per_set) == 1 and max(k for _, _, k in per_set) <= N, per_set
     res = [e for e in ev if e["what"] == "result"]
@@ -834,9 +899,15 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
         lag = e["gen_enters"] - e["gen_offered"]
         assert lag == (e["gen"] - e["gen_offered"]) + (1 if e["site"] == "pick" else 0) and lag >= 1, e
         assert entering.get(e["gen_enters"]) == e["kept"], (e["gen_enters"], entering)
-    # replies are read just before the candidate set (the exact lags are pinned by the stub test below: the niced
+    # replies are read just before the candidate set (the exact lags are pinned by the stub tests below: the niced
     # worker on contended cores may answer several generations late)
     assert any(e["site"] == "candidates" for e in res), [(e["site"], e["gen_offered"], e["gen_enters"]) for e in res]
+    assert out["lpd_skip_pending"] == sum(e["site"] == "pick" and e["kept"] > 0 for e in res)
+    dropped = [e for e in ev if e["what"] == "dropped"]
+    assert out["lpd_kept"] == sum(k for _, _, k in per_set) + out["lpd_dropped"]
+    assert out["lpd_dropped"] == sum(e["rows"] for e in dropped)
+    assert {e["req"] for e in dropped} == {e["req"] for e in res if e["kept"] and (e["gen_enters"] is None
+                                                                                 or e["gen_enters"] > eng.gen)}
     # genealogy
     g = eng.genealogy()
     dec = g["lpd_src"] >= 0
@@ -871,16 +942,62 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
         assert ("F" if eng.lpd_kind_of[copy_id] == L.KIND_F else "I") == kind_of_src[src]
     n_dec_F = sum(1 for iid, *_ in eng.inc_stack if iid in eng.lpd_ids and eng.lpd_kind_of[iid] == L.KIND_F)
     assert n_dec_F == c["lpd_incumbents_F"]
+    # entered and posts per kind against independent counts (the kind from the result rows, through lpd_src), per
+    # survival and per new incumbent, so a swapped split shows wherever the two kinds differ
+    ent_kinds = [kind_of_src[int(s)] for s in g["lpd_src"][dec]]
+    assert (c["lpd_entered_F"], c["lpd_entered_I"]) == (ent_kinds.count("F"), ent_kinds.count("I"))
+    for dF, dI, ids in ent_log:
+        kinds = [kind_of_src[eng.lpd_src_of[i]] for i in ids if i in eng.lpd_src_of]
+        assert (dF, dI) == (kinds.count("F"), kinds.count("I")), (dF, dI, kinds)
+    assert any(dF != dI for dF, dI, _ in ent_log)
+    posted_inc = {ids[0] for ids, frontier in posted if not frontier}
+    n_posts = 0
+    for iid, dF, dI in inc_log:
+        if iid in eng.lpd_ids and iid in posted_inc:
+            n_posts += 1
+            assert (dF, dI) == ((1, 0) if kind_of_src[eng.lpd_src_of[iid]] == "F" else (0, 1)), (iid, dF, dI)
+        else:
+            assert (dF, dI) == (0, 0), (iid, dF, dI)
+    assert n_posts == c["lpd_posts"] >= 1
+    # the funnel per kind: cached rows, I rows the screen looked at (= the worker's passes + fails), distinct sources
+    assert c["lpd_cached_F"] + c["lpd_cached_I"] == c["lpd_cached"]
+    for kd in ("F", "I"):
+        assert c[f"lpd_cached_{kd}"] == sum(r["kind"] == kd and r["code"] == "cached" for r in rows)
+        assert c[f"lpd_srcs_{kd}"] == len({r["src"] for r in rows if r["kind"] == kd and r["code"] not in
+                                           ("not_solved", "after_deadline")})
+    assert c["lpd_screened_I"] == sum(r["kind"] == "I" and r["code"] not in ("cached", "not_solved") for r in rows)
+    assert c["lpd_srcs_F"] + c["lpd_srcs_I"] == len(eng.lpd_offered)
     blk = out["lp_decode"]
     assert blk["state"] in ("idle", "busy") and blk["worker"]["solves"] >= c["lpd_ok"] and blk["host_s"] > 0
     assert blk["ready"]["nice"] >= L.NICE and blk["host_s_max"] <= blk["host_s"]
-    # M0: the worker's own ready time precedes the EA's read of it; M1 / IPC fields
-    assert 0 < blk["ready_t_worker"] <= blk["ready_t"] and "t_sent" not in blk["ready"]
+    # M0: the worker's own ready time (its send stamp), which precedes the EA's read of it; M1 / IPC fields
+    assert blk["ready_t_worker"] == pytest.approx(eng.lpd_ready_info["t_sent"] - tr.t0, abs=1e-5)
+    assert 0 < blk["ready_t_worker"] < blk["ready_t"] and "t_sent" not in blk["ready"]
     assert 0 <= blk["sync_s_max"] <= blk["sync_s"] + 1e-12 and 0 <= blk["wait_s_max"] <= blk["wait_s_total"] + 1e-12
     assert blk["ipc"]["offers"] == c["lpd_offers"] and blk["ipc"]["reads"] == c["lpd_replies"]
     assert 1 <= blk["batch_rows_max"] <= N
     w = blk["worker"]
     assert w["priming_first_status"] == "Optimal" and w["warm_solves"] + w["priming_solves"] == w["solves"]
+    # M2 recounted from the result rows (the same replies as the statistics: those read): a solve = a row that reached
+    # HiGHS, priming = `cold`, a hit = the status "Time limit reached" (also on an OK row)
+    sv = [r for r in rows if r["code"] in SOLVED_CODES]
+    assert all(isinstance(r["cold"], bool) for r in sv) and sum(r["cold"] for r in sv) == w["priming_solves"] >= 1
+    assert sum(not r["cold"] for r in sv) == w["warm_solves"] >= 1 and len(sv) == w["solves"]
+    hit = [r for r in sv if r["status"] == "Time limit reached"]
+    assert sum(not r["cold"] for r in hit) == w["warm_time_limit_hits"]
+    assert sum(r["cold"] for r in hit) == w["priming_time_limit_hits"]
+    assert c["lpd_screened_I"] == w["screen_pass"] + w["screen_fail"]
+    # M3: the gains of the copies that entered, recomputed from the result rows joined through the genealogy
+    kept_row = {r["src"]: r for r in rows if r["kept"]}                      # a kept row's source is unique
+    for kd in ("F", "I"):
+        gains = [(r["key_src"] - r["key"]) / max(1.0, abs(r["key_src"]))
+                 for r in (kept_row[int(s)] for s in g["lpd_src"][dec]) if r["kind"] == kd]
+        assert blk[f"gain_{kd}_entered_n"] == len(gains) == c[f"lpd_entered_{kd}"]
+        if gains:
+            assert blk[f"gain_{kd}_entered_median"] == pytest.approx(float(np.median(gains)), rel=1e-12, abs=1e-15)
+        else:
+            assert blk[f"gain_{kd}_entered_median"] is None
+    assert blk["gain_F_entered_median"] > 0                                  # polish copies beat their sources
     from itrea.analysis import build_runs as B                # every field the derived table reads exists
     assert all(key in blk for _, key in B.LPD_BLOCK_COLS) and all(key in blk["ipc"] for _, key in B.LPD_IPC_COLS)
     assert all(key in w for _, key in B.LPD_WORKER_COLS) and all(k in out for k in B.LPD_INT_COLS)
@@ -988,9 +1105,9 @@ def test_warmup_runs_the_decode_path_with_the_stub(files, monkeypatch):
     seen = []
     real = Engine._lpd_entering
 
-    def spy(self, ids, src_ids, kinds=None):
+    def spy(self, ids, src_ids, kinds=None, gains=None):
         seen.append((str(self.prob.path), self.lpd_warm_rows, len(ids)))
-        return real(self, ids, src_ids, kinds)
+        return real(self, ids, src_ids, kinds, gains)
     monkeypatch.setattr(Engine, "_lpd_entering", spy)
     before = _children()
     eng = Engine(prob, cfg_for(), seed=4)
@@ -1082,19 +1199,57 @@ def test_no_gain_filter_keeps_only_polish_copies_that_beat_their_source(files, w
 def test_sources_count_as_offered_only_once_screened_or_solved(files):
     """A source is recorded as offered (never offered again) when the reply screened or solved it — ok, infeasible,
     time limit, other, range fail, cached — but not when the worker's budget left it NOT_SOLVED or the deadline
-    AFTER_DEADLINE: those stay eligible for a later batch."""
+    AFTER_DEADLINE: those stay eligible for a later batch. The funnel counters per kind: cached rows, I rows the range
+    screen looked at (not cached, not NOT_SOLVED) and distinct sources recorded (a source counts once, also when a
+    later reply covers it again)."""
     path, prob = files["gen"]
     eng = _stub_engine(prob)
     codes = [L.OK, L.OK, L.NOT_SOLVED, L.NOT_SOLVED, L.INFEASIBLE, L.TIME_LIMIT, L.OTHER, L.RANGE_FAIL, L.CACHED,
              L.AFTER_DEADLINE]
-    kinds = [L.KIND_F] * 4 + [L.KIND_I] * 6
+    kinds = [L.KIND_F] * 3 + [L.KIND_I] * 7                  # rows 2 (F) and 3 (I) NOT_SOLVED, row 8 (I) cached
     rows = _distinct_rows(5, len(codes)).astype(float)
     eng.lpd_req_info = _req_info(eng, rows, kinds, np.full(len(codes), np.inf))
     eng.lpd_offered = set()
     eng._lpd_result(77, _reply(codes, [0, 1], np.zeros((2, len(prob.conts)))))
     assert eng.lpd_offered == {1000, 1001, 1004, 1005, 1006, 1007, 1008}
     assert eng.c["lpd_solved_F"] == 2 and eng.c["lpd_solved_I"] == 3 and eng.c["lpd_not_solved"] == 2
+    assert (eng.c["lpd_cached_F"], eng.c["lpd_cached_I"]) == (0, 1)
+    assert eng.c["lpd_screened_I"] == 5                      # infeasible, time limit, other, range fail, after deadline
+    assert (eng.c["lpd_srcs_F"], eng.c["lpd_srcs_I"]) == (2, 5)
+    # a second reply: 1000 again (cached), the two NOT_SOLVED sources now solved
+    info = _req_info(eng, rows[[0, 2, 3]], [L.KIND_F, L.KIND_F, L.KIND_I], np.full(3, np.inf))
+    info["ids"] = np.array([1000, 1002, 1003], np.int64)
+    eng.lpd_req_info = info
+    eng._lpd_result(77, _reply([L.CACHED, L.OK, L.INFEASIBLE], [1], np.zeros((1, len(prob.conts)))))
+    assert (eng.c["lpd_srcs_F"], eng.c["lpd_srcs_I"]) == (3, 6) and len(eng.lpd_offered) == 9
+    assert (eng.c["lpd_cached_F"], eng.c["lpd_cached_I"], eng.c["lpd_screened_I"]) == (1, 1, 6)
     eng.finish()
+
+
+def test_gains_count_only_the_copies_that_entered(files):
+    """D-017 M3's gain median is over the decoded copies that ENTERED the population: a polish copy identical to a
+    population member joins the candidate set but is eliminated as a duplicate, so neither `lpd_entered_F` nor
+    `gain_F_entered_n` counts it."""
+    path, prob = files["gen"]
+    eng = Engine(prob, cfg_for(), seed=1, warmup=False, decoder_factory=E._WarmupDecoder)
+    eng.prepare()
+    eng._lpd_tick = lambda cand: None                        # no automatic offers: the test feeds the reply
+    eng.begin(time.monotonic(), 3600.0)
+    for _ in range(3):
+        eng.step()
+    i = int(np.argmin(eng.h_key))
+    x = np.asarray(eng.bk.asnumpy(eng.pop.X[i]), float)
+    ints, cn = np.asarray(prob.ints), np.asarray(prob.conts)
+    key = float(prob.key(x))
+    eng.lpd_req_info = _req_info(eng, x[ints][None, :], [L.KIND_F], [key + 1.0])   # the copy = x, gain > 0
+    eng._lpd_result(77, _reply([L.OK], [0], x[cn][None, :]), site="exchange")
+    assert eng.c["lpd_kept_F"] == 1 and eng._lpd_pending_batches() == 1
+    dup0 = eng.c["duplicates"]
+    eng.step()
+    assert eng.c["lpd_batches"] == 1 and eng._lpd_pending_batches() == 0 and eng.c["duplicates"] > dup0
+    out = eng.finish()
+    assert out["lpd_entered_F"] == 0 and out["lp_decode"]["gain_F_entered_n"] == 0
+    assert out["lp_decode"]["gain_F_entered_median"] is None and out["lpd_dropped"] == 0
 
 
 def test_not_solved_sources_are_offered_again(files):
@@ -1132,9 +1287,12 @@ def test_not_solved_sources_are_offered_again(files):
 
 class _LagStub(E._WarmupDecoder):
     """The warm-up stub, but a reply becomes readable only at the `delays[j]`-th poll() after request j (cycling). The
-    engine does not call poll() while a decoded batch is pending, so a held reply stays "in the pipe"."""
+    engine does not call poll() while a decoded batch is pending, so a held reply stays "in the pipe". With
+    `exchange.poll_s` tiny the engine polls three times per generation (exchange tick, pre-candidate, pick site), so
+    after an offer at a pick site delay 1 is read at the next exchange tick, 2 at the next pre-candidate poll and 3 at
+    the next pick site."""
 
-    delays = (3, 1)
+    delays = (3, 2, 1)
 
     def __init__(self, eng):
         super().__init__(eng)
@@ -1155,16 +1313,27 @@ class _LagStub(E._WarmupDecoder):
         return super().poll()
 
 
-@pytest.mark.parametrize("hold", [True, False], ids=["one_batch", "negative_control"])
-def test_at_most_one_decoded_batch_joins_a_candidate_set(files, monkeypatch, hold):
-    """A reply read at the pick site is pending while the next request is answered before the next candidate set: the
-    exchange and pre-candidate polls then leave that reply in the pipe, so one decoded batch (at most N rows: what
-    plan_memory counts) joins each candidate set. Copies enter one generation after their offer, or two when read at
-    the pick site. The negative control polls without the hold and does see two batches in one set (the test is not
-    vacuous)."""
-    path, prob = files["gen"]
-    eng = Engine(prob, cfg_for(**{"exchange.poll_s": 1e-6}), seed=1, warmup=False, decoder_factory=_LagStub,
-                 lpd_warm_rows=2)                            # 2 rows per batch, every copy kept (no-gain filter off)
+class _LateFirstStub(_LagStub):
+    """The review's case: the first reply arrives during the survival (read at the next pick site), every later one
+    within the generation of its offer."""
+
+    delays = (3,) + (1,) * 199
+
+
+class _PickStub(_LagStub):
+    """Every reply is read at the pick site after the one of its offer."""
+
+    delays = (3,)
+
+
+def _lag_run(prob, factory, monkeypatch, steps, old_pick_site=False, hold=True):
+    """`steps` generations on `prob` with a stub decoder, 2 rows per batch with every copy kept (`lpd_warm_rows`, the
+    no-gain filter off) and an exchange tick every generation; the `lp_decode` events are collected, and per candidate
+    set the decoded batches and rows that joined it. old_pick_site: the pick site as before the skip — a reply read
+    there that kept copies is followed by an offer in the same tick (the batch is hidden from the real `_lpd_tick`,
+    which then reads nothing new and offers). hold=False: every poll reads, also while a decoded batch is pending."""
+    eng = Engine(prob, cfg_for(**{"exchange.poll_s": 1e-6}), seed=1, warmup=False, decoder_factory=factory,
+                 lpd_warm_rows=2)
     eng.prepare()
     events = []
     eng.trace.event = lambda kind, t=None, **d: events.append((kind, d)) if kind == "lp_decode" else None
@@ -1172,6 +1341,18 @@ def test_at_most_one_decoded_batch_joins_a_candidate_set(files, monkeypatch, hol
         real_poll = eng._lpd_poll
         monkeypatch.setattr(eng, "_lpd_poll", lambda timed=True, site="exchange", hold=True:
                             real_poll(timed=timed, site=site, hold=False))
+    if old_pick_site:
+        real_tick = eng._lpd_tick
+
+        def tick(cand):
+            eng._lpd_poll(timed=False, site="pick")
+            held = [b for b in eng.pending if b.src == "lp_decode"]
+            eng.pending = [b for b in eng.pending if b.src != "lp_decode"]
+            try:
+                real_tick(cand)
+            finally:
+                eng.pending = held + eng.pending
+        monkeypatch.setattr(eng, "_lpd_tick", tick)
     per_set = []
     real_with = eng._with_pending
 
@@ -1181,23 +1362,122 @@ def test_at_most_one_decoded_batch_joins_a_candidate_set(files, monkeypatch, hol
         return real_with(cand, meta)
     monkeypatch.setattr(eng, "_with_pending", with_pending)
     eng.begin(time.monotonic(), 3600.0)
-    for _ in range(30):
+    for _ in range(steps):
         eng.step()
-    eng.finish()
+    return eng, events, per_set
+
+
+@pytest.mark.parametrize("guards", [True, False], ids=["one_batch", "negative_control"])
+def test_at_most_one_decoded_batch_joins_a_candidate_set(files, monkeypatch, guards):
+    """Replies read at all three sites (delays 3, 2, 1): one decoded batch (at most N rows: what plan_memory counts)
+    joins each candidate set; copies enter the candidate set of the generation that reads the reply (one generation
+    after the offer), or the next one when the pick site reads it (two), which then offers nothing. The negative
+    control removes both guards — the pick site's skip and the polls' hold — and does see two batches in one set (the
+    test is not vacuous; the skip alone already keeps it to one, the hold is the second guard)."""
+    path, prob = files["gen"]
+    eng, events, per_set = _lag_run(prob, _LagStub, monkeypatch, 30, old_pick_site=not guards, hold=guards)
+    out = eng.finish()
     most = max(n for _, n, _ in per_set)
     res = [d for k, d in events if d.get("what") == "result"]
     assert len(res) >= 10
-    if not hold:
+    if not guards:
         assert most == 2, per_set
         return
     assert most == 1 and max(r for _, _, r in per_set) <= eng.cfg.repair.lp_decode_per_gen, per_set
     entering = {g: r for g, n, r in per_set if n}
     entered = [d for d in res if d["gen_enters"] is not None and d["gen_enters"] <= eng.gen]
     for d in entered:          # this generation's candidate set if read before it, the next one's if at the pick site
-        assert d["gen_enters"] == d["gen"] + (1 if d["site"] == "pick" else 0) > d["gen_offered"], d
+        assert d["gen_enters"] == d["gen"] + (1 if d["site"] == "pick" else 0), d
+        assert d["gen_enters"] - d["gen_offered"] == (2 if d["site"] == "pick" else 1), d
         assert entering[d["gen_enters"]] == d["kept"] == 2
-    assert {d["site"] for d in entered} >= {"pick", "candidates"}
-    assert {d["gen_enters"] - d["gen_offered"] for d in entered} >= {1, 2}
+    assert {d["site"] for d in entered} == {"pick", "candidates", "exchange"}
+    assert out["lpd_skip_pending"] == sum(d["site"] == "pick" for d in res) >= 3 and out["lpd_busy"] == 0
+    assert out["lpd_kept"] == sum(r for _, _, r in per_set) + out["lpd_dropped"]
+
+
+@pytest.mark.parametrize("skip", [True, False], ids=["skip", "negative_control"])
+def test_a_pick_site_read_skips_the_offer_so_copies_return_to_lag_one(files, monkeypatch, skip):
+    """The review's trap (delays 3, 1, 1, ...): the first reply is read at a pick site. That site offers nothing
+    (`lpd_skip_pending`), so every later reply is read at the next exchange tick and its copies join the candidate
+    set one generation after their offer. Negative control — the pick site offering in the same tick, as before the
+    fix: the polls hold every later reply while the previous batch is pending, so all of them are read at a pick
+    site, two generations after their offer."""
+    path, prob = files["gen"]
+    eng, events, per_set = _lag_run(prob, _LateFirstStub, monkeypatch, 25, old_pick_site=not skip)
+    out = eng.finish()
+    res = [d for k, d in events if d.get("what") == "result"]
+    first, later = res[0], [d for d in res[1:] if d["site"] != "finish"]
+    assert len(later) >= 8 and first["req"] == 1 and first["site"] == "pick"
+    assert first["gen_enters"] - first["gen_offered"] == 2
+    assert max(n for _, n, _ in per_set) == 1 and out["lpd_busy"] == 0
+    if not skip:
+        assert all(d["site"] == "pick" and d["gen_enters"] - d["gen_offered"] == 2 for d in later), later
+        assert out["lpd_skip_pending"] == 0
+        return
+    assert all(d["site"] in ("exchange", "candidates") and d["gen_enters"] - d["gen_offered"] == 1 for d in later), \
+        [(d["req"], d["site"], d["gen_offered"], d["gen_enters"]) for d in later]
+    assert out["lpd_skip_pending"] == 1
+    assert {(d["gen"], d["gen_offered"]) for d in later} == {(d["gen_offered"] + 1, d["gen_offered"]) for d in later}
+
+
+@pytest.mark.parametrize("stub, site", [(E._WarmupDecoder, "exchange"), (_PickStub, "pick")])
+def test_a_batch_left_pending_by_an_aborted_generation_is_recorded_dropped(files, monkeypatch, stub, site):
+    """A decoded batch read at the exchange tick of a generation that is then cut short during the repair (or read
+    at the pick site before it) never joins a candidate set, although its result event's `gen_enters` names that
+    generation: finish counts its rows in `lpd_dropped` and names it by an `lp_decode` event "dropped" with its req,
+    so a reader can exclude it (lpd_kept = rows that joined a candidate set + lpd_dropped)."""
+    path, prob = files["gen"]
+    eng, events, per_set = _lag_run(prob, stub, monkeypatch, 0)
+    real_repair, arm = eng._repair, {"on": False}
+
+    def repair(*a, **kw):
+        moved = real_repair(*a, **kw)
+        if arm["on"]:
+            eng.request_stop("stop")
+        return moved
+    monkeypatch.setattr(eng, "_repair", repair)
+    for _ in range(6):
+        eng.step()
+    if site == "pick":                                       # step until a pick-site read leaves a batch pending
+        for _ in range(6):
+            if eng._lpd_pending_batches():
+                break
+            eng.step()
+        assert eng._lpd_pending_batches() == 1
+    arm["on"] = True
+    eng.step()                                               # its repair ends in a stop: the generation is dropped
+    out = eng.finish()
+    res = [d for k, d in events if d.get("what") == "result"]
+    dropped = [d for k, d in events if d.get("what") == "dropped"]
+    last = res[-1]
+    assert out["aborted_generations"] == 1 and out["exit_reason"] == "stop"
+    assert last["site"] == site and last["gen_enters"] == out["generations"] and last["kept"] == 2, last
+    assert [(d["req"], d["site"], d["gen_enters"], d["rows"]) for d in dropped] == \
+        [(last["req"], site, out["generations"], 2)]
+    assert out["lpd_dropped"] == 2 and out["generations"] not in {g for g, n, _ in per_set if n}
+    assert out["lpd_kept"] == sum(r for _, _, r in per_set) + out["lpd_dropped"]
+
+
+def test_device_sync_is_timed_apart_from_host_seconds(files, monkeypatch):
+    """D-017 M1: the device wait before the row copies is `lpd_sync_s`, not `lpd_host_s`. With a 50 ms
+    `bk.synchronize` (on NumPy it does nothing): it is called once per offer, `lpd_sync_s` is about 50 ms per offer,
+    and no host call reaches 50 ms."""
+    SLEEP = 0.05
+    path, prob = files["gen"]
+    eng, events, per_set = _lag_run(prob, E._WarmupDecoder, monkeypatch, 0)
+    calls = []
+
+    def slow_sync():
+        calls.append(eng.gen)
+        time.sleep(SLEEP)
+    monkeypatch.setattr(eng.bk, "synchronize", slow_sync)
+    for _ in range(10):
+        eng.step()
+    out = eng.finish()
+    n = out["lpd_offers"]
+    assert n >= 8 and len(calls) == n, (n, calls)
+    assert SLEEP * n <= eng.lpd_sync_s <= SLEEP * n + 0.5 and eng.lpd_sync_s_max >= SLEEP
+    assert eng.lpd_host_s_max < SLEEP and out["lp_decode"]["host_s_max"] < SLEEP
 
 
 # ======================================================================================================= runner
@@ -1225,7 +1505,8 @@ def test_build_runs_lp_decode_columns(tmp_path):
     p, mps = toy_problem(tmp_path)
     raw = tmp_path / "raw"
     blk = dict(state="idle", host_s=0.5, host_s_max=0.01, sync_s=0.02, sync_s_max=0.004, ready_t=1.2,
-               ready_t_worker=0.9, wait_s_total=0.3, wait_s_max=0.1, batch_rows_max=4,
+               ready_t_worker=0.9, wait_s_total=0.3, wait_s_max=0.1, batch_rows_max=4, gain_F_entered_median=0.02,
+               gain_F_entered_n=3, gain_I_entered_median=-0.25, gain_I_entered_n=2,
                ipc=dict(offers=9, offer_s_total=0.05, offer_s_max=0.012, offer_bytes_max=2342400, reads=8,
                         read_s_total=0.03, read_s_max=0.006, read_bytes_max=5098000),
                worker=dict(priming_s=0.3, priming_first_s=0.25, priming_first_status="Optimal", priming_solves=1,
@@ -1256,6 +1537,8 @@ def test_build_runs_lp_decode_columns(tmp_path):
     assert r.loc[1001, "lpd_state"] == "inert" and r.loc[1001, "lpd_offers"] == -1
     assert r.loc[1002, "lpd_state"] == "" and r.loc[1002, "lpd_offers"] == -1 and math.isnan(r.loc[1002, "lpd_host_s"])
     assert r.loc[1002, "lpd_priming_first_status"] == "" and r.loc[1002, "lpd_warm_solves"] == -1
+    assert r.loc[1002, "lpd_gain_F_entered_n"] == -1 and math.isnan(r.loc[1002, "lpd_gain_F_entered_median"])
+    assert str(df["lpd_gain_F_entered_n"].dtype).startswith("int") and df["lpd_skip_pending"].notna().all()
     assert set(B.RUN_COLUMNS) >= {c for c, _ in B.LPD_BLOCK_COLS + B.LPD_IPC_COLS + B.LPD_WORKER_COLS}
 
 
