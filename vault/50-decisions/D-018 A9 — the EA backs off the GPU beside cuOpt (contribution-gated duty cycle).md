@@ -53,3 +53,22 @@ unchanged; review workflow running. Builder's note recorded here before stage 0:
 stretch as defined in rule (b) is already **1.136 over 55 shared values at full duty** (53 of the 55 in the first 7 s), i.e.
 under the 1.15 limit — so rule (b)'s sing44 limb may not bind and the floor will rest mostly on comp21's limb. The rule
 stays as written (no change after seeing data); the report will say which limb decided the floor.
+
+## Amendment before stage 0 (2026-10-09 13:5x) — after the adversarial review of the build (5 lenses, 2 refuters)
+**Correction to the build note above:** the "1.136" was the same-day A9/A2 ratio, not rule (b)'s A9/A6 statistic,
+which is **1.334** on the pilot (n = 55). Both readings show the real problem the review found: 53 of the 55 shared
+values lie in cuOpt's first 5 s (t_A6 2.3–5.1 s), where the full-duty EA adds only 1.12–1.16 over A2, while the A6
+reference has no SCIP beside cuOpt (A2/A6 = 1.186, day drift included). The median therefore responds to the duty by
+only ~5 % across ½ / ¼ / ⅛, against a threshold (1.15) calibrated on the fair-share model 1.33 / 1.14 / 1.07 that holds
+for the late window (A9/A6 = 1.98 at ~49 s vs A2/A6 = 1.04). As written the limb passes or fails at every duty
+depending on the baseline, not on the duty.
+**Rule (b), sing44 limb, redefined (no data from stage 0 seen):** add one same-day **sing44 × A2** run (SCIP ‖ cuOpt,
+no EA = zero EA duty, seed 2) to stage 0 (18 runs). Let v* = the best cuOpt objective A2 reaches by 60 s. For each EA arm,
+S_late = t_arm(v*) / t_A2(v*), where t is the first time cuOpt (inside the arm) reaches an objective ≤ v*; if the arm
+never reaches v* within 120 s, S_late = 120 / t_A2(v*) and the limb fails. The limb passes at d if S_late ≤ 1.15 (the
+fair-share model predicts 1.33 / 1.14 / 1.07). The comp21 limb is unchanged. If A2 has no cuOpt incumbent by 60 s, the
+sing44 limb is "n/a" and the floor rests on comp21 (stated in the report).
+**Other review-driven clarifications (code fixes, not rule changes):** forced mode does not forgive the duty debt on a
+wake (the stage-0 dose stays fixed); a stage-0 verdict distinguishes INVALID (sanity failed) from STOP (no duty
+protects cuOpt); cuOpt "first incumbent" times censored at the budget count as missing/∞, never as 120 s; shadow mode
+logs ladder steps that fall due before a lead resets them, dated at their due time.
