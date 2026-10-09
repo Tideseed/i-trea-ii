@@ -521,3 +521,34 @@ instances inside their band. Reading:
 - glass4: all three arms are within its 0.37 band; the control's seed 0 (0.113) was its luckiest seed so far.
 **Next:** seeds 2–3 on the in-band instances for cl1 AND tp1 (tp1 was not a pre-registered candidate for adoption; if it
 holds up, it becomes its own decision); look at item_placement's repair time per generation under clearing.
+
+## Rank 1 as a distinct elite — D-016 final (seeds 0–3; seeds 2–3 run 2026-10-09 12:40–14:38) — NOT ADOPTED
+Pool 20261009-124048 (`jobs/dev-cl1b.jsonl`, commit 221ad82 code = 6ae6a6f): 48/48, 0 void, 0 `compiled_on_clock`;
+together with 10-08: 102 runs (rail01 seeds 0–1 only, inert). `tools/d016_report.py` on seeds 0–3:
+
+| instance | P rc1d | P cl1 | P tp1 | d cl1 vs rc1d (band) | d tp1 vs rc1d | gens rc1d / cl1 / tp1 |
+|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 0.299 | 0.293 | 0.299 | +0.019 (0.10) | −0.000 | 21 / 20.8 / 21.3 |
+| fhnw-binpack4-48 | 1.000 | **0.826** | 1.000 | **+0.174** (0.02) | 0 | 35.5 / 29.5 / 35.5 |
+| glass4 | 0.215 | 0.243 | 0.233 | −0.112 (0.37) | −0.075 | 31.8 / 28 / 28.5 |
+| item_placement_9903 | 0.357 | 0.503 | 0.341 | −0.292 (0.68) | +0.044 | 1931 / 1565 / 1893 |
+| neos-3024952-loue | 0.381 | 0.340 | 0.323 | +0.108 (0.13) | **+0.153** | 71 / 191 / 242 |
+| neos-960392 | 0.032 | 0.034 | 0.032 | **−0.050** (0.04) | −0.015 | 21 / 27 / 21.5 |
+| radiationm18-12-05 | 0.226 | 0.225 | 0.224 | +0.007 (0.46) | +0.012 | 286 / 280 / 264 |
+| rail01 | 1.000 | 1.000 | 1.000 | 0 (0.02) | 0 | 675.5 / 675 / 675.5 |
+| sing44 | 0.327 | 0.387 | 0.372 | **−0.155** (0.11) | **−0.120** | 71 / 77 / 65 |
+
+| comparison | better / worse (of 9) | mean d [95 % CI] | Wilcoxon p |
+|---|---|---|---|
+| cl1 vs rc1d | 4 / 4 | −0.033 [−0.122, +0.050] | 0.64 |
+| tp1 vs rc1d | 3 / 4 | −0.000 [−0.044, +0.049] | 0.94 |
+| cl1 vs tp1 | 2 / 6 | −0.033 [−0.120, +0.039] | 0.25 |
+
+Mechanism still HOLDS (Rank 1 26 vs 5, banded spread 0.0266 vs 0.0010, clearing active on all 7). **Reading:** a
+diverse elite does not lower P here. Seeds 2–3 reversed the seed 0–1 signs of the size-only arm on sing44 (+0.238 →
+seed-mean −0.120) — the two-seed effects were noise; sing44 and neos-960392 are now worse than their bands under
+clearing (seed means; no instance worse on every seed, so the letter of the rule says "inconclusive", but the mean is
+≤ 0 with an interval centred below zero after the pre-stated extra seeds). fhnw's gain is one seed of four (the EA found
+its own feasible point once). item_placement pays for diversity in repair (−19 % generations, −0.29). **Decision: not
+adopted; the development default stays A3@rc1.** Clearing and tp1 remain available as options (`ranks.rank1_mode`,
+`ranks.elite_basis`). A natural follow-up is clearing with a much smaller k only where repair is cheap — not queued.

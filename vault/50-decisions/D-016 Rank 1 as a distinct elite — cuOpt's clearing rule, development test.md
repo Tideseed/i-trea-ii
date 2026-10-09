@@ -1,6 +1,6 @@
 # D-016 Rank 1 as a distinct elite — cuOpt's clearing rule, development test (2026-10-08, AgentRA on Berk's word)
 
-**Status:** built 2026-10-08; first test INCONCLUSIVE (mechanism holds; seeds 2–3 owed) — see Result. Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
+**Status:** NOT ADOPTED (2026-10-09, after seeds 0–3: mechanism holds, mean d −0.033 [−0.122, +0.050]) — see Final. Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
 get to work" on [[2026-10-08 cuOpt population and diversity — what transfers]]; open to a superseding decision on
 evidence. Issue #25. Development only (D-010) — never a confirmatory configuration without prereg-v2.
 
@@ -88,3 +88,10 @@ sing44 (48 runs). rail01 is left out (inert: the EA never holds a feasible point
 outside its band (+0.347, one seed) and is included as a replication. The verdict is then read on seeds 0–3 together with
 the same rules (mean d over the 9 with rail01's d = 0; bands as above). tp1 is reported with the same statistics; it is a
 candidate only through its own decision record.
+
+## Final (2026-10-09 14:5x) — NOT ADOPTED
+Seeds 0–3 (102 runs, 0 void, no compile on the clock): cl1 vs rc1d mean d −0.033 [−0.122, +0.050], 4 better / 4 worse;
+seed-mean d beyond the band on sing44 (−0.155) and neos-960392 (−0.050), on no instance on every seed. By the letter of
+the rule that is "inconclusive" again; the extra seeds the rule asked for are spent and the interval is centred below 0,
+so the decision is **not to adopt** (the default stays rc1). tp1 (size only): −0.000 [−0.044, +0.049] — its seed 0–1
+gains on sing44 / loue did not hold on sing44 (seed-mean −0.120 at seeds 0–3). Details: Development log, "D-016 final".
