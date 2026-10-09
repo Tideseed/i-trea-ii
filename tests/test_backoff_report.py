@@ -311,8 +311,18 @@ def test_stage0_steps_sanity_and_missing_runs(tmp_path):
     s = json.loads(p.read_text())
     s["backoff"]["ls_steps"] = 120_000.0                           # duty 1/2 but the work of full duty
     p.write_text(json.dumps(s))
-    res = BR.stage0(runs, inc, "backoff0", root=tmp_path)
+    res = BR.stage0(runs, inc, "backoff0", root=tmp_path, steps_gate=True)       # the rule as first written
     assert not res["sanity"][f"A9@bof50 {BR.SING44}"]["steps_ok"] and 0.5 in res["rules"]["b"]["not_counted"]
+    res = BR.stage0(runs, inc, "backoff0", root=tmp_path)                         # D-018 deviation: duty gates, steps reported
+    sn = res["sanity"][f"A9@bof50 {BR.SING44}"]
+    assert not sn["steps_ok"] and sn["ok"] and 0.5 not in res["rules"]["b"]["not_counted"]
+    i2 = runs.index[(runs["arm"] == "A9@bof25") & (runs["instance"] == BR.SING44)][0]
+    p2 = Path(runs.loc[i2, "run_dir"]) / "ea.summary.json"
+    s2 = json.loads(p2.read_text())
+    s2["backoff"]["busy_share"] = 0.40                              # the duty limb still gates
+    p2.write_text(json.dumps(s2))
+    res = BR.stage0(runs, inc, "backoff0", root=tmp_path)
+    assert not res["sanity"][f"A9@bof25 {BR.SING44}"]["duty_ok"] and 0.25 in res["rules"]["b"]["not_counted"]
     res2 = BR.stage0(runs[runs["instance"] != BR.GLASS4], inc, "backoff0", root=tmp_path)
     assert res2["verdict"].startswith("INCOMPLETE") and (BR.GLASS4, BR.BO0) in res2["missing"]
 

@@ -88,6 +88,11 @@ STAGE1_SEEDS = (0, 1)
 S_FIRST_MAX, S_SING_MAX, P_COMP_SLACK = 2.0, 1.15, 0.02
 V_STAR_S = 60.0                           # rule (b): v* = A2's best cuOpt objective by this time
 DUTY_TOL, STEPS_LO, STEPS_HI = 0.03, 0.75, 1.5
+# D-018 deviation (2026-10-09, after stage 0's first 13 runs, stated in the record): the lane-steps limb of the sanity
+# rule assumed EA work proportional to the duty; contention refutes it in both directions (sing44: MORE steps per busy
+# second at low duty — less contention from cuOpt; chromaticindex: fewer — launches restart short). The duty limb gates
+# whether a forced run counts; the steps ratio is reported. `steps_gate=True` reproduces the rule as first written.
+STEPS_GATE = False
 MIN_SHARED, MIN_T_REF = 5, 1.0
 # stage-1 thresholds
 T_D, T_P = 0.30, 0.30
@@ -376,7 +381,7 @@ def _clamp(x, lo, hi):
 
 # ================================================================================================= stage 0
 def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff0", root: Path = ROOT,
-           seed: int = STAGE0_SEED) -> dict:
+           seed: int = STAGE0_SEED, steps_gate: bool = STEPS_GATE) -> dict:
     """The stage-0 rules (module docstring). Returns {readouts, sanity, rules, bo1, verdict, notes}."""
     R = load(runs, set_name, root)
     notes: list[str] = []
@@ -454,8 +459,8 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
             ratio = sps / sps0 if _fin(sps) and sps0 > 0 else math.nan
             ok_d = _fin(duty) and abs(duty - d) <= DUTY_TOL
             ok_s = _fin(ratio) and STEPS_LO * d <= ratio <= STEPS_HI * d
-            sanity[(arm, i)] = dict(ok=bool(ok_d and ok_s), duty=duty, steps_ratio=ratio, duty_ok=bool(ok_d),
-                                    steps_ok=bool(ok_s))
+            sanity[(arm, i)] = dict(ok=bool(ok_d and (ok_s or not steps_gate)), duty=duty, steps_ratio=ratio,
+                                    duty_ok=bool(ok_d), steps_ok=bool(ok_s), steps_gate=bool(steps_gate))
 
     def counts(arm, inst) -> bool:
         return bool(sanity.get((arm, inst), {}).get("ok"))
@@ -1153,6 +1158,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--incumbents", default=str(DATASETS / "incumbents_checked.parquet"))
     ap.add_argument("--root", default=str(ROOT), help="root of the run_dir paths in the run table")
     ap.add_argument("--json", default=None, help="also write the result as JSON here")
+    ap.add_argument("--steps-gate", action="store_true",
+                    help="stage 0: let the lane-steps limb gate the sanity check (the rule as first written, before "
+                         "the D-018 deviation of 2026-10-09)")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -1163,7 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
     runs = pd.read_parquet(a.runs)
     inc = pd.read_parquet(a.incumbents) if Path(a.incumbents).exists() else None
     if a.stage == 0:
-        res = stage0(runs, inc, a.set_ or "backoff0", Path(a.root))
+        res = stage0(runs, inc, a.set_ or "backoff0", Path(a.root), steps_gate=a.steps_gate)
         print_stage0(res)
     else:
         res = stage1(runs, inc, a.set_ or "backoff1", Path(a.root), stage0_set=a.stage0_set)
