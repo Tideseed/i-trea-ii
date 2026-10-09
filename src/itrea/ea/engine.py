@@ -898,6 +898,7 @@ class Engine:
             self.h_key, self.h_viol, self.h_feas = self.h_key[:keep], self.h_viol[:keep], self.h_feas[:keep]
         self._after_survival()
         self._warm_elite()
+        self._warm_operators()
         if not one:
             return
         fr = self.frontier
@@ -935,6 +936,39 @@ class Engine:
             for block, budget in ((1, 1), (2, 1), (r, 1 << 30)):
                 clearing_pick(bk, X, np.arange(r), ints, 1 << 30, r, block=block, budget=budget)
         self.c["warm_elite"] = self.c.get("warm_elite", 0) + 1
+
+    def _warm_operators(self) -> None:
+        """Warm-up only: run EVERY crossover operator and every mutation operator on batches of one, two and three
+        children with this run's gene dtype. The two warm-up passes draw operators at random, so an operator's
+        one-child form (CuPy collapses size-1 axes into a lower-dimensional kernel) was warmed only by chance: on
+        2026-10-09 the block crossover's one-child chunk (`ascontiguousarray(D.T, float32)` → a 1-D bool→float32 copy)
+        compiled after t0 in an lp_decode GPU test, where a smaller operator budget split the block children into chunks
+        with a one-child tail. Parent B differs from A in every gene so that every data-dependent branch runs."""
+        from itrea.ea import crossover as _xo
+        from itrea.ea import mutation as _mu
+        bk, n = self.bk, self.pop.size
+        if n < 1:
+            return
+        xp = bk.xp
+        budget = self.budgets["operators"]
+        for k in (1, 2, 3):
+            A = xp.concatenate([self.pop.X[:1]] * k)
+            B = (A + 1).astype(A.dtype)
+            for name in _xo.OPERATORS:
+                if name == "none" or not _xo._applicable(name, self.dp):
+                    continue
+                xcfg = dataclasses.replace(self.cfg.crossover, pc=1.0, weights={name: 1.0})
+                crossover(bk, self.dp, A, B, xcfg, self.rng_dev, self.rng_host, mem_budget_bytes=budget)
+            for name in _mu.OPERATORS:
+                if name == "violation_guided":                   # forced on a violated point (_warm_violation_guided)
+                    continue
+                if name == "toward_lp" and self.lp_x is None:
+                    continue
+                mcfg = dataclasses.replace(self.cfg.mutation, weights={name: 1.0})
+                mutate(bk, self.dp, A.copy(), mcfg, self.rng_dev, self.rng_host, lp_x=self.lp_x,
+                       mem_budget_bytes=budget)
+        bk.synchronize()
+        self.c["warm_operators"] = self.c.get("warm_operators", 0) + 1
 
     def _warm_violation_guided(self) -> int:
         """Warm-up only. violation_guided draws "the r-th violated row of a child" with cumsum / searchsorted / take
