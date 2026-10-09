@@ -81,3 +81,10 @@ feasible instances. Outcome: cl1 vs rc1d mean d −0.013 [−0.141, +0.109], 4 b
 band → **inconclusive**: seeds 2–3 on the in-band instances. Not adopted; the development default stays rc1. The
 size-only control tp1 (+0.003 overall) was better than the control beyond the band on sing44 (+0.238) and loue (+0.178);
 clearing cost item_placement 31 % of its generations and 0.18–0.22 in P (inside its 0.68 band).
+
+## Seeds 2–3 (2026-10-09, written before the runs)
+`jobs/dev-cl1b.jsonl`: rc1d / cl1 / tp1 × seeds 2–3 on ca, fhnw, glass4, item_placement, loue, neos-960392, radiationm,
+sing44 (48 runs). rail01 is left out (inert: the EA never holds a feasible point there; P = 1.0 in all six runs). fhnw is
+outside its band (+0.347, one seed) and is included as a replication. The verdict is then read on seeds 0–3 together with
+the same rules (mean d over the 9 with rail01's d = 0; bands as above). tp1 is reported with the same statistics; it is a
+candidate only through its own decision record.
