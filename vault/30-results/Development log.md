@@ -552,3 +552,25 @@ clearing (seed means; no instance worse on every seed, so the letter of the rule
 its own feasible point once). item_placement pays for diversity in repair (−19 % generations, −0.29). **Decision: not
 adopted; the development default stays A3@rc1.** Clearing and tp1 remain available as options (`ranks.rank1_mode`,
 `ranks.elite_basis`). A natural follow-up is clearing with a much smaller k only where repair is cheap — not queued.
+
+## LP decode — D-017 result (2026-10-09 14:49–16:07) — A3@rc1e vs A3@ld1 × 6 instances × seeds 0–1 — ADOPTED
+[[D-017 LP decode — re-optimise the continuous variables of selected candidates]], issue #27. Pool 20261009-144950,
+main 87bc759; 24/24, 0 void, 0 `compiled_on_clock`; both LLM servers stopped. `tools/d017_report.py`.
+
+| instance | P rc1e | P ld1 | d (band) | gens rc1e / ld1 | decoded copies entered F / I | decoded incumbents F / I | median gain of entered F copies |
+|---|---|---|---|---|---|---|---|
+| ca__Scenario400_reserves_1 | 0.298 | 0.296 | +0.005 (0.10) | 21 / 21 | 19 / 3 | 3 / 0 | 0.9–1.0 % |
+| fhnw-binpack4-48 | 1.000 | 0.652 | +0.348 (0.02) — not lp_decode's | 35 / 22 | 0 / 0 | 0 / 0 | — |
+| glass4 | 0.219 | 0.230 | −0.047 (0.37) | 26 / 30 | 30 / 87 | 12 / 3 | 1.1–1.7 % |
+| item_placement_9903 | 0.311 | **0.118** | **+0.619** (0.68) | 1,834 / 1,096 | 253 / 5,214 | 62 / 28 | 7.6–12.4 % |
+| radiationm18-12-05 | 0.235 | 0.230 | +0.020 (0.46) | 292 / 288 | 0 / 0 | 0 / 0 | — |
+| sing44 | 0.377 | **0.238** | **+0.369** (0.11) | 104 / 71 | 12 / 1 | 10 / 0 | 2.2–4.8 % |
+
+Mean d **+0.219 [+0.041, +0.429]**, 5 better / 1 worse (Wilcoxon p 0.16); without fhnw +0.193; 9-instance mean (inert
+three at 0) +0.146. Mechanism: M0, M2, M3 hold; M4 (completion) works on item_placement (5,215 LP-feasible completions
+of 5,439 screened rows) and glass4, never on radiationm (0 / 6,879) or fhnw; **M1 fails by the letter on
+item_placement** (decoder host time 1.39 / 1.63 % of wall vs ≤ 1 %; per call ≤ 20.5 ms everywhere). Reading: polishing
+the continuous part of feasible solutions and completing super-optimal infeasible ones with an LP is the largest single
+gain of the development so far — item_placement drops from 0.31 to 0.12 although the EA runs 40 % fewer generations, and
+sing44's EA finds 10 incumbents through decoded copies. fhnw's gain is a trajectory change (the decoder kept nothing
+there). **Adopted as the A3 development default** with the M1 deviation stated (a cost to the arm): `configs/itrea2-dev-rc-ld.yaml`.
