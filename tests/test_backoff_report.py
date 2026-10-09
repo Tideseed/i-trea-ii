@@ -344,7 +344,7 @@ def _rclock(n=3, paused=0.5):
 def stage1_world(tmp_path, *, p_bo1=None, p_bo0=None, ca_escalates=False, ca_phase_y=0.4, glass4_noise=False,
                  leads_bo1=None, bo1_util=None, flat=(), bo0_events=None, bo1_events=None, bo1_summary=None,
                  bo1_row=None, yield_level=2, censored=()):
-    """14 instances x {A6, A9@bo0, A9@bo1} x seeds 0-1 where every criterion holds unless changed: `p_bo0` = {instance:
+    """14 instances x {A6, A9@bo1s (control), A9@bo1} x seeds 0-1 where every criterion holds unless changed: `p_bo0` = {instance:
     (seed 0, seed 1)} (A6 follows it), `leads_bo1` = {instance: bo1's lead times}, `bo1_util` = {instance: bo1's GPU
     utilisation}, `flat` = M4 instances where bo1 works like the control (no step down), `bo0_events` / `bo1_events`
     = {instance: extra EA events}, `bo1_summary` / `bo1_row` = {instance: extra EA-summary / run-table fields of bo1},
@@ -374,9 +374,9 @@ def stage1_world(tmp_path, *, p_bo1=None, p_bo0=None, ca_escalates=False, ca_pha
             b0 = bo_block(first_lead=leads[0] if leads else None, exit_t=0.4)
             esc0 = [dict(t=0.0, kind="backoff", phase="Y", level=2, reason="start"),
                     dict(t=0.4, kind="backoff", phase="P", level=0, reason="y_peek")] + list(bo0_events.get(i, []))
-            rows.append(make_run(tmp_path, S, i, BR.BO0, s, p0, cuopt_t_first=60.0 if i == BR.CHROMATIC else 0.3,
+            rows.append(make_run(tmp_path, S, i, BR.CTRL1, s, p0, cuopt_t_first=60.0 if i == BR.CHROMATIC else 0.3,
                                  cuopt_events=send, bo=b0, ea_events=esc0 + contrib + ctrl_gen, gpu_util=95.0,
-                                 best_obj=10.0, censored=(i, BR.BO0, s) in censored))
+                                 best_obj=10.0, censored=(i, BR.CTRL1, s) in censored))
             m4 = i in BR.M4_SET and i not in flat
             gen1 = _gen_events(30.0, 45.0, 300.0) if m4 else ctrl_gen
             yl = ca_phase_y if i == BR.CA else (0.4 if not (glass4_noise and i == BR.GLASS4) else 0.4)

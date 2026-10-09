@@ -1,0 +1,28 @@
+# I-TREA II -- A9 GPU back-off (D-018), stage-1 arm `bo1s`: the governor in SHADOW mode with the stage-0 values
+# (`itrea backoff-report --stage 0`, 2026-10-09 19:2x, set backoff0 seed 2, with D-018's two stated deviations):
+# D_Y = 1/2 (yield_level 1: chromaticindex cuOpt first incumbent 1.03x alone at duty 1/2), floor 1/8 (levels 3; rule (b)
+# SHORTFALL — comp21's cuOpt-inside P exceeds A6 + 0.02 at every duty), yield_until_s 30, patience_search_s 40 (ca),
+# patience_own_s 40 (sing44 / glass4). The stage-1 CONTROL: shadow = bookkeeping only (genealogy of the run without the
+# governor); it carries bo1's values so that its would-be timeline (M6) is bo1's.
+# Base = configs/itrea2-dev-rc-3way.yaml verbatim; `exchange.from_cuopt` is added by the runner for A9. Development only.
+name: itrea2-dev-rc-3way-bo1s
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: active
+backoff:
+  enabled: true
+  mode: shadow
+  yield_level: 1
+  levels: 3
+  yield_until_s: 30.0
+  patience_search_s: 40.0
+  patience_own_s: 40.0

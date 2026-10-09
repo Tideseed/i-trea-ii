@@ -69,6 +69,7 @@ from itrea.trace import read_events
 
 # ----------------------------------------------------------------------------------------------- the design's names
 A6, A2, BO0, BO1 = "A6", "A2", "A9@bo0", "A9@bo1"
+CTRL1 = "A9@bo1s"                         # stage-1 control: bo1's values in shadow mode (2026-10-09; its would-be timeline is bo1's)
 FORCED = {"A9@bof50": 0.5, "A9@bof25": 0.25, "A9@bof12": 0.125}
 DUTIES = (0.5, 0.25, 0.125)
 STAGE0_SEED = 2
@@ -637,7 +638,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     """The stage-1 criteria (module docstring). Returns {mechanism, outcome, classification, reports, verdict}."""
     R = load(runs, set_name, root)
     notes: list[str] = []
-    missing = [(i, a, s) for i in STAGE1 for a in (BO0, BO1, A6) for s in STAGE1_SEEDS if (i, a, s) not in R]
+    missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BO1, A6) for s in STAGE1_SEEDS if (i, a, s) not in R]
     d_min = None
     for (i, a, s), r in R.items():
         if a == BO1 and r.bo:
@@ -646,10 +647,10 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     # ------------------------------------------------------------------------ effects
     eff = {}
     for i in STAGE1:
-        d, pa, pc = _d(R, i, BO1, BO0)
-        d0a6, _, _ = _d(R, i, BO0, A6)
+        d, pa, pc = _d(R, i, BO1, CTRL1)
+        d0a6, _, _ = _d(R, i, CTRL1, A6)
         d1a6, _, _ = _d(R, i, BO1, A6)
-        p0 = _pmeans(R, i, BO0)
+        p0 = _pmeans(R, i, CTRL1)
         eff[i] = dict(d=d, p_bo1=pa, p_bo0=pc, dP=pc - pa if _fin(pa) and _fin(pc) else math.nan, band=_band(R, i),
                       d_bo0_vs_A6=d0a6, d_bo1_vs_A6=d1a6,
                       bo0_spread=abs(p0[0] - p0[1]) if 0 in p0 and 1 in p0 else math.nan)
@@ -691,7 +692,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     m3 = []
     for i in M3_SET:
         for s in STAGE1_SEEDS:
-            r, c = R.get((i, BO1, s)), R.get((i, BO0, s))
+            r, c = R.get((i, BO1, s)), R.get((i, CTRL1, s))
             if r is None or c is None:
                 m3.append(dict(instance=i, seed=s, ok=False, why="missing run"))
                 continue
@@ -717,7 +718,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     for i in M4_SET:
         u1, u0 = [], []
         for s in STAGE1_SEEDS:
-            r, c = R.get((i, BO1, s)), R.get((i, BO0, s))
+            r, c = R.get((i, BO1, s)), R.get((i, CTRL1, s))
             if r is None or c is None:
                 continue
             if any(t > M4_LATE for t in c.leads()):
@@ -742,9 +743,9 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     # M5
     m5 = dict(accounting=[], o_s=[], cap_hits=[], overrun=[], checked=[], gpu=[])
     for (i, a, s), r in sorted(R.items()):
-        if a not in (BO0, BO1, A6):
+        if a not in (CTRL1, BO1, A6):
             continue
-        if a in (BO0, BO1):
+        if a in (CTRL1, BO1):
             if int(r.get("n_inc_unchecked", 0)) > 0 or int(r.get("n_inc_failed", 0)) > 0:
                 m5["checked"].append(dict(instance=i, arm=a, seed=s, unchecked=r.get("n_inc_unchecked"),
                                           failed=r.get("n_inc_failed")))
@@ -761,7 +762,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
             cf = sum(_f(c.get("s")) for c in (e.get("calls") or []) if c.get("cf"))
             if _fin(g) and g - cf < -1e-3:
                 m5["o_s"].append(dict(instance=i, seed=s, gen=e.get("gen"), o_raw=g - cf))
-        c = R.get((i, BO0, s))
+        c = R.get((i, CTRL1, s))
         if c is not None:
             def per_call(v):
                 sm = v.summary()
@@ -783,7 +784,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     m6 = []
     for i in GUARDS:
         for s in STAGE1_SEEDS:
-            c = R.get((i, BO0, s))
+            c = R.get((i, CTRL1, s))
             if c is None:
                 continue
             te, be = c.first_escalation()
@@ -896,7 +897,7 @@ def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None, root: Path = ROOT
     only if stage 0 showed S_first <= 3 at that duty (duty 1 = stage 0's bo0, the shadow run); otherwise
     unclassified."""
     rs = [R.get((CA, BO1, s)) for s in STAGE1_SEEDS]
-    cs = [R.get((CA, BO0, s)) for s in STAGE1_SEEDS]
+    cs = [R.get((CA, CTRL1, s)) for s in STAGE1_SEEDS]
     if any(_esc_before_lead(r) for r in rs):
         lags = [c.first_lead() - c.first_post() for c in cs if c is not None and _fin(c.first_lead())
                 and _fin(c.first_post())]
@@ -933,7 +934,7 @@ def floor_seconds(R, inc, inst: str) -> dict:
     final best (any process of the run)."""
     out = {}
     for s in STAGE1_SEEDS:
-        for a in (BO0, BO1, A6):
+        for a in (CTRL1, BO1, A6):
             r = R.get((inst, a, s))
             if r is None:
                 continue
@@ -972,7 +973,7 @@ def d013_report(R, runs: pd.DataFrame, insts) -> dict:
                 pb[i] = float(np.mean(list(p.values())))
         weak = [i for i, v in pb.items() if v >= 0.5]
         res = dict(weak_set=weak, n_with_baseline=len(pb))
-        for arm in (BO0, BO1):
+        for arm in (CTRL1, BO1):
             pa = {i: float(np.mean(list(_pmeans(R, i, arm).values()))) for i in pb if _pmeans(R, i, arm)}
             ds = {i: effect_d(pb[i], pa[i]) for i in pa}
             w = [i for i in weak if i in pa]
@@ -990,7 +991,7 @@ def relay_latency(R) -> dict:
     """Median seconds from a cuOpt `send` to the SCIP incumbent recorded with source "cuopt" for the same objective,
     per A9 arm."""
     out = {}
-    for arm in (BO0, BO1):
+    for arm in (CTRL1, BO1):
         lat = []
         for (i, a, s), r in R.items():
             if a != arm:
@@ -1011,7 +1012,7 @@ def lp_arrival(R) -> dict:
     """Median arrival time of the HiGHS LP point in the EA (`lp` events, state done), per A9 arm (a confound: a sleeping
     EA frees its core for the LP worker)."""
     out = {}
-    for arm in (BO0, BO1):
+    for arm in (CTRL1, BO1):
         ts = [_f(e.get("t")) for (i, a, s), r in R.items() if a == arm for e in r.kind("lp")
               if e.get("state") == "done"]
         out[arm] = dict(n=len(ts), median_s=float(np.median(ts)) if ts else math.nan)
@@ -1121,7 +1122,7 @@ def print_stage1(res: dict, out=sys.stdout) -> None:
         p(f"D-013 {b}: weak set {v['weak_set']}; " + "; ".join(
             f"{arm}: improved {v[arm]['improved']}, P {_fmt(v[arm]['mean_P_B'])} -> {_fmt(v[arm]['mean_P_arm'])}, "
             f"mean d {_fmt(v[arm]['mean_d_weak'])}, worst {_fmt(v[arm]['worst_P'])}, all-mean d "
-            f"{_fmt(v[arm]['mean_d_all'])}" for arm in (BO0, BO1)))
+            f"{_fmt(v[arm]['mean_d_all'])}" for arm in (CTRL1, BO1)))
     p("relay latency (cuOpt send -> SCIP incumbent): " + ", ".join(
         f"{a} median {_fmt(v['median_s'], 2)} s (n {v['n']})" for a, v in rep["relay"].items()))
     p("HiGHS LP point arrival: " + ", ".join(f"{a} median {_fmt(v['median_s'], 2)} s (n {v['n']})"

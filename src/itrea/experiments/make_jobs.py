@@ -74,7 +74,7 @@ BACKOFF0_A2_INSTANCES = ("sing44",)      # rule (b)'s zero-duty reference (D-018
 BACKOFF_BASE = "configs/itrea2-dev-rc-3way"
 # D-018 stage 1 (A9@bo0 shadow vs A9@bo1 active, same-day A6 in every block; two windows: seed 0, then seed 1)
 BACKOFF1_SET, BACKOFF1_BUDGET = "backoff1", 120.0
-BACKOFF1_VARIANTS = ("bo0", "bo1")
+BACKOFF1_VARIANTS = ("bo1s", "bo1")        # control bo1s = bo1's values in shadow mode (M6 reads its would-be timeline)
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
 OPTIONAL = ("emphasis", "ablation", "variant")
 

@@ -158,7 +158,7 @@ def test_backoff_stage1_jobs():
     from itrea.experiments import make_jobs as MJ
     jobs = MJ.backoff_stage1(seeds=(0, 1))
     assert len(jobs) == len(STAGE1) * 2 * 3 == 84
-    assert {(j["arm"], j.get("variant")) for j in jobs} == {("A9", "bo0"), ("A9", "bo1"), ("A6", None)}
+    assert {(j["arm"], j.get("variant")) for j in jobs} == {("A9", "bo1s"), ("A9", "bo1"), ("A6", None)}
     assert {j["seed"] for j in jobs} == {0, 1} and all(j["budget"] == 120.0 and j["set"] == "backoff1" for j in jobs)
     blocks = {}
     for j in jobs:
