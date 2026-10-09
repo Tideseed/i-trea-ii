@@ -26,6 +26,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
         --emphasis <tuned> --out jobs/e2.jsonl
     python -m itrea.experiments.make_jobs smoke --instance /tmp/toy.mps --arms A0,A1 --out /tmp/smoke.jsonl
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
+    python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -71,6 +72,9 @@ BACKOFF0_LEAD_INSTANCES = ("ca__Scenario400_reserves_1", "glass4")
 BACKOFF0_VARIANTS = ("bo0", "bof50", "bof25", "bof12")
 BACKOFF0_A2_INSTANCES = ("sing44",)      # rule (b)'s zero-duty reference (D-018 amendment, 2026-10-09)
 BACKOFF_BASE = "configs/itrea2-dev-rc-3way"
+# D-018 stage 1 (A9@bo0 shadow vs A9@bo1 active, same-day A6 in every block; two windows: seed 0, then seed 1)
+BACKOFF1_SET, BACKOFF1_BUDGET = "backoff1", 120.0
+BACKOFF1_VARIANTS = ("bo0", "bo1")
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
 OPTIONAL = ("emphasis", "ablation", "variant")
 
@@ -437,6 +441,24 @@ def backoff_stage0(budget: float = BACKOFF0_BUDGET, seed: int = BACKOFF0_SEED, s
     return _sorted(out)
 
 
+def backoff_stage1(seeds=(0, 1), budget: float = BACKOFF1_BUDGET, set_: str = BACKOFF1_SET,
+                   tables=INSTANCE_TABLES) -> list[dict]:
+    """D-018 stage 1: the 14 instances of `analysis.backoff.STAGE1` x seeds x {A9@bo0, A9@bo1, A6} (84 runs for seeds
+    0-1). `configs/itrea2-dev-rc-3way-bo1.yaml` is written from the stage-0 report before this file is used; the pool
+    refuses a job whose configuration file is missing."""
+    from itrea.analysis.backoff import STAGE1
+    where = instance_paths(STAGE1, tables)
+    out = []
+    for n in STAGE1:
+        for seed in seeds:
+            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}")
+            for v in BACKOFF1_VARIANTS:
+                out.append(job(where[n], set_, "A9", seed, budget, config=f"{BACKOFF_BASE}-{v}.yaml", variant=v,
+                               **common))
+            out.append(job(where[n], set_, "A6", seed, budget, config=None, **common))
+    return _sorted(out)
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -484,7 +506,10 @@ def main(argv=None) -> int:
     b0 = sub.add_parser("backoff0", help="D-018 stage 0: A9 GPU back-off calibration (18 runs)")
     b0.add_argument("--budget", type=float, default=BACKOFF0_BUDGET)
     b0.add_argument("--seed", type=int, default=BACKOFF0_SEED)
-    for p in (s1, s2, e1, e4, cf, sm, b0):
+    b1 = sub.add_parser("backoff1", help="D-018 stage 1: A9@bo0 vs A9@bo1 + A6 (42 runs per seed)")
+    b1.add_argument("--budget", type=float, default=BACKOFF1_BUDGET)
+    b1.add_argument("--seeds", default="0,1", help="comma-separated (one window per seed: 0, then 1)")
+    for p in (s1, s2, e1, e4, cf, sm, b0, b1):
         p.add_argument("--out", required=True, type=Path)
     a = ap.parse_args(argv)
     try:
@@ -506,6 +531,8 @@ def main(argv=None) -> int:
                                 ablations=tuple(x for x in a.ablations.split(",") if x))
         elif a.cmd == "backoff0":
             jobs = backoff_stage0(a.budget, a.seed)
+        elif a.cmd == "backoff1":
+            jobs = backoff_stage1(tuple(int(x) for x in a.seeds.split(",") if x), a.budget)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:

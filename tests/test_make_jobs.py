@@ -151,3 +151,17 @@ def test_cli_smoke(tmp_path):
     assert mj.main(["smoke", "--instance", str(tmp_path / "toy.mps"), "--arms", "A0,A1", "--out", str(out)]) == 0
     jobs = [json.loads(line) for line in out.read_text().splitlines()]
     assert [j["arm"] for j in jobs] == ["A0", "A1"] and all(j["split"] == "smoke" for j in jobs)
+
+
+def test_backoff_stage1_jobs():
+    from itrea.analysis.backoff import STAGE1
+    from itrea.experiments import make_jobs as MJ
+    jobs = MJ.backoff_stage1(seeds=(0, 1))
+    assert len(jobs) == len(STAGE1) * 2 * 3 == 84
+    assert {(j["arm"], j.get("variant")) for j in jobs} == {("A9", "bo0"), ("A9", "bo1"), ("A6", None)}
+    assert {j["seed"] for j in jobs} == {0, 1} and all(j["budget"] == 120.0 and j["set"] == "backoff1" for j in jobs)
+    blocks = {}
+    for j in jobs:
+        blocks.setdefault(j["block"], set()).add((j["arm"], j.get("variant")))
+    assert len(blocks) == 28 and all(len(v) == 3 for v in blocks.values())
+    assert len(MJ.backoff_stage1(seeds=(0,))) == 42
