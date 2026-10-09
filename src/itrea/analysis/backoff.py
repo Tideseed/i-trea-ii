@@ -1091,7 +1091,10 @@ def print_stage1(res: dict, out=sys.stdout) -> None:
             bad = [r for r in m[k]["rows"] if r.get("applies") and not r.get("ok")]
         else:
             bad = [f"{kk}: {len(v)}" for kk, v in m[k].items() if isinstance(v, list) and v]
-        p(f"{k}: {'holds' if m[k]['ok'] else 'FAILS'}" + (f" — {bad[:4]}" if bad else ""))
+        noted = [f"seed {r['seed']}: {r['why']}" for r in m[k]["rows"] if r.get("ok") and r.get("why")] \
+            if k == "M2" else []
+        p(f"{k}: {'holds' if m[k]['ok'] else 'FAILS'}" + (f" — {bad[:4]}" if bad else "")
+          + (f" (reported: {'; '.join(noted)})" if noted else ""))
     p(f"M4 gpu util lower on {m['M4']['util_lower']} of {len(m['M4']['util'])} (needed {m['M4']['util_needed']})")
     esc = [r for r in m["M6"]["rows"] if r["before_lead"]]
     p(f"M6 (reported): the control would have stepped down before its first lead on {len(esc)} guard runs "

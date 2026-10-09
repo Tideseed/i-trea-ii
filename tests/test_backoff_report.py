@@ -545,6 +545,9 @@ def test_stage1_m2_censored_first_incumbents(tmp_path, cens, ok):
     row = next(r for r in m2["rows"] if r["seed"] == 0)
     if len(cens) == 2:
         assert "both censored" in row["why"]
+        with open(tmp_path / "out.txt", "w") as f:
+            BR.print_stage1(res, out=f)
+        assert "M2: holds (reported: seed 0: both censored" in (tmp_path / "out.txt").read_text()
     if not ok:
         assert row["why"] == "bo1 censored" and "M2" in res["verdict"]
 
