@@ -582,3 +582,6 @@ A9's P there from 0.544 to 0.069 (cuOpt alone 0.068); on sing44 duty ½ gives A9
 SCIP ‖ cuOpt, 0.734 for cuOpt alone, and the late stretch drops from 1.84 to 1.14. ⅛ duty: chromaticindex late again
 (62.3 s) — one-seed anomaly. comp21 block not run (deadline); the pre-stated lane-steps sanity limb fails in both
 directions (a refuted premise), deviation proposed in D-018. Verdict by the letter: INCOMPLETE.
+Stage 0 complete (2026-10-09 19:16, comp21 block): comp21's cuOpt-inside P stays above cuOpt alone at every duty
+(0.69 / 0.60 / 0.62 / 0.59 at 1 / ½ / ¼ / ⅛ vs 0.52) → the floor goes to ⅛ by the rule's shortfall; D_Y = ½. Verdict
+PROCEED; bo1 / bo1s written (D-018 "Stage 0 complete").

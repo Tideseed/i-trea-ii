@@ -106,3 +106,17 @@ block). Why, once more: the steps limb assumed EA work ∝ duty; contention move
 ⅛, chromaticindex 0.46d–0.72d), so as written no forced run could count and stage 0 could never decide anything. This
 is the second stated deviation of D-018's letter; like D-012's, it is development-only and the confirmatory test
 (prereg-v2) will state its own sanity rule in advance.
+
+## Stage 0 complete (2026-10-09 19:06–19:16, comp21 block) — verdict PROCEED; stage 1 prepared
+18/18 runs (0 void, 0 compile on the clock); `itrea backoff-report --stage 0` (duty-gated sanity, the deviation above):
+every forced run counts. **(a) D_Y = ½** (S_first ½ 1.03, ¼ 1.21, ⅛ 7.67). **(b) floor ⅛ by SHORTFALL** — the sing44 limb
+passes at every duty (S_late 1.14 / 1.06 / 1.00, full duty 1.84) but comp21's limb fails at every duty: cuOpt-inside P
+0.596 / 0.621 / 0.591 (full duty 0.692) against A6 0.523 + 0.02 — on comp21 the EA's duty is not what slows cuOpt
+(even ⅛ leaves it at 0.59; candidates: SCIP beside cuOpt, the CPU split, the relay). **(c) yield_until_s = 30, (d)
+patience_search_s = 40, (e) patience_own_s = 40.** `configs/itrea2-dev-rc-3way-bo1.yaml` (active; run hash f67354be775d)
+written from these values. **Control clarified before stage 1:** `configs/itrea2-dev-rc-3way-bo1s.yaml` = the same values
+in SHADOW mode (run hash 62bf82b236f6) replaces bo0 as the stage-1 control — shadow mode is bookkeeping only (genealogy of
+the run without the governor), and with bo1's values its would-be timeline is bo1's, which M6 needs; the outcome
+comparison is unchanged. Jobs: `jobs/dev-backoff1-s0.jsonl`, `-s1.jsonl` (42 runs each, one window per seed).
+Known risk carried into stage 1: with the floor at ⅛ the design's risk 3 (a late lead delayed by 1/D_min, glass4) is
+live; glass4 is a binding guard. The ⅛ chromaticindex anomaly concerns forced duty from t0 — under bo1 phase Y runs at ½.
