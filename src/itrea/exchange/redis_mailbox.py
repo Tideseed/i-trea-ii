@@ -127,6 +127,11 @@ class _Info:
         self._seen = v
         return json.loads(v)
 
+    def peek(self) -> dict | None:
+        """The latest info WITHOUT consuming it (`_seen` untouched; the next `poll` still returns it). D-018."""
+        v = self.r.get(self.key)
+        return None if v is None else json.loads(v)
+
 
 class RedisMailbox:
     """All channels of one run on Redis, seen from one role ("solver", "ea", "cuopt", "runner", …)."""

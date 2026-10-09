@@ -589,7 +589,7 @@ class FJCpu:
         return ((base + np.arange(k, dtype=np.uint64) * np.uint64(2654435761)) % np.uint64(1 << 32)).astype(np.uint32)
 
     def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None, horizon: int | None = None,
-            cap_s: float | None = None) -> dict:
+            cap_s: float | None = None, pace=None) -> dict:
         """Improve every row of X in place; see the class docstring for the counters. keep_state=True also stores the
         final per-individual activities, weights and violated-row counts in `self.state` (tests). `scale_idx` (k,):
         each row's index into `row_scales` (None: 0).
@@ -608,8 +608,15 @@ class FJCpu:
         or ST_FEASIBLE if the projection is feasible) — a row in progress cannot be cut on one core. This is the
         sequential meaning of the GPU's call deadline (where the chunk in progress is cut at an equal step count).
         The counters then add `finished_horizon` (rows with ST_HORIZON, also counted in `finished_budget`, so the
-        three finish counters still add up to k) and `cap_hits` (1 if the deadline cut the call)."""
+        three finish counters still add up to k) and `cap_hits` (1 if the deadline cut the call).
+
+        `pace` (the EA's GPU back-off, D-018, wired here for CPU tests of the engine; None: the call above, unchanged):
+        a callable that may sleep and returns the seconds it slept, called before every slice (before the stop poll,
+        so a stop during a sleep is seen at once). With it the rows are processed in slices as with should_stop, the
+        deadline compares BUSY time (sleeps subtracted), `seconds` and the profile's seconds are busy time, and the
+        counters add `paused_s` and `wall_s`."""
         t0 = time.perf_counter()
+        paused = 0.0                                    # seconds slept in `pace` (0.0 without it)
         if not isinstance(X, np.ndarray) or X.ndim != 2:
             raise TypeError("FJCpu.run needs a 2-D NumPy array (use FJGpu for device arrays)")
         k, n = X.shape
@@ -660,13 +667,17 @@ class FJCpu:
                 for u, v in zip(np.r_[a, cut], np.r_[cut, b]):
                     batch(int(u), int(v), r.rs_tab[int(sidx[u])], h)
 
-            if should_stop is None and cap_s is None:
+            if should_stop is None and cap_s is None and pace is None:
                 call(0, k)
             else:
                 deadline = None if cap_s is None else _clock() + float(cap_s)
                 a, size, target = 0, 1, self.slice_ms / 1000.0
-                while a < k and not (should_stop is not None and should_stop()):
-                    if deadline is not None and _clock() >= deadline:
+                while a < k:
+                    if pace is not None:
+                        paused += float(pace())
+                    if should_stop is not None and should_stop():
+                        break
+                    if deadline is not None and _clock() - paused >= deadline:
                         call(a, k, 0)                       # rows not started: projected only (horizon 0)
                         cut_rows = k - a
                         break
@@ -688,7 +699,10 @@ class FJCpu:
             out["finished_budget"] += out["finished_horizon"]
             out["cap_hits"] = int(cut_rows > 0)
         out["act_drift"] = float(ldrift.max(initial=0.0))
-        out["seconds"] = time.perf_counter() - t0
+        wall = time.perf_counter() - t0
+        out["seconds"] = wall - paused
+        if pace is not None:
+            out["paused_s"], out["wall_s"] = paused, wall
         self.last_status, self.last_moves, self.last_steps = status, lmoves, lsteps
         self.last_profile = dict(kind="sequential", seconds=out["seconds"], H=None if horizon is None else int(horizon),
                                  cap_s=cap_s, cap_hit=cut_rows > 0, cut_rows=int(cut_rows))

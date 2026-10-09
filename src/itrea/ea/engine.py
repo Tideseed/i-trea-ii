@@ -217,6 +217,39 @@ counter, no event, no extra random number; the start-up record says `lp_decode.s
     (`lpd_failed`, `lp_decode` event "failed", the error); the EA never waits on it (the worker is signalled, not
     joined). `finish` reads a reply waiting at the end and then stops it (`run`'s finally stops it after an
     exception); a request still outstanding then counts as `lpd_lost` (usually one at the deadline).
+GPU back-off (`backoff.enabled`, `BackoffCfg`, `ea.backoff`, D-018; off by default, and inert unless
+`exchange.from_cuopt` — arm A9 —, so A3 / A3x and every other arm run exactly as without it: no argument reaches a
+local-search call, no event, no field). Only the EA's GPU DUTY changes; every generation and every exchange tick still
+happens. The governor (`self.bo`) is made in `begin` (phase Y from t0) and paces at two points where the EA's GPU queue
+is empty:
+  - pace point 1, between generations, at the top of `step` before the generation's clock starts (so `max_gen_s`
+    excludes it): `update`, then — if a sleep is due — `bk.synchronize()` (queued survival / evaluate kernels must not
+    run during the "pause"; the wait counts as busy) and a sleep in slices of `backoff.slice_s` under the phase
+    "paused". Each slice runs `_should_stop` (the stop file, the deadline — a sleep never passes it) and, when due, an
+    exchange tick; `_lps_use` is skipped while asleep (`_bo_sleeping`), so LP-stream children do not pile up per wall
+    second. A tick that shows a partner improvement (the external incumbent fell by >= materiality, or a new solver or
+    cuOpt batch is pending) ends the sleep — the next generation injects the rows and relays them to SCIP — and forgives
+    the credit at most once per `wake_min_s`. If a stop arrived, `step` returns without a generation.
+  - pace point 2, inside `FJGpu.run` / `FJCpu.run` (`_ls_run` passes `pace=self._bo_pace` in active and forced mode
+    only): before every chunk and between launches; the same sync-then-sliced-sleep with the stop poll, and in phase Y
+    a non-consuming peek (`InfoChannel.peek`) of SCIP's and cuOpt's info channels at most every `exchange.poll_s`. No
+    exchange tick inside a call, so the cutoff stays constant within a generation as the repair clock assumes.
+  Busy clock: `_bo_busy_now()` = time.monotonic() − the seconds slept (= time.monotonic() without a governor). The
+  repair clock's `decide` and `end_generation` run on it (gen_seconds = busy now − busy at the generation's start), and
+  the local searches subtract their own sleeps, so the repair clock's levels, decay, probes and caps see the same
+  seconds at every duty. Phase Y ends at a peek, at a tick that makes `inc_external` finite, or at the EA's first
+  incumbent ("own"; "tick" when that incumbent is an unchanged partner vector); `_step` feeds the first own feasible
+  member (`_rc_own_feasible`, needs no repair clock) once. Contributions: every incumbent with source "self" is a lead
+  of dg = the gap unit from ref = min(best_key, inc_external) (taken before best_key changes) to its key; every accepted
+  verdict on an EA post that is not an unchanged cuOpt row and whose note says `improved` is an assist of dg = the gap
+  unit from `primal_before` to `primal_after` (`backoff.assist`). Records: `backoff` events on every change (phase-Y
+  exit, own feasible, step down, a material contribution that changed the level or state, a forgiven wake), `contrib`
+  events for every lead and assist (`what`: lead | assist, `dg`, `ref`, `key`, `id`, `busy_s`, `material`), `gen`
+  events add the `bo_*` fields and `ls_steps` (lane steps since the previous `gen` event), `rclock` events add
+  `bo_wall_s` / `bo_paused_s` of the generation, the summary a `backoff` block (with `ls_steps` and `max_launch_s`).
+  Shadow mode: the same bookkeeping at generation boundaries (no sync, no sleep, no pace argument, no peek, no extra
+  stop poll) — its genealogy is that of the run without the governor. Forced mode: the fixed duty from t0 (stage-0 calibration). Ticks during a pause may still do small device
+  work (an injected row's copy, an LP-stream point's evaluation).
 
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
 archive members), evaluated, de-duplicated against the population and admitted with the survival's rules: an
@@ -264,6 +297,8 @@ from itrea.ea.mutation import mutate
 from itrea.ea.population import (NO_RANK, ORIGIN_IMMIGRANT, ORIGIN_INJECTED, ORIGIN_LP_DECODE, ORIGIN_REPAIR,
                                   ORIGIN_SEED_LP, ORIGIN_SEED_RANDOM, R0, R1, R2, DupHasher, IdCounter, Population,
                                   child_ancestry, gene_dtype_for, origin_names, src_bits_of_origin)
+from itrea.ea.backoff import Backoff, gap_unit
+from itrea.ea.backoff import describe as backoff_describe
 from itrea.ea.elite import clearing_pick, elite_spread, min_diff_auto
 from itrea.ea import lp_decode as lpdec
 from itrea.ea.ranks import Survival, rank1_cap, three_rank_survival
@@ -651,6 +686,8 @@ class Engine:
         self.lpd_warm_rows = int(lpd_warm_rows)
         self.lpd = None                          # the LP decode worker (repair.continuous: lp_decode; made in begin)
         self.lpd_on = False
+        self.bo: Backoff | None = None           # the GPU back-off (backoff.enabled and exchange.from_cuopt; in begin)
+        self._bo_sleeping = False                # True during a between-generation pause (`_lps_use` waits)
 
     def incumbent_log(self, run_dir: str | os.PathLike, role: str = "ea") -> None:
         """Append every incumbent to `<role>.incumbents.part` as it is found (with `<role>.names.json`), in the solver
@@ -779,6 +816,10 @@ class Engine:
             rec["local_search_static_bytes"] = getattr(self.ls.impl, "static_bytes", None)
         if cfg.repair_clock.enabled:
             rec["repair_clock"] = RepairClock(cfg.repair_clock).describe()
+        if cfg.backoff.enabled:                                  # live only beside cuOpt (exchange.from_cuopt)
+            ex = cfg.exchange
+            rec["backoff"] = dict(backoff_describe(cfg.backoff),
+                                  live=bool(self.mailbox is not None and ex.enabled and ex.from_cuopt))
         # -------------------------------------------------------------------------------- warm-up
         t = time.monotonic()
         if self.warmup_enabled:
@@ -829,6 +870,7 @@ class Engine:
                 "exchange.from_solver": True, "exchange.to_solver": True, "exchange.use_dual_bound": True,
                 "exchange.use_root_lp": True, "exchange.poll_s": 1e-6, "exchange.post_frontier": True,
                 "seeding.lp_source": "solver", "seeding.random": 0.5, "seeding.lp_rounding": 0.5,
+                "backoff.enabled": False,                       # never pace (sleep) before the clock
                 "crossover.pc": 1.0,
                 "crossover.weights": {"agreement": 1.0, "uniform": 1.0, "block": 1.0, "k_point": 1.0},
                 "mutation.weights": {k: 1.0 for k in ("flip", "step", "reset", "toward_lp", "violation_guided",
@@ -1143,12 +1185,20 @@ class Engine:
             self.lp_worker = LPWorker(prob.path, cfg.seeding.lp_time_limit, cpus=None, names=prob.names).start()
             self.lp_info["state"] = "running"
         self._lpd_begin()                        # repair.continuous: lp_decode, an instance it can act on
+        # GPU back-off (module docstring): only beside cuOpt; phase Y from t0, so it paces the initial repair too
+        self.bo = Backoff(cfg.backoff, self.t0) if (cfg.backoff.enabled and self.from_cuopt) else None
+        self._bo_sleeping = False
+        self._bo_next_peek = -math.inf
+        self._bo_ls_steps = self._bo_ls_steps_logged = 0
+        self._bo_max_launch = 0.0
+        if self.bo is not None:
+            self._bo_log(self.bo.snapshot(self.t0, "start"))
         # repair clock (module docstring): generation 0 is before any feasible member, so it plays "none"
         self.rclock = RepairClock(cfg.repair_clock) if cfg.repair_clock.enabled else None
         self.rc_dec, self._rc_last = None, None
         if self.rclock is not None:
             self.c.update(ls_finished_horizon=0, ls_cap_hits=0)
-            self._rc_t_gen = time.monotonic()
+            self._rc_gen_start()
             self._rc_decide(False)
         # ------------------------------------------------------------------------- initial population
         with self.phase("seed"):
@@ -1180,7 +1230,16 @@ class Engine:
     def step(self) -> None:
         """One generation (module docstring, steps 1–10). Cut short after the repair when the budget ends or a stop
         arrives during it (the local search polls `_should_stop`): the generation's children are dropped, the
-        population stays as it was, `gen` keeps counting the started generation and `aborted_generations` is 1."""
+        population stays as it was, `gen` keeps counting the started generation and `aborted_generations` is 1.
+        With the GPU back-off the between-generation pause comes first (module docstring); a stop or the end of the
+        budget during it ends the step without a generation."""
+        if self.bo is not None:
+            if self.bo.shadow:
+                self._bo_log(self.bo.update(time.monotonic()))
+            else:
+                self._bo_between()
+                if self._should_stop():
+                    return
         tg = time.monotonic()
         try:
             self._step()
@@ -1191,10 +1250,12 @@ class Engine:
         cfg, bk, dp, pop = self.cfg, self.bk, self.dp, self.pop
         self.gen += 1
         if self.rclock is not None:
-            self._rc_t_gen = time.monotonic()
+            self._rc_gen_start()
         if time.monotonic() >= self.next_poll:
             with self.phase("exchange"):
                 self._exchange_in()
+        if self.bo is not None and self.bo.own is None and self._rc_own_feasible():
+            self._bo_log(self.bo.own_feasible(time.monotonic()))     # the first own feasible member (back-off)
         if self.rclock is not None:                          # the level of this generation, after the exchange tick
             self._rc_decide(self._rc_own_feasible())
         if self.pop.size == 0:                               # every candidate died (duplicates / non-finite)
@@ -1400,6 +1461,8 @@ class Engine:
         args = {} if scale_idx is None else {"scale_idx": scale_idx}
         if self.rclock is not None:
             args.update(self._rc_call_args())
+        if self.bo is not None and not self.bo.shadow:      # the GPU back-off's pace point 2 (module docstring)
+            args["pace"] = self._bo_pace
         for attempt in range(OOM_RETRIES + 1):
             try:
                 st = ls.run(X, should_stop=self._should_stop, **args)
@@ -1410,6 +1473,9 @@ class Engine:
                 self._oom("local_search", e)
         self.c["ls_moves"] += int(st.get("moves", 0))
         self.c["ls_calls"] += 1
+        if self.bo is not None:
+            self._bo_ls_steps += int(st.get("steps", 0))
+            self._bo_max_launch = max(self._bo_max_launch, float(st.get("max_launch_s", 0.0) or 0.0))
         for k in ("local_minima", "finished_feasible", "finished_stall", "finished_budget", "interrupted"):
             self.c[f"ls_{k}"] = self.c.get(f"ls_{k}", 0) + int(st.get(k, 0))
         if self.rclock is not None:
@@ -1430,7 +1496,13 @@ class Engine:
         """The repair clock's level for the generation that starts now (after the exchange tick); an unpaired call
         left by a generation cut short is dropped."""
         self._rc_last, self._rc_cf = None, True
-        self.rc_dec = self.rclock.decide(time.monotonic() - self.t0, has_feasible, gen=self.gen)
+        self.rc_dec = self.rclock.decide(self._bo_busy_now() - self.t0, has_feasible, gen=self.gen)
+
+    def _rc_gen_start(self) -> None:
+        """The generation's start on the wall and the busy clock (the repair clock's gen_seconds are busy seconds)."""
+        self._rc_t_gen = time.monotonic()
+        self._rc_b_gen = self._bo_busy_now()
+        self._rc_p_gen = self.bo.paused if self.bo is not None else 0.0
 
     def _rc_own_feasible(self) -> bool:
         """The repair clock's phase test: a feasible member that is not an unchanged solver solution (origin INJECTED
@@ -1478,10 +1550,146 @@ class Engine:
         """Close the generation in the repair clock and write its `rclock` event."""
         if self.rclock is None:
             return
-        now = time.monotonic()
-        ev = self.rclock.end_generation(now - self.t0, now - self._rc_t_gen)
+        now = self._bo_busy_now()                        # = time.monotonic() without the GPU back-off
+        ev = self.rclock.end_generation(now - self.t0, now - self._rc_b_gen)
         if ev is not None:
+            if self.bo is not None:                      # the accounting check: gen_s + paused = wall
+                ev.update(bo_wall_s=round(time.monotonic() - self._rc_t_gen, 6),
+                          bo_paused_s=round(self.bo.paused - self._rc_p_gen, 6))
             self.trace.event("rclock", **ev)
+
+    # ---------------------------------------------------------------------------------------------- GPU back-off
+    def _bo_busy_now(self) -> float:
+        """The busy clock: time.monotonic() minus the governor's sleeps; time.monotonic() itself without a governor."""
+        if self.bo is None:
+            return time.monotonic()
+        return time.monotonic() - self.bo.paused
+
+    def _bo_log(self, recs) -> None:
+        """`backoff` events for the governor's change records (None, one dict or a list)."""
+        if recs is None:
+            return
+        for r in ([recs] if isinstance(recs, dict) else recs):
+            if r is not None:
+                self.trace.event("backoff", gen=self.gen, **r)
+
+    def _bo_peek(self, now: float) -> bool:
+        """Phase Y: a non-consuming read of SCIP's (when from_solver) and cuOpt's info channels, at most every
+        exchange.poll_s; a finite incumbent ends phase Y ("peek"). True if it did."""
+        if now < self._bo_next_peek:
+            return False
+        self._bo_next_peek = now + self.cfg.exchange.poll_s
+        mb = self.mailbox
+        for ch in ([mb.info] if self.from_solver else []) + [mb.info_cuopt]:
+            d = ch.peek()
+            inc = d.get("incumbent") if isinstance(d, dict) else None
+            if isinstance(inc, (int, float)) and math.isfinite(float(inc)):
+                self._bo_log(self.bo.phase_y_exit(now, "peek"))
+                return True
+        return False
+
+    def _bo_sleep(self, seconds: float, site: str) -> float:
+        """One slice: time.sleep, measured; the governor is told. Returns the seconds slept."""
+        t = time.monotonic()
+        time.sleep(seconds)
+        d = time.monotonic() - t
+        self.bo.slept(d, site)
+        return d
+
+    def _bo_between(self) -> None:
+        """Pace point 1, before a generation (module docstring)."""
+        bo, cfg = self.bo, self.cfg
+        now = time.monotonic()
+        if bo.in_phase_y:
+            self._bo_peek(now)
+        self._bo_log(bo.update(now))
+        if bo.sleep_due(now) <= 0.0:
+            return
+        self.bk.synchronize()                    # the queue must be empty while "paused"; the wait is busy time
+        now = time.monotonic()
+        end = min(now + bo.sleep_due(now), self.deadline)
+        mat = cfg.backoff.materiality
+        self._bo_sleeping = True
+        try:
+            with self.phase("paused"):
+                while True:
+                    now = time.monotonic()
+                    if now >= end or bo.duty >= 1.0 or self._should_stop():
+                        break
+                    if now >= self.next_poll:            # the exchange keeps ticking during the pause
+                        inc0 = self.inc_external
+                        n0 = sum(1 for b in self.pending if b.src in ("solver", "cuopt"))
+                        self._exchange_in()
+                        if self.stop_reason is not None:
+                            break
+                        n1 = sum(1 for b in self.pending if b.src in ("solver", "cuopt"))
+                        if n1 > n0 or (math.isfinite(self.inc_external)
+                                       and gap_unit(inc0, self.inc_external) >= mat):
+                            now = time.monotonic()      # a partner improvement: wake up
+                            if bo.wake(now):
+                                self._bo_log(bo.snapshot(now, "wake"))
+                            break
+                        continue
+                    if bo.in_phase_y and self._bo_peek(now):
+                        break
+                    self._bo_sleep(min(cfg.backoff.slice_s, end - now, max(self.next_poll - now, 1e-3)), "gen")
+        finally:
+            self._bo_sleeping = False
+
+    def _bo_pace(self) -> float:
+        """Pace point 2, inside a repair call (module docstring): the bucket's sleep after a sync, in slices with the
+        stop poll, and the phase-Y peek; no exchange tick. Returns the seconds slept (the call subtracts them)."""
+        bo = self.bo
+        now = time.monotonic()
+        if bo.in_phase_y:
+            self._bo_peek(now)
+        self._bo_log(bo.update(now))
+        if bo.sleep_due(now) <= 0.0:
+            return 0.0
+        self.bk.synchronize()
+        now = time.monotonic()
+        end = min(now + bo.sleep_due(now), self.deadline)
+        slept = 0.0
+        while True:
+            now = time.monotonic()
+            if now >= end or bo.duty >= 1.0 or self._should_stop():
+                break
+            if bo.in_phase_y and self._bo_peek(now):
+                break
+            slept += self._bo_sleep(min(self.cfg.backoff.slice_s, end - now), "call")
+        return slept
+
+    def _bo_incumbent(self, iid: int, src: str, key: float) -> None:
+        """A new EA incumbent (before best_key changes): it ends phase Y; with source "self" it is a lead."""
+        bo = self.bo
+        now = time.monotonic()
+        if bo.in_phase_y:
+            self._bo_log(bo.phase_y_exit(now, "own" if src == "self" else "tick"))
+        if src != "self":
+            return
+        ref = min(self.best_key, self.inc_external)
+        dg = gap_unit(ref, key, self.dual_key)
+        material, rec = bo.contribution(now, dg, "lead", ref)
+        self._bo_log(rec)
+        self.trace.event("contrib", what="lead", dg=dg, id=int(iid), ref=ref, key=float(key),
+                         busy_s=round(bo.busy(now), 6), material=material)
+
+    def _bo_assist(self, iid: int, note: dict) -> None:
+        """An accepted verdict on an EA post: an assist if SCIP took it as an improvement (note `improved`) and the row
+        is not an unchanged cuOpt vector; dg = the gap unit from primal_before to primal_after."""
+        if not self.cfg.backoff.assist or not note.get("improved") or note.get("cuopt") or iid in self.cuopt_posted:
+            return
+        before, after = note.get("primal_before"), note.get("primal_after")
+        if not isinstance(after, (int, float)):
+            return
+        kb = self.prob.key_of_objective(float(before)) if isinstance(before, (int, float)) else math.inf
+        ka = self.prob.key_of_objective(float(after))
+        dg = gap_unit(kb, ka, self.dual_key)
+        now = time.monotonic()
+        material, rec = self.bo.contribution(now, dg, "assist", kb)
+        self._bo_log(rec)
+        self.trace.event("contrib", what="assist", dg=dg, id=int(iid), ref=kb, key=ka,
+                         busy_s=round(self.bo.busy(now), 6), material=material)
 
     def _should_stop(self) -> bool:
         """Polled by the local search between kernel launches / row slices / steps, so the EA's work inside one
@@ -1746,6 +1954,8 @@ class Engine:
             src = "cuopt"
             self.c["cuopt_incumbents"] += 1
         t = self.trace.now()
+        if self.bo is not None:                              # before best_key changes: ref = min(best, external)
+            self._bo_incumbent(iid, src, key)
         self.best_key, self.best_obj, self.best_x = key, obj, x
         self.inc_stack.append((iid, key, obj, x))
         row = _SparseRow(x)
@@ -1998,6 +2208,8 @@ class Engine:
             self._solver_in()
         if self.from_cuopt:                      # after the solver's: a vector both delivered stays the solver's
             self._cuopt_in()
+        if self.bo is not None and self.bo.in_phase_y and math.isfinite(self.inc_external):
+            self._bo_log(self.bo.phase_y_exit(time.monotonic(), "tick"))
 
     def _solver_in(self) -> None:
         """The solver's channels (`exchange.from_solver`): solutions, info, the LP point, the LP stream, verdicts."""
@@ -2028,7 +2240,7 @@ class Engine:
             sm = mb.lps.poll()
             if sm is not None:
                 self._lps_receive(sm)
-            if self.lps_pool:
+            if self.lps_pool and not self._bo_sleeping:    # not during a back-off pause (module docstring)
                 self._lps_use()
         if self.posted:
             n_rej = self.c["solver_rejections"]
@@ -2221,10 +2433,12 @@ class Engine:
             seq = int(v.get("seq", -1))
             note = v.get("note")
             row = 0
+            nd = None                                        # the note as a dict (the back-off's assists read it)
             if isinstance(note, str) and note.startswith("{"):
                 try:
-                    row = int(json.loads(note).get("row", 0))
-                except (ValueError, TypeError):
+                    nd = json.loads(note)
+                    row = int(nd.get("row", 0))
+                except (ValueError, TypeError, AttributeError):
                     row = 0
             ids = self.posted.get(seq)
             if not ids or row >= len(ids):
@@ -2235,6 +2449,8 @@ class Engine:
             if bool(v.get("accepted")):
                 self.c["solver_accepted"] += 1
                 self.g_accepted.add(iid)
+                if self.bo is not None and isinstance(nd, dict):
+                    self._bo_assist(iid, nd)
             else:
                 self.c["solver_rejections"] += 1
                 hs = self.posted_hashes.get(seq)
@@ -2679,6 +2895,9 @@ class Engine:
                          lps_pool=len(self.lps_pool), lps_unused=sum(1 for q in self.lps_pool if not q["used"]))
         if self.rclock is not None:
             extra.update(self.rclock.gen_fields())
+        if self.bo is not None:
+            extra.update(self.bo.gen_fields(time.monotonic()), ls_steps=self._bo_ls_steps - self._bo_ls_steps_logged)
+            self._bo_ls_steps_logged = self._bo_ls_steps
         if self.from_cuopt:
             extra.update(inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt, dual_key_cuopt=self.dual_key_cuopt,
                          cuopt_pop=self._cuopt_members())
@@ -2752,6 +2971,9 @@ class Engine:
                 final_stream=int(np.sum((pop.origin & both) == both)))
         if self.rclock is not None:
             out["repair_clock"] = self.rclock.record()
+        if self.bo is not None:
+            out["backoff"] = dict(self.bo.record(time.monotonic()), ls_steps=self._bo_ls_steps,
+                                  max_launch_s=round(self._bo_max_launch, 6))
         if self.from_cuopt:
             out.update(exchange_from_cuopt=True, inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt,
                        dual_key_cuopt=self.dual_key_cuopt, final_cuopt_pop=self._cuopt_members())
@@ -2847,6 +3069,9 @@ class _Info:
     def poll(self):
         d, self.d = self.d, None
         return d
+
+    def peek(self):
+        return self.d
 
 
 class _WarmupMailbox:

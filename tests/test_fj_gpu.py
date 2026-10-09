@@ -635,3 +635,75 @@ def test_deadline_projects_every_chunk_it_did_not_reach(bk):
     feas = np.array([prob.check(x).feasible for x in proj])
     np.testing.assert_array_equal(fj.last_status == ST_FEASIBLE, feas)
     assert all(c["cap_hit"] and c["H_eff"] == 0 for c in fj.last_profile["chunks"])
+
+
+# ------------------------------------------------------------------- the GPU back-off's pace (D-018, host side only)
+class _Nap:
+    """A pace callable: sleeps `s` seconds per call and returns them; at call `stop_at` it raises the stop flag first
+    (a stop that arrives during a sleep)."""
+
+    def __init__(self, s: float = 0.0, stop_at: int | None = None):
+        self.s, self.stop_at, self.calls, self.stop = float(s), stop_at, 0, False
+
+    def __call__(self) -> float:
+        import time
+        self.calls += 1
+        if self.stop_at is not None and self.calls == self.stop_at:
+            self.stop = True
+        if self.s > 0:
+            time.sleep(self.s)
+        return self.s
+
+
+@pytest.mark.parametrize("nap", [0.0, 0.002])
+def test_pace_does_not_change_the_result(bk, nap):
+    """A pace that sleeps 0, or sleeps between launches, without a horizon or a cap: the same rows, statuses, steps and
+    moves as the call without pace (lane state lives on the device; the RNG is seeded per (seed, row, call)); only
+    `paused_s` / `wall_s` are added, and `seconds` is busy time."""
+    for name in ("set_cover", "mixed"):
+        prob, X0, f0 = _armed(name, bk)
+        X = cp.asarray(X0)
+        out0 = f0.run(X)
+        assert "paused_s" not in out0 and "wall_s" not in out0 and "paused_s" not in f0.last_profile
+        _, _, f1 = _armed(name, bk)
+        X1 = cp.asarray(X0)
+        p = _Nap(nap)
+        out1 = f1.run(X1, pace=p)
+        np.testing.assert_array_equal(cp.asnumpy(X1), cp.asnumpy(X))
+        np.testing.assert_array_equal(f1.last_status, f0.last_status)
+        np.testing.assert_array_equal(f1.last_steps, f0.last_steps)
+        np.testing.assert_array_equal(f1.last_moves, f0.last_moves)
+        assert p.calls >= 1 and out1["paused_s"] == pytest.approx(p.calls * nap)
+        assert out1["seconds"] == pytest.approx(out1["wall_s"] - out1["paused_s"])
+        assert f1.last_profile["paused_s"] == out1["paused_s"]
+        for c in f1.last_profile["chunks"]:                    # the profile is on busy time: no gap of a nap
+            assert c["end"] <= out1["seconds"] + 1e-9
+
+
+def test_cap_cuts_at_busy_time_not_wall_time(bk):
+    """With cap_s and a pace that sleeps half the cap per call, the call is cut when its BUSY time reaches the cap —
+    far later on the wall clock — not when the wall clock does."""
+    prob = toy.set_cover(200, 120, density=0.05, seed=1)
+    X0 = random_starts(prob, 32, seed=2, p_one=0.02)
+    make_fj(prob, bk, max_steps=200000, stall_steps=5000, seed=5).run(cp.asarray(X0))     # compile / warm
+    f = make_fj(prob, bk, max_steps=200000, stall_steps=5000, seed=5)
+    S = f.run(cp.asarray(X0))["seconds"]
+    if S < 0.06:
+        pytest.skip(f"the unbounded call takes {S:.3f} s: too short to cut")
+    cap = S / 3
+    fp = make_fj(prob, bk, max_steps=200000, stall_steps=5000, seed=5)
+    p = _Nap(cap / 2)
+    out = fp.run(cp.asarray(X0), cap_s=cap, pace=p)
+    assert out["cap_hits"] >= 1 and out["seconds"] < S
+    assert out["seconds"] <= cap + max(out["max_launch_s"], 0.01) + 0.01       # one launch past the busy cap
+    assert out["paused_s"] >= cap and out["wall_s"] > out["seconds"] + cap      # the wall clock went far beyond it
+
+
+def test_stop_during_a_sleep_ends_the_call(bk):
+    """A stop that arrives while the pace sleeps is seen at the poll right after it: the call ends at once (no further
+    launch or pace), the unfinished rows stay ST_ACTIVE (counted in `interrupted`)."""
+    prob, X0, fj = _armed("set_cover", bk)
+    p = _Nap(0.001, stop_at=2)                     # call 1: before chunk 0; call 2: after launch 1
+    out = fj.run(cp.asarray(X0), should_stop=lambda: p.stop, pace=p)
+    assert p.calls == 2 and out["launches"] == 1
+    assert out["interrupted"] > 0 and out["interrupted"] == int(np.sum(fj.last_status == ST_ACTIVE))

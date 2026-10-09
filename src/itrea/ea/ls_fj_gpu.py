@@ -52,6 +52,11 @@ its deadline is still projected (prep, fj_init and a launch of 0 steps, which on
 being left untouched. Every call records its per-launch (steps, seconds) profile (`last_profile`) and each block's
 step count (`last_steps`), whatever the arguments.
 
+GPU back-off (`run(pace=...)`, D-018, host side only): between launches — the one point inside a call where this
+process has nothing queued on the GPU — and before every chunk the host may sleep (the EA's duty cycle beside cuOpt,
+`ea.backoff`); the call's own clock (deadline, profile, seconds) then runs on busy time, so the repair clock sees the
+same seconds whatever the duty.
+
 Determinism: the per-block RNG is seeded from (seed, global individual index, call counter), list updates use scans
 instead of atomics, and reductions run in a fixed tree order — so a run is reproducible, and an individual's result
 does not depend on how the population is chunked.
@@ -760,7 +765,7 @@ class FJGpu:
         return max(1, min(k, int(self.mem_budget_bytes // max(per_ind, 1))))
 
     def run(self, X, keep_state: bool = False, should_stop=None, scale_idx=None, horizon: int | None = None,
-            cap_s: float | None = None) -> dict:
+            cap_s: float | None = None, pace=None) -> dict:
         """Improve every row of X (k, n; int8 / int32 / float32 / float64) in place. Integers stay integral and inside
         [ceil(lb), floor(ub)]; every gene is clipped to its bounds first. `scale_idx` (k,): each row's index into
         `row_scales` (None: 0 for every row; one scale: ignored). Returns the counters
@@ -779,10 +784,20 @@ class FJGpu:
         done, cut, cap_hit}]} — per chunk the cumulative steps after every launch (starting at 0) with the seconds
         since the call started (`t[0]` = the chunk's start), the chunk's end, the step count it ended at, whether
         every block stopped by itself (`done`) and whether the horizon or the deadline cut it — are kept for every
-        call."""
+        call.
+
+        `pace` (the EA's GPU back-off, D-018; None: the loop above, unchanged): a callable that may sleep and returns
+        the seconds it slept. It is called where this call's GPU queue is empty — before every chunk and between two
+        launches (after the horizon and deadline tests, before the stop poll, so a stop that arrives during a sleep is
+        seen at once). Every time the call measures for itself is BUSY time, the sleeps subtracted: the deadline
+        (`cap_s`, so it cuts at busy ~ cap, not wall ~ cap), the profile's `t` / `end` and `seconds`; the counters
+        then add `paused_s` and `wall_s` (and the profile `paused_s`). Lane state lives on the device and every RNG is
+        seeded per (seed, row, call), so without a horizon or a cap pacing changes WHEN rows are repaired, not what
+        they become."""
         import cupy as cp
 
         t0 = time.perf_counter()
+        paused = 0.0                                          # seconds slept in `pace` (0.0 without it)
         if not isinstance(X, cp.ndarray) or X.ndim != 2:
             raise TypeError("X must be a 2-D CuPy array (k, n)")
         k, n = int(X.shape[0]), int(X.shape[1])
@@ -845,14 +860,16 @@ class FJGpu:
         self._iters = min(self._iters, ITERS_START)
         stopped = False
         for ci, s in enumerate(range(0, k, chunk)):
+            if pace is not None:
+                paused += float(pace())
             if should_stop is not None and should_stop():
                 stopped = True
                 break
             kc = min(chunk, k - s)
             tc = time.perf_counter()
             deadline = None if cap_s is None else t0 + float(cap_s) * (ci + 1) / n_chunks
-            late = deadline is not None and tc >= deadline       # reached after its deadline: projected only
-            prof = dict(k=kc, cum=[0], t=[tc - t0], end=0.0, H_eff=0, done=False, cut=False, cap_hit=False)
+            late = deadline is not None and tc - paused >= deadline   # reached after its deadline: projected only
+            prof = dict(k=kc, cum=[0], t=[tc - t0 - paused], end=0.0, H_eff=0, done=False, cut=False, cap_hit=False)
             prof_chunks.append(prof)
             if direct:
                 Xc = X[s:s + kc]
@@ -899,18 +916,20 @@ class FJGpu:
                     dt = tn - tl
                     max_launch = max(max_launch, dt)
                     prof["cum"].append(cum)
-                    prof["t"].append(tn - t0)
+                    prof["t"].append(tn - t0 - paused)
                     if active == 0:
                         prof["done"] = True
                         break
                     if hz is not None and cum >= hz:                 # the horizon: every active block has hz steps
                         cut = True
                         break
-                    if late or (deadline is not None and tn >= deadline):
+                    if late or (deadline is not None and tn - paused >= deadline):
                         cut = True                                   # the deadline: cut at the equal count reached
                         prof["cap_hit"] = True
                         cap_hits += 1
                         break
+                    if pace is not None:                             # the queue is empty here (count_nonzero synced)
+                        paused += float(pace())
                     if should_stop is not None and should_stop():
                         stopped = True
                         break
@@ -940,7 +959,7 @@ class FJGpu:
                 kept["nviol"].append(st[:, S_NVIOL].copy())
                 kept["F"].append(cp.asnumpy(STD[:kc, D_F]))
             peak = max(peak, pool.used_bytes() - used0)
-            prof["end"] = time.perf_counter() - t0
+            prof["end"] = time.perf_counter() - t0 - paused
             if stopped:
                 break
         cp.cuda.Stream.null.synchronize()
@@ -956,9 +975,13 @@ class FJGpu:
         out["launches"] = launches
         out["max_launch_s"] = max_launch
         out["peak_bytes"] = int(peak)
-        out["seconds"] = time.perf_counter() - t0
+        wall = time.perf_counter() - t0
+        out["seconds"] = wall - paused
         self.last_status, self.last_moves, self.last_steps = status_all, moves_all, steps_all
         self.last_profile["seconds"] = out["seconds"]
+        if pace is not None:
+            out["paused_s"], out["wall_s"] = paused, wall
+            self.last_profile["paused_s"] = paused
         if keep_state:
             self.state = {kk: (np.concatenate(v) if v else None) for kk, v in kept.items()}
         return out

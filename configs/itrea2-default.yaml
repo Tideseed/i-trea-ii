@@ -23,6 +23,8 @@
 # added at their defaults ("top", 0, 0), under the _LATE_DEFAULTS rule.
 # 2026-10-08 (hash unchanged): repair.lp_decode_cold_limit (10.0) and repair.lp_decode_infeasible (true) for
 # `repair.continuous: lp_decode` (D-017, issue #27) added at their defaults, under the _LATE_DEFAULTS rule.
+# 2026-10-09 (hash unchanged): the `backoff` section (D-018: the EA backs off the GPU beside cuOpt in arm A9 by a
+# contribution-gated duty cycle) was added OFF, under the same rule as strategy / lp_stream / repair_clock.
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -158,6 +160,26 @@ repair_clock:
   cap_s: 10.0
   cap_factor: 3.0
   pin_lp: true
+backoff:
+  enabled: false
+  mode: active
+  forced_duty: 1.0
+  yield_level: 2
+  levels: 2
+  yield_until_s: 30.0
+  patience_search_s: 75.0
+  patience_own_s: 30.0
+  materiality: 0.001
+  patience_kappa: 3.0
+  patience_min_s: 2.0
+  patience_max_s: 40.0
+  half_life_s: 20.0
+  step_s: 4.0
+  burst_s: 0.25
+  max_sleep_s: 4.0
+  slice_s: 0.25
+  wake_min_s: 5.0
+  assist: true
 backend: cupy
 gpu_mem_gb: 12.0
 log_every: 10

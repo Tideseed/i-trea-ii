@@ -46,6 +46,13 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   `posts_*` minus `cuopt_posts*`. Units in `cuopt_attribution`. Runs whose EA does not read cuOpt's channels
   (`reads_cuopt`: decided from the EA's own record) leave these columns missing (-1), not 0. A9's matched control is
   A3x (A3 with A9's EA footprint, no cuOpt); A3 differs from A9 by the EA's cores as well.
+- **GPU back-off** (A9's EA, D-018; `backoff_stats`, from the EA summary's `backoff` block — missing for runs
+  without the governor): `bo_mode`; `bo_busy_share` (busy / wall seconds since t0) and `bo_paused_s`; phase Y's length
+  and exit reason (`bo_phase_y_s`, `bo_phase_y_exit`: peek | tick | own | expiry | never); wall seconds per level
+  (`bo_level0_s` … `bo_level3_s`; NaN in forced mode); material leads and assists (`bo_n_lead`, `bo_n_assist`); the
+  EA's own-feasible and first-lead times (`bo_own_feasible_s`, `bo_first_lead_s` wall, `bo_first_lead_busy_s` busy);
+  the first step down in busy seconds (`bo_first_escalation_s`: in shadow mode the would-be one) and their number;
+  wakes; the EA's lane steps (`bo_ls_steps`). `itrea backoff-report` reads the run directories for the rest.
 - **Crashes are kept and truncated** (no event after the crash exists to count); `crashed`, `crashed_roles`. A
   process the runner killed after a partner's proven outcome (`processes[*].stopped_by_runner`, e.g. cuOpt in A2 / A9
   after SCIP proved optimality) is not a crash.
@@ -604,6 +611,30 @@ def lp_decode_cols(run: Run) -> dict:
     return out
 
 
+def backoff_stats(run: Run) -> dict:
+    """The GPU back-off's columns (module docstring) from the EA summary's `backoff` block; {} without it."""
+    b = run.summary(EA_ROLE).get("backoff")
+    if not isinstance(b, dict):
+        return {}
+
+    def sub(k):
+        v = b.get(k)
+        return v if isinstance(v, dict) else {}
+    py, spl, own, fl, fe = sub("phase_y"), sub("seconds_per_level"), sub("own_feasible"), sub("first_lead"), \
+        sub("first_escalation")
+    forced = b.get("mode") == "forced"
+    out = dict(bo_mode=str(b.get("mode") or ""), bo_busy_share=_fl(b.get("busy_share")),
+               bo_paused_s=_fl(b.get("paused_s")), bo_phase_y_s=_fl(py.get("length_s")),
+               bo_phase_y_exit=str(py.get("reason") or ""), bo_n_lead=_int(b.get("n_lead"), -1),
+               bo_n_assist=_int(b.get("n_assist"), -1), bo_own_feasible_s=_fl(own.get("t")),
+               bo_first_lead_s=_fl(fl.get("t")), bo_first_lead_busy_s=_fl(fl.get("busy_s")),
+               bo_first_escalation_s=_fl(fe.get("busy_s")), bo_escalations=_int(b.get("escalations"), -1),
+               bo_wakes=_int(b.get("wakes"), -1), bo_ls_steps=_fl(b.get("ls_steps")))
+    for k in range(4):
+        out[f"bo_level{k}_s"] = math.nan if forced else _fl(spl.get(str(k), 0.0))
+    return out
+
+
 def _exit_codes(rj: dict) -> dict[str, int | None]:
     out: dict[str, int | None] = {}
     procs = rj.get("processes")
@@ -849,6 +880,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
                                          (inc["source"] == "ea") & (inc["t"] <= T)).sum()) if len(inc) else 0
         row.update(cuopt_attribution(run, inc, T))
         row.update(lp_decode_cols(run))
+        row.update(backoff_stats(run))
         row.update(crash_flags(run))
         row.update(gpu_flags(run))
         row.update(_resource_cols(run))
@@ -1070,6 +1102,11 @@ RUN_COLUMNS = {
     **{c: ("int" if c.endswith("_bytes_max") else "float") for c, _ in LPD_IPC_COLS},
     **{c: ("float" if c.endswith(("_s", "_mb")) else "int") for c, _ in LPD_WORKER_COLS},
     "lpd_priming_first_status": "str",
+    # A9's GPU back-off (D-018): missing for runs without the governor
+    "bo_mode": "str", "bo_busy_share": "float", "bo_paused_s": "float", "bo_phase_y_s": "float",
+    "bo_phase_y_exit": "str", **{f"bo_level{k}_s": "float" for k in range(4)}, "bo_n_lead": "int",
+    "bo_n_assist": "int", "bo_own_feasible_s": "float", "bo_first_lead_s": "float", "bo_first_lead_busy_s": "float",
+    "bo_first_escalation_s": "float", "bo_escalations": "int", "bo_wakes": "int", "bo_ls_steps": "float",
     "crashed": "bool", "crashed_roles": "str", "crash_t": "float", "exit_codes": "str",
     "gpu_arm": "bool", "gpu_health": "str", "gpu_median_sm_mhz": "float", "gpu_foreign_share": "float",
     "gpu_void": "bool", "block_void": "bool",

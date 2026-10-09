@@ -26,6 +26,10 @@ left out of the hash while false (`_LATE_DEFAULTS`), so every recorded hash stan
 (an arm-implied change, `itrea.experiments.pair.ARMS`), so A9 and its matched control A3x (A9's EA footprint, no
 cuOpt; A3 differs from A9 by the EA's cores as well) share one configuration file.
 
+`backoff` (`BackoffCfg`, off by default, D-018) lets the EA of arm A9 back off the GPU beside cuOpt by a
+contribution-gated duty cycle (`ea.backoff`); inert unless `exchange.from_cuopt`. Same hash rule: left out while
+disabled.
+
 `ranks.rank1_mode` (default "top", D-016) chooses Rank 1 either as before or by cuOpt's clearing rule ("clearing": a
 distinct elite of up to `rank1_size` feasible members, any two differing in at least `rank1_min_diff` integer
 variables); the three fields are in `_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
@@ -298,6 +302,42 @@ class RepairClockCfg:
     pin_lp: bool = True                # the one-shot LP batch is always repaired at "none", uncapped
 
 
+@dataclass
+class BackoffCfg:
+    """The EA backs off the GPU beside cuOpt in arm A9 by a contribution-gated duty cycle (D-018; design: vault
+    `80-reviews/2026-10-08 A9 GPU back-off design (workflow).md`, section 1). Only the EA's GPU DUTY changes — the share
+    of wall time in which it may keep work on the GPU: a host-side token bucket sleeps between FJ launches and between
+    generations (`ea.backoff`). Phase Y (no incumbent anywhere): duty 2^-yield_level until the first SCIP / cuOpt
+    incumbent, the EA's own first incumbent, or `yield_until_s` (wall seconds since t0). Phase P: full duty, stepping
+    down 1 -> 1/2 -> 1/4 (-> 1/8) to 2^-levels after a patience in BUSY seconds that depends on the EA's state (no own
+    feasible member: patience_search_s; own feasible, no material lead yet: patience_own_s; led: clamp(kappa / the
+    decayed material-event rate, patience_min_s, patience_max_s)), then step_s per further level; any material lead
+    (>= materiality in the repair clock's gap unit) or SCIP-confirmed assist restores full duty. `mode`: "active" plays
+    the rule; "shadow" only logs what it would do (the control arm: no sync, no sleep, no in-call pace); "forced" holds
+    `forced_duty` from t0 to the end (stage-0 calibration only, never a default). Inert unless
+    `exchange.from_cuopt` is true (the runner sets it for A9 alone). Off by default: with `enabled: false` the section
+    is inert and is left out of the configuration hash (`EAConfig.hash`)."""
+    enabled: bool = False
+    mode: str = "active"               # "active" | "shadow" (bookkeeping only) | "forced" (fixed duty, stage 0 only)
+    forced_duty: float = 1.0           # forced mode: the duty held from t0 to the end
+    yield_level: int = 2               # phase Y duty 2^-yield_level (stage-0 rule (a))
+    levels: int = 2                    # L: the ladder's floor duty 2^-L (stage-0 rule (b))
+    yield_until_s: float = 30.0        # phase Y ends at this wall time since t0 at the latest (stage-0 rule (c))
+    patience_search_s: float = 75.0    # busy seconds before the first step down with no own feasible member (rule (d))
+    patience_own_s: float = 30.0       # ... with an own feasible member but no material lead yet (rule (e))
+    materiality: float = 1e-3          # a lead / assist counts if its gain (gap units) is at least this
+    patience_kappa: float = 3.0        # led: patience = clamp(kappa / rate, patience_min_s, patience_max_s)
+    patience_min_s: float = 2.0
+    patience_max_s: float = 40.0
+    half_life_s: float = 20.0          # the material-event rate decays with this half-life (busy seconds)
+    step_s: float = 4.0                # busy seconds without a contribution between two further steps down
+    burst_s: float = 0.25              # the token bucket sleeps once the credit falls below -burst_s
+    max_sleep_s: float = 4.0           # longest sleep at one pace point
+    slice_s: float = 0.25              # a sleep is cut in slices of at most this; each keeps the stop poll alive
+    wake_min_s: float = 5.0            # a partner improvement forgives the credit at most once per this many seconds
+    assist: bool = True                # count SCIP-confirmed improvements of EA posts as contributions
+
+
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
 _LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False,
                   "ranks.rank1_mode": "top", "ranks.rank1_size": 0, "ranks.rank1_min_diff": 0,
@@ -320,7 +360,8 @@ class EAConfig:
     strategy: StrategyCfg = field(default_factory=StrategyCfg)
     lp_stream: LpStreamCfg = field(default_factory=LpStreamCfg)
     repair_clock: RepairClockCfg = field(default_factory=RepairClockCfg)
-    backend: str = "cupy"            # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
+    backoff: BackoffCfg = field(default_factory=BackoffCfg)
+    backend: str = "cupy"           # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
     gpu_mem_gb: float = 12.0           # CuPy pool limit (the only GPU memory cap on GB10) = cuOpt's RMM limit in A2:
                                        # equal GPU memory for both partners; cuOpt needs ~10.5 GB (measured 2026-10-06)
     log_every: int = 10                # generations between generation-log records
@@ -332,9 +373,9 @@ class EAConfig:
 
     def hash(self) -> str:
         """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy`,
-        `lp_stream` and `repair_clock` sections while disabled, and the fields in `_LATE_DEFAULTS` while at their
-        default: they are inert then, so every configuration written before a section or field existed keeps its hash
-        (the default's `9ac4a93bf93b` among them)."""
+        `lp_stream`, `repair_clock` and `backoff` sections while disabled, and the fields in `_LATE_DEFAULTS` while at
+        their default: they are inert then, so every configuration written before a section or field existed keeps its
+        hash (the default's `9ac4a93bf93b` among them)."""
         d = self.to_dict()
         d.pop("name", None)
         if not self.strategy.enabled:
@@ -343,6 +384,8 @@ class EAConfig:
             d.pop("lp_stream", None)
         if not self.repair_clock.enabled:
             d.pop("repair_clock", None)
+        if not self.backoff.enabled:
+            d.pop("backoff", None)
         for dotted, default in _LATE_DEFAULTS.items():     # fields added after a hash was recorded: out while default
             sec, _, k = dotted.partition(".")
             if d.get(sec, {}).get(k, object()) == default:
@@ -483,6 +526,25 @@ class EAConfig:
         # the gain signal relies on FEASIBLE => strictly below the cutoff (the cutoff row of the feasibility jump)
         _check(not rc.enabled or (rp.method == "fj" and rp.objective_mode == "cutoff_row"),
                "repair_clock.enabled needs repair.method fj and repair.objective_mode cutoff_row")
+        bo = self.backoff
+        _check(isinstance(bo.enabled, bool) and isinstance(bo.assist, bool), "backoff.enabled/assist are bools")
+        _check(bo.mode in ("active", "shadow", "forced"), "backoff.mode in active|shadow|forced")
+        # yield_level is bounded by the ladder's largest level (3), not by `levels`: stage 0 sets the phase-Y duty and
+        # the floor by separate rules (D-018), and a phase-Y duty below the floor (e.g. 1/8 with a floor of 1/4) must
+        # stay expressible
+        _check(all(isinstance(v, int) and not isinstance(v, bool) for v in (bo.levels, bo.yield_level))
+               and 1 <= bo.levels <= 3 and 0 <= bo.yield_level <= 3,
+               "backoff: integers 1 <= levels <= 3 and 0 <= yield_level <= 3")
+        _check(isinstance(bo.forced_duty, (int, float)) and not isinstance(bo.forced_duty, bool)
+               and 0.0 < bo.forced_duty <= 1.0, "backoff.forced_duty in (0, 1]")
+        secs = (bo.yield_until_s, bo.patience_search_s, bo.patience_own_s, bo.patience_min_s, bo.patience_max_s,
+                bo.half_life_s, bo.step_s, bo.burst_s, bo.max_sleep_s, bo.slice_s, bo.wake_min_s)
+        _check(all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in secs),
+               "backoff: every *_s > 0")
+        _check(bo.patience_min_s <= bo.patience_max_s, "backoff.patience_min_s <= backoff.patience_max_s")
+        _check(bo.patience_kappa > 0 and bo.materiality >= 0, "backoff.patience_kappa > 0, materiality >= 0")
+        _check(not bo.enabled or (self.exchange.enabled and rp.method == "fj"),
+               "backoff.enabled needs exchange.enabled and repair.method fj")
         _check(self.backend in ("cupy", "numpy", "auto"), "backend in cupy|numpy|auto")
         _check(self.gpu_mem_gb > 0, "gpu_mem_gb > 0")
         _check(self.log_every >= 1 and self.lineage_depth >= 0, "logging parameters")

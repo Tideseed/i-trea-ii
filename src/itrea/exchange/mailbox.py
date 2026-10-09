@@ -142,6 +142,16 @@ class InfoChannel:
         self.last_seq = d.get("seq", 0)
         return d
 
+    def peek(self) -> dict | None:
+        """The latest info WITHOUT consuming it: `_seen` and `last_seq` are left alone, so the next `poll` still
+        returns it (the EA's GPU back-off reads the partners' incumbents inside its repair calls, D-018). None if
+        nothing was posted or the file is being replaced."""
+        try:
+            with open(self.path, "rb") as fh:
+                return json.loads(fh.read())
+        except (OSError, ValueError):
+            return None
+
 
 class Mailbox:
     """All channels of one run, seen from one role ("solver", "solver2", "ea", "cuopt" or "runner")."""

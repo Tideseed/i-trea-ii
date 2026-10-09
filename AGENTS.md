@@ -103,6 +103,7 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/ea/continuous.py` | closed-form decoding of singleton continuous columns (`repair.continuous: auto`) | built |
 | `src/itrea/ea/lp_decode.py` | the LP decode (`repair.continuous: lp_decode` = auto + a HiGHS worker process that fixes the integers of a few candidates per generation and solves the LP over the continuous variables; D-017, issue #27): pure selection / budget / screen functions and the `LPDecoder` worker; the runner refuses it for A9 / A3x — 2026-10-08, review fixes 2026-10-09 (`vault/80-reviews/2026-10-08 lp_decode review (workflow).md`), CPU-tested, GPU tests written but not run, not yet run on an instance (`tools/probe_lp_decode.py` probes the worker on stored vectors) | built |
 | `src/itrea/ea/repair_clock.py` | the repair clock's controller: one lane-step horizon per generation from each horizon's measured gain per second (`repair_clock`, off by default; shadow mode logs only) — 2026-10-06, CPU-tested, not yet run on an instance | built |
+| `src/itrea/ea/backoff.py` | A9's GPU back-off (D-018): a contribution-gated duty cycle — phase Y (reduced duty until the first incumbent anywhere), then a ladder of duties stepped down after a state-dependent patience in busy seconds and restored by material leads / SCIP-confirmed assists; a host-side token bucket the engine sleeps on between generations and between FJ launches (`backoff`, off by default, inert unless `exchange.from_cuopt`; modes active / shadow / forced) — 2026-10-09, CPU-tested, not yet run on an instance | built |
 | `src/itrea/ea/engine.py` | the generation loop, exchange in/out, genealogy, frontier updates | built |
 | `src/itrea/ea/run.py` | EA process: `python -m itrea.ea.run …` | built |
 | `src/itrea/exchange/mailbox.py` | file mailbox on `/dev/shm` (fallback transport) | core |
@@ -117,7 +118,7 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/experiments/record_env.py` | versions, hardware, git state for every run record | built |
 | `src/itrea/experiments/pair.py` | one run: launch the arm's processes, start barrier, stop, every exit code checked, `run.json` | built |
 | `src/itrea/experiments/pool.py` | a job file under every D-002/D-003 control: Williams arm order per block, blocks never split, gates per run | built |
-| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke` (`itrea make-jobs …`) | built |
+| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke`, `backoff0` (D-018 stage 0) (`itrea make-jobs …`) | built |
 | `src/itrea/benchmarks/hardset.py` | the hard pool: screening candidates, the stage-2 rule, strata, family split, freeze (`itrea screen-candidates`, `screen-stage2`, `pool-freeze`) | built |
 | `src/itrea/analysis/metrics.py` | primal gap, P(T), primal-dual integral, times to target (adapted from optopt) | built |
 | `src/itrea/analysis/check_solutions.py` | independent exact check of every stored incumbent (adapted from optopt) | built |
@@ -126,8 +127,9 @@ non-default branch before relying on it (`vault/80-reviews/2026-10-05 design cri
 | `src/itrea/analysis/lineage.py` | depth-1 matched Rank 0 odds ratio, Mantel–Haenszel (descriptive) | built |
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
+| `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria (M1–M5, outcome, fallbacks) applied to the run table and run directories, with a verdict (`itrea backoff-report --stage 0\|1`) | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
-| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b` on 2026-10-06), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `itrea2-adaptive.yaml` (development: the self-adaptive repair strategy + the EA's own LP point), `ablations/*.yaml`; `tests/test_configs.py` keeps the default file equal to the code | core |
+| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b` on 2026-10-06), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `itrea2-adaptive.yaml` (development: the self-adaptive repair strategy + the EA's own LP point), `itrea2-dev-rc-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms of A9's GPU back-off: shadow, forced duty ½ / ¼ / ⅛; `-bo1` is written after stage 0), `ablations/*.yaml`; `tests/test_configs.py` keeps the default file equal to the code | core |
 | `tools/serving-window.sh` | stop / restore the two local LLM servers for a window | core |
 | `tools/bench_ls.py` | local-search throughput, GPU vs CPU reference (`itrea bench-ls`) | built |
 | `datasets/` | derived tables (committed); `hardness_from_optopt.csv` is background only | — |

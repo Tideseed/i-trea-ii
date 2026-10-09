@@ -132,10 +132,13 @@ class LocalSearch:
     def set_cutoff(self, inc_key: float | None) -> None:
         self.impl.set_cutoff(inc_key)
 
-    def run(self, X, should_stop=None, scale_idx=None, horizon=None, cap_s=None) -> dict:
-        clock = {k: v for k, v in (("horizon", horizon), ("cap_s", cap_s)) if v is not None}
+    def run(self, X, should_stop=None, scale_idx=None, horizon=None, cap_s=None, pace=None) -> dict:
+        """Repair X in place. `horizon` / `cap_s` (the repair clock) and `pace` (the EA's GPU back-off, D-018: a
+        callable that may sleep between launches / slices and returns the seconds slept) reach the feasibility jump
+        only; any of them with another method is an error."""
+        clock = {k: v for k, v in (("horizon", horizon), ("cap_s", cap_s), ("pace", pace)) if v is not None}
         if clock and self.method != "fj":
-            raise ValueError(f"horizon / cap_s need repair.method 'fj', not {self.method!r}")
+            raise ValueError(f"horizon / cap_s / pace need repair.method 'fj', not {self.method!r}")
         if self.method == "none":
             out = self.impl.run(X, should_stop=should_stop)
         else:

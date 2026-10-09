@@ -1,0 +1,31 @@
+# I-TREA II -- A9 GPU back-off (D-018), arm variant `bo0`: the stage-1 CONTROL and the stage-0 reference: the governor
+# in SHADOW mode (bookkeeping only — no sync, no sleep, no in-call pace; it logs the would-be phase, level and steps
+# down). Its genealogy equals the run without the governor (tests on the reference fixtures).
+# The base (everything above `backoff`) is configs/itrea2-dev-rc-3way.yaml verbatim: with `backoff.enabled: false`
+# this file IS that configuration (hash 1d12ad490dd0; tests/test_backoff.py checks it). `exchange.from_cuopt` is left
+# out on purpose: the runner adds it for A9 (an arm-implied change), and without it the governor is inert (A3x with
+# this file stays A3x). Development only (D-010). Design: vault 80-reviews/2026-10-08 A9 GPU back-off design
+# (workflow).md; decision D-018.
+#
+# Stage-0 arms (seed 2, 120 s, jobs/dev-backoff0.jsonl): bo0 (shadow = duty 1, the reference), bof50 / bof25 / bof12
+# (forced duty 1/2, 1/4, 1/8), beside same-day A6. `itrea backoff-report --stage 0` applies D-018's stage-0 rules.
+# NOT YET WRITTEN: configs/itrea2-dev-rc-3way-bo1.yaml (mode active, with the stage-0 values) — written and committed
+# after stage 0, from the values `itrea backoff-report --stage 0` prints, before stage 1.
+#
+# Partial file over the defaults.
+name: itrea2-dev-rc-3way-bo0
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: active
+backoff:
+  enabled: true
+  mode: shadow
