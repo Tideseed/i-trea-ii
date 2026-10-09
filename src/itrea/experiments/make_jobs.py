@@ -28,10 +28,11 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
-chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12} plus
-ca__Scenario400_reserves_1 and glass4 x A9@bo0 = 17 runs, one block per instance (the pool interleaves a block's arms in Williams order). The A9
-variants run the configuration files configs/itrea2-dev-rc-3way-<variant>.yaml (the runner adds exchange.from_cuopt);
-A6 runs no EA (config null). Instance paths come from datasets/dev_set.csv and datasets/classprobe_set.csv.
+chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
+and glass4 x A9@bo0, and sing44 x A2 (SCIP || cuOpt, zero EA duty: rule (b)'s same-day reference, D-018 amendment) =
+18 runs, one block per instance (the pool interleaves a block's arms in Williams order). The A9 variants run the
+configuration files configs/itrea2-dev-rc-3way-<variant>.yaml (the runner adds exchange.from_cuopt); A6 and A2 run no
+EA (config null). Instance paths come from datasets/dev_set.csv and datasets/classprobe_set.csv.
 """
 from __future__ import annotations
 
@@ -68,6 +69,7 @@ BACKOFF0_SET, BACKOFF0_SEED, BACKOFF0_BUDGET = "backoff0", 2, 120.0
 BACKOFF0_DUTY_INSTANCES = ("chromaticindex1024-7", "sing44", "comp21-2idx")
 BACKOFF0_LEAD_INSTANCES = ("ca__Scenario400_reserves_1", "glass4")
 BACKOFF0_VARIANTS = ("bo0", "bof50", "bof25", "bof12")
+BACKOFF0_A2_INSTANCES = ("sing44",)      # rule (b)'s zero-duty reference (D-018 amendment, 2026-10-09)
 BACKOFF_BASE = "configs/itrea2-dev-rc-3way"
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
 OPTIONAL = ("emphasis", "ablation", "variant")
@@ -418,7 +420,8 @@ def instance_paths(names, tables=INSTANCE_TABLES) -> dict[str, str]:
 
 def backoff_stage0(budget: float = BACKOFF0_BUDGET, seed: int = BACKOFF0_SEED, set_: str = BACKOFF0_SET,
                    tables=INSTANCE_TABLES) -> list[dict]:
-    """D-018 stage 0 (module docstring): 3 instances x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12} + 2 x A9@bo0."""
+    """D-018 stage 0 (module docstring): 3 instances x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12} + 2 x A9@bo0 +
+    sing44 x A2 (18 runs)."""
     names = BACKOFF0_DUTY_INSTANCES + BACKOFF0_LEAD_INSTANCES
     where = instance_paths(names, tables)
     out = []
@@ -429,6 +432,8 @@ def backoff_stage0(budget: float = BACKOFF0_BUDGET, seed: int = BACKOFF0_SEED, s
             out.append(job(where[n], set_, "A9", seed, budget, config=f"{BACKOFF_BASE}-{v}.yaml", variant=v, **common))
         if n in BACKOFF0_DUTY_INSTANCES:
             out.append(job(where[n], set_, "A6", seed, budget, config=None, **common))
+        if n in BACKOFF0_A2_INSTANCES:
+            out.append(job(where[n], set_, "A2", seed, budget, config=None, **common))
     return _sorted(out)
 
 
@@ -476,7 +481,7 @@ def main(argv=None) -> int:
     sm.add_argument("--arms", default="A0")
     sm.add_argument("--budget", type=float, default=5.0)
     sm.add_argument("--config")
-    b0 = sub.add_parser("backoff0", help="D-018 stage 0: A9 GPU back-off calibration (17 runs)")
+    b0 = sub.add_parser("backoff0", help="D-018 stage 0: A9 GPU back-off calibration (18 runs)")
     b0.add_argument("--budget", type=float, default=BACKOFF0_BUDGET)
     b0.add_argument("--seed", type=int, default=BACKOFF0_SEED)
     for p in (s1, s2, e1, e4, cf, sm, b0):

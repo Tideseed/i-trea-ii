@@ -228,8 +228,11 @@ is empty:
     "paused". Each slice runs `_should_stop` (the stop file, the deadline — a sleep never passes it) and, when due, an
     exchange tick; `_lps_use` is skipped while asleep (`_bo_sleeping`), so LP-stream children do not pile up per wall
     second. A tick that shows a partner improvement (the external incumbent fell by >= materiality, or a new solver or
-    cuOpt batch is pending) ends the sleep — the next generation injects the rows and relays them to SCIP — and forgives
-    the credit at most once per `wake_min_s`. If a stop arrived, `step` returns without a generation.
+    cuOpt batch is pending) is a wake (`bo.wake`): it forgives the credit at most once per `wake_min_s` and never in
+    forced mode, and only a forgiven wake ends the sleep — the next generation injects the rows and relays them to
+    SCIP. A wake that forgives nothing leaves the sleep running with its ticks live: ending it would only move the same
+    debt into the children's first FJ chunk (pace point 2, no tick there), still before the rows are injected. If a
+    stop arrived, `step` returns without a generation.
   - pace point 2, inside `FJGpu.run` / `FJCpu.run` (`_ls_run` passes `pace=self._bo_pace` in active and forced mode
     only): before every chunk and between launches; the same sync-then-sliced-sleep with the stop poll, and in phase Y
     a non-consuming peek (`InfoChannel.peek`) of SCIP's and cuOpt's info channels at most every `exchange.poll_s`. No
@@ -242,13 +245,18 @@ is empty:
   member (`_rc_own_feasible`, needs no repair clock) once. Contributions: every incumbent with source "self" is a lead
   of dg = the gap unit from ref = min(best_key, inc_external) (taken before best_key changes) to its key; every accepted
   verdict on an EA post that is not an unchanged cuOpt row and whose note says `improved` is an assist of dg = the gap
-  unit from `primal_before` to `primal_after` (`backoff.assist`). Records: `backoff` events on every change (phase-Y
-  exit, own feasible, step down, a material contribution that changed the level or state, a forgiven wake), `contrib`
-  events for every lead and assist (`what`: lead | assist, `dg`, `ref`, `key`, `id`, `busy_s`, `material`), `gen`
+  unit from `primal_before` to `primal_after` (`backoff.assist`) — unless that row was already credited as a material
+  lead: one improvement enters λ̂ once (its `contrib` event is written with `dup_lead` and `material` false; the
+  summary counts them, `n_assist_dup`). Records: `backoff` events on every change (phase-Y exit, own feasible, step
+  down — dated at its due time, `t_due` / `busy_s` —, a material contribution that changed the level or state, a
+  forgiven wake), `contrib` events for every lead and assist (`what`: lead | assist, `dg`, `ref`, `key`, `id`,
+  `busy_s`, `material`), `gen`
   events add the `bo_*` fields and `ls_steps` (lane steps since the previous `gen` event), `rclock` events add
   `bo_wall_s` / `bo_paused_s` of the generation, the summary a `backoff` block (with `ls_steps` and `max_launch_s`).
   Shadow mode: the same bookkeeping at generation boundaries (no sync, no sleep, no pace argument, no peek, no extra
-  stop poll) — its genealogy is that of the run without the governor. Forced mode: the fixed duty from t0 (stage-0 calibration). Ticks during a pause may still do small device
+  stop poll) — its genealogy is that of the run without the governor; a step that falls due between two boundaries is
+  still logged before a lead or the first own feasible member resets the ladder (both run `update` first), and once
+  more at `finish`. Forced mode: the fixed duty from t0 (stage-0 calibration). Ticks during a pause may still do small device
   work (an injected row's copy, an LP-stream point's evaluation).
 
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
@@ -1191,6 +1199,8 @@ class Engine:
         self._bo_next_peek = -math.inf
         self._bo_ls_steps = self._bo_ls_steps_logged = 0
         self._bo_max_launch = 0.0
+        self._bo_lead_ids: set[int] = set()     # ids credited as material leads (their assists are not credited)
+        self._bo_n_dup = 0
         if self.bo is not None:
             self._bo_log(self.bo.snapshot(self.t0, "start"))
         # repair clock (module docstring): generation 0 is before any feasible member, so it plays "none"
@@ -1499,10 +1509,11 @@ class Engine:
         self.rc_dec = self.rclock.decide(self._bo_busy_now() - self.t0, has_feasible, gen=self.gen)
 
     def _rc_gen_start(self) -> None:
-        """The generation's start on the wall and the busy clock (the repair clock's gen_seconds are busy seconds)."""
-        self._rc_t_gen = time.monotonic()
-        self._rc_b_gen = self._bo_busy_now()
-        self._rc_p_gen = self.bo.paused if self.bo is not None else 0.0
+        """The generation's start on the wall and the busy clock (the repair clock's gen_seconds are busy seconds),
+        both from ONE clock reading, so gen_s + paused = wall holds exactly per generation."""
+        t = time.monotonic()
+        p = self.bo.paused if self.bo is not None else 0.0
+        self._rc_t_gen, self._rc_p_gen, self._rc_b_gen = t, p, t - p
 
     def _rc_own_feasible(self) -> bool:
         """The repair clock's phase test: a feasible member that is not an unchanged solver solution (origin INJECTED
@@ -1550,12 +1561,13 @@ class Engine:
         """Close the generation in the repair clock and write its `rclock` event."""
         if self.rclock is None:
             return
-        now = self._bo_busy_now()                        # = time.monotonic() without the GPU back-off
+        t = time.monotonic()                             # one reading for the busy and the wall clock
+        p = self.bo.paused if self.bo is not None else 0.0
+        now = t - p                                      # the busy clock (= time.monotonic() without the back-off)
         ev = self.rclock.end_generation(now - self.t0, now - self._rc_b_gen)
         if ev is not None:
-            if self.bo is not None:                      # the accounting check: gen_s + paused = wall
-                ev.update(bo_wall_s=round(time.monotonic() - self._rc_t_gen, 6),
-                          bo_paused_s=round(self.bo.paused - self._rc_p_gen, 6))
+            if self.bo is not None:                      # the accounting check: gen_s + paused = wall, by construction
+                ev.update(bo_wall_s=round(t - self._rc_t_gen, 6), bo_paused_s=round(p - self._rc_p_gen, 6))
             self.trace.event("rclock", **ev)
 
     # ---------------------------------------------------------------------------------------------- GPU back-off
@@ -1625,11 +1637,11 @@ class Engine:
                         n1 = sum(1 for b in self.pending if b.src in ("solver", "cuopt"))
                         if n1 > n0 or (math.isfinite(self.inc_external)
                                        and gap_unit(inc0, self.inc_external) >= mat):
-                            now = time.monotonic()      # a partner improvement: wake up
-                            if bo.wake(now):
+                            now = time.monotonic()      # a partner improvement: a wake
+                            if bo.wake(now):            # forgiven: wake up (the next generation injects the rows)
                                 self._bo_log(bo.snapshot(now, "wake"))
-                            break
-                        now = time.monotonic()          # no improvement: sleep on (a slice at least 1 ms)
+                                break
+                        now = time.monotonic()          # no (forgiven) wake: sleep on (a slice at least 1 ms)
                         if now >= end or bo.duty >= 1.0:
                             break
                     if bo.in_phase_y and self._bo_peek(now):
@@ -1671,14 +1683,17 @@ class Engine:
             return
         ref = min(self.best_key, self.inc_external)
         dg = gap_unit(ref, key, self.dual_key)
-        material, rec = bo.contribution(now, dg, "lead", ref)
-        self._bo_log(rec)
+        material, recs = bo.contribution(now, dg, "lead", ref)
+        self._bo_log(recs)
+        if material:
+            self._bo_lead_ids.add(int(iid))
         self.trace.event("contrib", what="lead", dg=dg, id=int(iid), ref=ref, key=float(key),
                          busy_s=round(bo.busy(now), 6), material=material)
 
     def _bo_assist(self, iid: int, note: dict) -> None:
         """An accepted verdict on an EA post: an assist if SCIP took it as an improvement (note `improved`) and the row
-        is not an unchanged cuOpt vector; dg = the gap unit from primal_before to primal_after."""
+        is not an unchanged cuOpt vector; dg = the gap unit from primal_before to primal_after. A row already credited
+        as a material lead is not credited again (one improvement, one event in λ̂): logged with `dup_lead`."""
         if not self.cfg.backoff.assist or not note.get("improved") or note.get("cuopt") or iid in self.cuopt_posted:
             return
         before, after = note.get("primal_before"), note.get("primal_after")
@@ -1688,8 +1703,13 @@ class Engine:
         ka = self.prob.key_of_objective(float(after))
         dg = gap_unit(kb, ka, self.dual_key)
         now = time.monotonic()
-        material, rec = self.bo.contribution(now, dg, "assist", kb)
-        self._bo_log(rec)
+        if int(iid) in self._bo_lead_ids:
+            self._bo_n_dup += 1
+            self.trace.event("contrib", what="assist", dg=dg, id=int(iid), ref=kb, key=ka,
+                             busy_s=round(self.bo.busy(now), 6), material=False, dup_lead=True)
+            return
+        material, recs = self.bo.contribution(now, dg, "assist", kb)
+        self._bo_log(recs)
         self.trace.event("contrib", what="assist", dg=dg, id=int(iid), ref=kb, key=ka,
                          busy_s=round(self.bo.busy(now), 6), material=material)
 
@@ -2974,8 +2994,10 @@ class Engine:
         if self.rclock is not None:
             out["repair_clock"] = self.rclock.record()
         if self.bo is not None:
-            out["backoff"] = dict(self.bo.record(time.monotonic()), ls_steps=self._bo_ls_steps,
-                                  max_launch_s=round(self._bo_max_launch, 6))
+            now = time.monotonic()
+            self._bo_log(self.bo.update(now))            # a step due after the last update (shadow: the last boundary)
+            out["backoff"] = dict(self.bo.record(now), ls_steps=self._bo_ls_steps,
+                                  max_launch_s=round(self._bo_max_launch, 6), n_assist_dup=self._bo_n_dup)
         if self.from_cuopt:
             out.update(exchange_from_cuopt=True, inc_solver=self.inc_solver, inc_cuopt=self.inc_cuopt,
                        dual_key_cuopt=self.dual_key_cuopt, final_cuopt_pop=self._cuopt_members())

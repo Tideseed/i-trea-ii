@@ -1,10 +1,14 @@
 """The EA's GPU back-off beside cuOpt (D-018; `itrea.ea.backoff`, `BackoffCfg`): the governor on a fake clock (long-run
-duty per level, escalation times per state, the own-feasible reset, the κ/λ̂ clamp, phase-Y exit and expiry, one
-forgiven wake per wake_min_s, the max_sleep cap, forced and shadow modes), the configuration (hash out while off,
-validation), the mailboxes' non-consuming `peek`, `FJCpu.run(pace=...)`, and the engine on NumPy: inert while off or
-without `exchange.from_cuopt` (equal to the recorded references), shadow mode with the genealogy of the run without
-the governor, and active / forced mode under scripted cuOpt traffic (sleeps, the stop file within one slice, the
-deadline never overslept, the repair clock's gen_s / o_s without the pauses, leads and assists credited).
+duty per level, escalation times per state, the own-feasible reset, the κ/λ̂ clamp, phase-Y exit and expiry — dated at
+yield_until_s however late it is detected —, one forgiven wake per wake_min_s in active mode and none in forced mode
+(its dose stays fixed under partner traffic), steps due before a lead / own-feasible reset logged at their due time,
+the max_sleep cap, forced and shadow modes), the configuration (hash out while off, validation), the mailboxes'
+non-consuming `peek`, `FJCpu.run(pace=...)`, and the engine on NumPy: inert while off or without `exchange.from_cuopt`
+(no governor built; equal to the recorded references), shadow mode with the genealogy of the run without the governor,
+and active / forced mode under scripted cuOpt traffic (sleeps, a forgiven wake ends a between-generation sleep and a
+non-forgiven one does not, the stop file within one slice, the deadline never overslept, the repair clock's gen_s /
+o_s without the pauses and its decisions on busy time, leads and assists credited once per improvement, an unchanged
+cuOpt row never an assist).
 
 Toy models only; NumPy backend; nothing on the GPU (the GPU pace tests are in tests/test_fj_gpu.py, marker `gpu`)."""
 from __future__ import annotations
@@ -22,7 +26,7 @@ from itrea.benchmarks import toy
 from itrea.config import BackoffCfg, EAConfig
 from itrea.ea.backoff import Backoff, gap_unit
 from itrea.exchange.mailbox import Message
-from itrea.solvers.common import ORIGIN_SOLVER
+from itrea.solvers.common import ORIGIN_SOLVER, POST_CUOPT
 from itrea.trace import Trace, read_events
 from test_engine import cfg_for, knapsack_optimum_x, prepared
 from test_three_way import _CuoptLPMailbox, _TrafficCuoptMailbox
@@ -162,7 +166,7 @@ def test_escalation_own_state_and_reset():
     s.bo.phase_y_exit(s.now, "tick")
     b0 = s.bo.busy(s.now)
     s.work(50.0)
-    r = s.bo.own_feasible(s.now)
+    r = s.bo.own_feasible(s.now)[-1]
     assert r["reason"] == "own_feasible" and r["state"] == "own" and s.bo.state == "own"
     assert s.bo.own_feasible(s.now + 1) is None                       # first transition only
     s.work(40.0)
@@ -186,13 +190,13 @@ def test_lead_and_assist_restore_full_duty():
     s.work(10.0)
     assert s.bo.level == 2
     m, r = s.bo.contribution(s.now, 5e-4, "lead", ref=1.0)              # below materiality: nothing
-    assert not m and r is None and s.bo.level == 2 and s.bo.state == "search"
-    m, r = s.bo.contribution(s.now, 0.01, "lead", ref=1.0)
+    assert not m and r == [] and s.bo.level == 2 and s.bo.state == "search"
+    m, (r,) = s.bo.contribution(s.now, 0.01, "lead", ref=1.0)
     assert m and r["reason"] == "lead" and r["level"] == 0 and r["state"] == "led" and s.bo.sleep_due(s.now) == 0
     assert s.bo.first_lead is not None and s.bo.own is not None
     s.work(60.0)
     assert s.bo.level == 2
-    m, r = s.bo.contribution(s.now, 0.5, "assist")
+    m, (r,) = s.bo.contribution(s.now, 0.5, "assist")
     assert m and r["reason"] == "assist" and s.bo.level == 0
     assert s.bo.n_material == {"lead": 1, "assist": 1} and s.bo.n_all == {"lead": 2, "assist": 1}
     with pytest.raises(ValueError):
@@ -239,7 +243,9 @@ def test_led_patience_clamp_and_decay():
 
 
 def test_one_forgiven_wake_per_window():
-    s = Sim(cfg(mode="forced", forced_duty=0.25, wake_min_s=5.0))
+    """Active mode at a reduced duty (phase Y at level 2): a wake forgives the credit at most once per wake_min_s and
+    leaves the level alone."""
+    s = Sim(cfg(mode="active", yield_level=2, yield_until_s=1e6, wake_min_s=5.0))
     s.now += 2.0
     assert s.bo.sleep_due(s.now) > 0
     assert s.bo.wake(s.now) is True and s.bo.c == 0.0 and s.bo.sleep_due(s.now) == 0.0
@@ -249,7 +255,27 @@ def test_one_forgiven_wake_per_window():
     assert s.bo.wake(s.now) is False and s.bo.sleep_due(s.now) == pytest.approx(debt)   # not forgiven within 5 s
     s.now += 3.1
     assert s.bo.wake(s.now) is True
-    assert (s.bo.wakes, s.bo.forgiven) == (3, 2)
+    assert (s.bo.wakes, s.bo.forgiven) == (3, 2) and s.bo.level == 2 and s.bo.in_phase_y
+
+
+def test_forced_mode_counts_wakes_but_never_forgives():
+    """Forced mode (stage 0): a wake is counted but the debt stays, so the measured duty is the set dose however often
+    partners post (D-018 amendment) — here a wake at every between-generation pause."""
+    s = Sim(cfg(mode="forced", forced_duty=0.25, wake_min_s=5.0))
+    s.now += 2.0
+    debt = s.bo.sleep_due(s.now)
+    c = s.bo.c
+    assert debt > 0 and s.bo.wake(s.now) is False and s.bo.c == c and s.bo.sleep_due(s.now) == pytest.approx(debt)
+    s.now += 10.0
+    assert s.bo.wake(s.now) is False and (s.bo.wakes, s.bo.forgiven) == (2, 0)
+    for d in (0.5, 0.25, 0.125):
+        f = Sim(cfg(mode="forced", forced_duty=d, wake_min_s=5.0))
+        while f.wall() < 120.0:
+            f.work(0.3)                                      # a generation of paced FJ launches
+            f.bo.wake(f.now)                                 # a partner improvement at every pause
+            f.pace()
+        assert f.bo.wakes >= 40 and f.bo.forgiven == 0
+        assert f.bo.busy(f.now) / f.wall() == pytest.approx(d, abs=0.01)
 
 
 def test_shadow_never_sleeps_and_logs_would_be_steps():
@@ -265,6 +291,65 @@ def test_shadow_never_sleeps_and_logs_would_be_steps():
     rec = s.bo.record(s.now)
     assert rec["mode"] == "shadow" and rec["first_escalation"]["busy_s"] == pytest.approx(b0 + 10.0)
     assert rec["busy_share"] == pytest.approx(1.0)
+
+
+def test_shadow_logs_a_step_due_before_a_lead_resets_it():
+    """Shadow mode updates once per generation: a step down that falls due inside a generation in which a material
+    lead (or the first own feasible member) then resets the ladder is still logged, dated at its due time — before
+    the reset — and the would-be first escalation precedes the first lead."""
+    s = Sim(cfg(mode="shadow", levels=2, patience_search_s=75.0, patience_own_s=30.0, step_s=4.0))
+    t = lambda w: s.bo.t0 + w                                                   # noqa: E731
+    s.bo.phase_y_exit(t(0.3), "tick")
+    s.recs += s.bo.own_feasible(t(10.0))                                       # own: the step falls due at busy 40
+    s.recs += s.bo.update(t(15.0)) + s.bo.update(t(30.0))                      # generation boundaries
+    m, recs = s.bo.contribution(t(43.0), 0.01, "lead")                         # inside the next generation
+    assert m and [r["reason"] for r in recs] == ["escalate", "lead"]
+    esc = recs[0]
+    assert esc["busy_s"] == pytest.approx(40.0) and esc["t_due"] == pytest.approx(40.0) and esc["level"] == 1
+    assert s.bo.first_escalation == dict(t=40.0, busy_s=40.0, level=1, state="own")
+    assert s.bo.level == 0 and s.bo.first_lead["t"] == pytest.approx(43.0)
+    rec = s.bo.record(t(60.0))
+    assert rec["escalations"] == 1 and rec["busy_per_level"]["1"] == pytest.approx(3.0)
+    assert [x[0] for x in rec["timeline"]] == sorted(x[0] for x in rec["timeline"])   # the timeline is in due order
+    # the first own feasible member resets too: a search-state step due before it is logged first
+    o = Sim(cfg(mode="shadow", levels=2, patience_search_s=10.0, step_s=4.0))
+    o.bo.phase_y_exit(o.bo.t0, "tick")
+    recs = o.bo.own_feasible(o.bo.t0 + 15.0)
+    assert [r["reason"] for r in recs] == ["escalate", "escalate", "own_feasible"]
+    assert [r["t_due"] for r in recs[:2]] == pytest.approx([10.0, 14.0]) and o.bo.b_last == pytest.approx(15.0)
+
+
+def test_phase_y_expiry_is_dated_at_yield_until_s():
+    """An expiry detected late (shadow: at the first generation boundary after it) is dated at yield_until_s — phase P
+    and the would-be ladder start there —, and an exit seen by a tick, a peek or the EA's own incumbent after
+    yield_until_s is the expiry too."""
+    c = cfg(mode="shadow", yield_until_s=30.0, patience_search_s=75.0, levels=2)
+    s = Sim(c)
+    recs = s.bo.update(s.bo.t0 + 48.0)                                         # chromaticindex's generation 0
+    assert [r["reason"] for r in recs] == ["y_expiry"] and recs[0]["t_due"] == pytest.approx(30.0)
+    assert s.bo.y_exit == dict(t=30.0, busy_s=30.0, reason="expiry") and s.bo.b_last == pytest.approx(30.0)
+    assert s.bo.update(s.bo.t0 + 96.0) == []
+    esc = s.bo.update(s.bo.t0 + 119.0)
+    assert [(r["reason"], r["busy_s"], r["t_due"]) for r in esc] == [("escalate", 105.0, 105.0),
+                                                                     ("escalate", 109.0, 109.0)]
+    rec = s.bo.record(s.bo.t0 + 120.0)
+    assert rec["phase_y"]["length_s"] == pytest.approx(30.0) and rec["seconds_per_level"]["Y"] == pytest.approx(30.0)
+    for why in ("tick", "peek", "own"):
+        late = Sim(c)
+        r = late.bo.phase_y_exit(late.bo.t0 + 48.0, why)
+        assert r["reason"] == "y_expiry" and late.bo.y_exit == dict(t=30.0, busy_s=30.0, reason="expiry")
+    early = Sim(c)
+    assert early.bo.phase_y_exit(early.bo.t0 + 29.0, "tick")["reason"] == "y_tick"
+    # active at 1/8: the expiry's busy time counts the sleeps before it, not the work after it
+    a = Sim(cfg(yield_level=3, yield_until_s=30.0, patience_search_s=1e3))
+    a.now += 2.0
+    a.pace()                                                                   # 2 s of work, then a 4-s sleep
+    w1, b1 = a.wall(), a.bo.busy(a.now)
+    assert a.bo.paused == pytest.approx(4.0) and a.bo.in_phase_y
+    a.now = a.bo.t0 + 31.0                                                     # work from 6 s to 31 s, no pace point
+    r = a.bo.update(a.now)[0]
+    assert r["reason"] == "y_expiry" and a.bo.y_exit["t"] == 30.0
+    assert a.bo.y_exit["busy_s"] == pytest.approx(b1 + (30.0 - w1)) == pytest.approx(26.0)
 
 
 def test_record_and_gen_fields():
@@ -446,8 +531,10 @@ def test_fj_cpu_stop_during_a_sleep():
         if p.calls == 2:
             flag["stop"] = True                              # the stop arrives while asleep
     fj = _fj_cpu(prob)
-    out = fj.run(X0.copy(), should_stop=lambda: flag["stop"], pace=_Pace(0.001, on_call))
-    assert out["interrupted"] > 0 and out["interrupted"] == int(np.sum(fj.last_status == 0))
+    p = _Pace(0.001, on_call)
+    out = fj.run(X0.copy(), should_stop=lambda: flag["stop"], pace=p)
+    # pace 1, a one-row slice, pace 2 (the stop arrives while asleep), seen by the poll right after it: one row ran
+    assert p.calls == 2 and out["interrupted"] == 15 and int(np.sum(fj.last_status != 0)) == 1
 
 
 def test_local_search_pace_needs_fj():
@@ -496,9 +583,10 @@ class _Queue:
 class Partners:
     """SCIP and cuOpt in memory (arm A9): queued solution messages, latest-wins info channels with `peek`, posts to SCIP
     answered by a verdict per row whose note carries SCIP's primal_before / primal_after / improved (an EA row better
-    than SCIP's best becomes SCIP's incumbent), and a stop flag that turns on at `stop_at` (monotonic)."""
+    than SCIP's best becomes SCIP's incumbent) and, as scip_run does, `cuopt` for a row whose origin has POST_CUOPT
+    (`mark_cuopt`), and a stop flag that turns on at `stop_at` (monotonic)."""
 
-    def __init__(self, prob, scip_inc: float | None = None):
+    def __init__(self, prob, scip_inc: float | None = None, mark_cuopt: bool = True):
         self.prob = prob
         self.to_ea, self.lp, self.to_ea_cuopt = _Queue(), _Queue(), _Queue()
         self.info, self.info_cuopt = _Latest(), _Latest()
@@ -521,6 +609,8 @@ class Partners:
                         outer.best = float(o)
                     note = dict(row=r, primal_before=before, primal_after=outer.best, improved=bool(better),
                                 stored=bool(better), feasible=True, dup=False)
+                    if mark_cuopt and origin is not None and int(np.asarray(origin)[r]) & POST_CUOPT:
+                        note["cuopt"] = True
                     outer._verdicts.append(dict(seq=seq, t=0.0, obj=float(o), accepted=True, note=json.dumps(note)))
                 return seq
         self.to_solver = _To()
@@ -547,9 +637,15 @@ FAST = {"backoff.burst_s": 0.02, "backoff.slice_s": 0.02, "backoff.max_sleep_s":
 
 
 @pytest.mark.parametrize("mode", ["active", "forced", "shadow"])
-def test_inert_without_from_cuopt_equals_the_references(mode):
-    """Enabled but without exchange.from_cuopt (A3 / A3x): no governor at all — the recorded references of the engine
-    before the feature (plain toys, and the A3 path under solver traffic) are reproduced exactly."""
+def test_inert_without_from_cuopt_equals_the_references(mode, monkeypatch):
+    """Enabled but without exchange.from_cuopt (A3 / A3x): no governor at all (building one fails the test) — the
+    recorded references of the engine before the feature (plain toys, and the A3 path under solver traffic) are
+    reproduced exactly."""
+    from itrea.ea import engine as E
+
+    def no_governor(*a, **k):
+        pytest.fail("a back-off governor was built without exchange.from_cuopt")
+    monkeypatch.setattr(E, "Backoff", no_governor)
     over = {"backoff.enabled": True, "backoff.mode": mode, "backoff.forced_duty": 0.125, "backoff.burst_s": 1e-3}
     ref = REF.load_reference()
     for name in REF.TOYS:
@@ -626,7 +722,7 @@ def test_shadow_under_cuopt_traffic_logs_and_keeps_the_genealogy(tmp_path):
     assert "backoff" not in o0 and not any(e["kind"] in ("backoff", "contrib") for e in e0)
     bo = o1["backoff"]
     assert bo["mode"] == "shadow" and bo["paused_s"] == 0.0 and bo["busy_share"] == pytest.approx(1.0)
-    assert bo["phase_y"]["reason"] == "tick" and bo["n_lead"] >= 1 and bo["n_assist"] >= 1
+    assert bo["phase_y"]["reason"] == "tick" and bo["n_lead"] >= 1 and bo["n_assist"] + bo["n_assist_dup"] >= 1
     assert bo["escalations"] >= 1 and bo["first_escalation"] is not None
     reasons = [e["reason"] for e in e1 if e["kind"] == "backoff"]
     assert reasons[0] == "start" and "y_tick" in reasons and "escalate" in reasons
@@ -634,6 +730,28 @@ def test_shadow_under_cuopt_traffic_logs_and_keeps_the_genealogy(tmp_path):
     assert all("bo_level" in e and "ls_steps" in e for e in e1 if e["kind"] == "gen")
     contrib = [e for e in e1 if e["kind"] == "contrib"]
     assert {c["what"] for c in contrib} == {"lead", "assist"} and any(c["material"] for c in contrib)
+
+
+def test_finish_logs_a_step_due_after_the_last_generation_boundary(tmp_path):
+    """Shadow mode updates at generation boundaries; a step that falls due after the last one is logged by `finish`
+    (dated at its due time, before the end)."""
+    p = toy.knapsack(30)
+    tr = Trace(tmp_path, "ea")
+    eng = prepared(p, bo_cfg(**{"backoff.mode": "shadow"}), seed=11, mailbox=_three_way_partners(p), trace=tr)
+    eng.begin(time.monotonic(), 3600.0)
+    for _ in range(2):
+        eng.step()
+    bo = eng.bo
+    n0 = bo.escalations
+    assert bo.level == 0 and bo.phase == "P"
+    bo.b_last -= 1000.0                                      # the patience ran out after the last boundary
+    out = eng.finish()
+    tr.close()
+    assert out["backoff"]["escalations"] == n0 + bo.L
+    ev = read_events(tmp_path / "ea.events.jsonl")
+    last_gen = max(e["t"] for e in ev if e["kind"] == "gen")
+    esc = [e for e in ev if e["kind"] == "backoff" and e["reason"] == "escalate" and e["t"] >= last_gen]
+    assert len(esc) == bo.L and all(e["t_due"] <= e["t"] for e in esc)
 
 
 def test_forced_duty_paces_and_the_repair_clock_sees_busy_time(tmp_path):
@@ -658,9 +776,17 @@ def test_forced_duty_paces_and_the_repair_clock_sees_busy_time(tmp_path):
     ev = read_events(tmp_path / "ea.events.jsonl")
     rc = [e for e in ev if e["kind"] == "rclock"]
     assert len(rc) >= 3
-    for e in rc:
-        assert e["gen_s"] + e["bo_paused_s"] == pytest.approx(e["bo_wall_s"], abs=max(2e-3, 0.02 * e["bo_wall_s"]))
+    for e in rc:                                             # exact by construction (one clock reading), up to rounding
+        assert e["gen_s"] + e["bo_paused_s"] == pytest.approx(e["bo_wall_s"], abs=1e-5)
         assert e["o_s"] >= 0 and e["gen_s"] - sum(c["s"] for c in e["calls"] if c["cf"]) >= -1e-3
+    # the repair clock decides (and decays, probes) on BUSY time: at 1/4 its decision time is about a quarter of wall
+    assert rc[-1]["t"] > 0.8 and rc[-1]["t_dec"] <= 0.5 * rc[-1]["t"]
+    nxt = {}                                                 # each rclock event's generation record (written after it)
+    for j, e in enumerate(ev):
+        if e["kind"] == "rclock":
+            nxt[j] = next((g for g in ev[j + 1:] if g["kind"] == "gen"), None)
+    pairs = [(ev[j]["t_dec"], g["bo_busy_s"]) for j, g in nxt.items() if g is not None]
+    assert len(pairs) >= 3 and all(td <= b + 1e-6 for td, b in pairs)     # decided at a busy time, not a wall time
     assert any(e["bo_paused_s"] > 0 for e in rc)            # in-call pauses, outside gen_s
     assert sum(e["gen_s"] for e in rc) <= bo["busy_s"] + 1e-3
     gen = [e for e in ev if e["kind"] == "gen"]
@@ -695,13 +821,72 @@ def test_active_leads_and_assists_are_credited(tmp_path):
     out = eng.run(60.0, time.monotonic(), max_gens=10)
     tr.close()
     bo = out["backoff"]
-    assert bo["n_lead"] >= 1 and bo["n_assist"] >= 1 and bo["first_lead"] is not None
+    assert bo["n_lead"] >= 1 and bo["n_assist_dup"] >= 1 and bo["first_lead"] is not None
     assert bo["phase_y"]["reason"] == "peek"                  # partners' incumbents on the channels at t0
     con = [e for e in read_events(tmp_path / "ea.events.jsonl") if e["kind"] == "contrib"]
     leads = [e for e in con if e["what"] == "lead" and e["material"]]
     assists = [e for e in con if e["what"] == "assist" and e["material"]]
-    assert len(leads) == bo["n_lead"] and len(assists) == bo["n_assist"]
+    dups = [e for e in con if e["what"] == "assist" and e.get("dup_lead")]
+    assert len(leads) == bo["n_lead"] and len(assists) == bo["n_assist"] and len(dups) == bo["n_assist_dup"]
     assert all(0 < e["dg"] <= 1 and e["key"] < e["ref"] for e in leads + assists)
+    # one improvement enters λ̂ once: SCIP's confirmation of a material lead is not credited again
+    assert {e["id"] for e in leads}.isdisjoint({e["id"] for e in assists})
+    assert dups and {e["id"] for e in dups} <= {e["id"] for e in leads} and not any(e["material"] for e in dups)
+
+
+def test_an_assist_is_credited_when_the_post_was_not_a_material_lead(tmp_path):
+    """cuOpt's incumbent (360 of the optimum 370) is known on its info channel but its vector never arrives: EA rows
+    worse than it are no leads, yet SCIP (far behind) takes them as improvements — those assists are credited; the
+    EA's rows past 360 are material leads, and SCIP's confirmations of those are not credited again."""
+    p = toy.knapsack(30)
+    mb = Partners(p, scip_inc=1.0)
+    mb.info_cuopt.post(incumbent=360.0, dual_bound=None, status="solving", solver="cuopt")
+    tr = Trace(tmp_path, "ea")
+    eng = prepared(p, bo_cfg(**FAST), seed=5, mailbox=mb, trace=tr)
+    out = eng.run(60.0, time.monotonic(), max_gens=10)
+    tr.close()
+    bo = out["backoff"]
+    con = [e for e in read_events(tmp_path / "ea.events.jsonl") if e["kind"] == "contrib"]
+    lead_ids = {e["id"] for e in con if e["what"] == "lead" and e["material"]}
+    assist_ids = {e["id"] for e in con if e["what"] == "assist" and e["material"]}
+    assert bo["n_assist"] >= 1 and len(assist_ids) == bo["n_assist"] and lead_ids.isdisjoint(assist_ids)
+    assert bo["n_lead"] == len(lead_ids) >= 1 and bo["n_assist_dup"] >= 1
+
+
+class _NeverPosted(set):
+    """`cuopt_posted` that never answers yes: the engine's other guard (SCIP's note `cuopt`) must hold alone."""
+
+    def __contains__(self, item):
+        return False
+
+
+@pytest.mark.parametrize("guard", ["note", "cuopt_posted"])
+def test_an_unchanged_cuopt_row_is_never_an_assist(tmp_path, guard):
+    """cuOpt delivers the optimum; the EA relays that unchanged vector to SCIP, which takes it as an improvement. It is
+    cuOpt's, not the EA's: no assist (each of the engine's two guards on its own — SCIP's note `cuopt`, the EA's own
+    record `cuopt_posted`)."""
+    p = toy.knapsack(30)
+    x = knapsack_optimum_x(p)
+    mb = Partners(p, scip_inc=1.0, mark_cuopt=(guard == "note"))
+    mb.to_ea_cuopt.items.append(_msg(x, p.toy_optimum))
+    mb.info_cuopt.post(incumbent=p.toy_optimum, dual_bound=None, status="solving", solver="cuopt")
+    tr = Trace(tmp_path, "ea")
+    eng = prepared(p, bo_cfg(**FAST), seed=5, mailbox=mb, trace=tr)
+    eng.begin(time.monotonic(), 3600.0)
+    posted = set(eng.cuopt_posted)
+    if guard == "note":
+        eng.cuopt_posted = _NeverPosted(eng.cuopt_posted)
+    for _ in range(4):
+        eng.step()
+    eng._exchange_in(force=True)
+    out = eng.finish()
+    tr.close()
+    posted |= set(eng.cuopt_posted)
+    assert posted, "the cuOpt row was not relayed to SCIP"
+    assert out["cuopt_rows_accepted"] >= 1 or guard == "note"
+    con = [e for e in read_events(tmp_path / "ea.events.jsonl") if e["kind"] == "contrib" and e["what"] == "assist"]
+    assert not any(e["id"] in posted for e in con)
+    assert out["backoff"]["n_assist_all"] == len(con) - out["backoff"]["n_assist_dup"]
 
 
 def test_stop_file_is_honoured_within_one_slice():
@@ -718,28 +903,75 @@ def test_stop_file_is_honoured_within_one_slice():
     assert seen - mb.stop_at <= 0.25 + 0.15
 
 
+def _paused_at_one_eighth(p, mb, seed=7):
+    """An active engine in phase P at level 3 (duty 1/8) with begin's verdicts drained (an assist there would restore
+    full duty and end any sleep for another reason)."""
+    cfg = bo_cfg(**{"backoff.levels": 3, "backoff.max_sleep_s": 3.0, "backoff.slice_s": 0.05, "exchange.poll_s": 0.2})
+    eng = prepared(p, cfg, seed=seed, mailbox=mb)
+    eng.begin(time.monotonic(), 3600.0)
+    eng._exchange_in(force=True)
+    bo = eng.bo
+    assert not bo.in_phase_y
+    bo.level = 3
+    return eng, bo
+
+
 def test_between_generation_sleep_wakes_on_a_partner_improvement_and_stops_at_the_deadline():
     p = toy.knapsack(30)
     mb = _three_way_partners(p)
-    cfg = bo_cfg(**{"backoff.mode": "forced", "backoff.forced_duty": 0.125, "backoff.max_sleep_s": 3.0,
-                    "backoff.slice_s": 0.05, "exchange.poll_s": 0.2})
-    eng = prepared(p, cfg, seed=7, mailbox=mb)
-    eng.begin(time.monotonic(), 3600.0)
+    eng, bo = _paused_at_one_eighth(p, mb)
     x = knapsack_optimum_x(p)
     mb.to_ea_cuopt.items.append(_msg(x, p.toy_optimum, seq=2))           # arrives at the next tick, 0.2 s away
     mb.info_cuopt.post(incumbent=p.toy_optimum, dual_bound=None, status="solving", solver="cuopt")
-    bo = eng.bo
     bo.c = -2.0                                                         # a debt: a 3-s sleep is due
     eng.next_poll = time.monotonic() + 0.2
     t = time.monotonic()
     eng._bo_between()
     dt = time.monotonic() - t
-    assert 0.15 <= dt <= 0.45 and (bo.wakes, bo.forgiven) == (1, 1) and bo.c == 0.0
+    assert 0.15 <= dt <= 0.45 and (bo.wakes, bo.forgiven) == (1, 1) and bo.c == 0.0 and bo.level == 3
     assert any(b.src == "cuopt" for b in eng.pending) and eng.inc_cuopt == pytest.approx(-p.toy_optimum)
-    # a second wake within wake_min_s ends the sleep but forgives nothing; the deadline ends a sleep too
+    # a wake within wake_min_s of the last forgiveness forgives nothing and does NOT end the sleep: the ticks go on,
+    # and a later wake outside the window forgives and ends it (one batch per tick: two queued batches, two ticks)
+    mb.to_ea_cuopt.items += [_msg(x, p.toy_optimum, seq=3), _msg(x, p.toy_optimum, seq=4)]
     bo.c = -2.0
-    eng.deadline = time.monotonic() + 0.15
+    t = time.monotonic()
+    bo.last_forgive = t - 4.75                                          # the window closes 0.25 s from now
+    eng.next_poll = t + 0.1
+    eng._bo_between()
+    dt = time.monotonic() - t
+    assert (bo.wakes, bo.forgiven) == (3, 2) and bo.c == 0.0
+    assert 0.25 <= dt <= 0.6                                            # slept through the first wake (at 0.1 s)
+    # a non-forgiven wake with the deadline near: asleep to the deadline, never past it, the debt kept
+    mb.to_ea_cuopt.items.append(_msg(x, p.toy_optimum, seq=5))
+    bo.c = -2.0
+    t = time.monotonic()
+    eng.next_poll = t + 0.1
+    eng.deadline = t + 0.4
+    eng._bo_between()
+    dt = time.monotonic() - t
+    assert (bo.wakes, bo.forgiven) == (4, 2) and bo.c < -1.5
+    assert 0.35 <= dt <= 0.4 + 0.06                                     # never past the deadline
+    assert eng._should_stop() and eng.stop_reason == "budget"           # (step() returns without a generation)
+
+
+def test_forced_mode_sleeps_through_wakes():
+    """Forced mode never forgives, so a partner improvement never ends its between-generation sleep (the stage-0 dose
+    stays fixed); the wake is counted and the rows wait in `pending` for the next generation."""
+    p = toy.knapsack(30)
+    mb = _three_way_partners(p)
+    cfg = bo_cfg(**{"backoff.mode": "forced", "backoff.forced_duty": 0.125, "backoff.max_sleep_s": 0.5,
+                    "backoff.slice_s": 0.05, "exchange.poll_s": 0.1})
+    eng = prepared(p, cfg, seed=7, mailbox=mb)
+    eng.begin(time.monotonic(), 3600.0)
+    eng._exchange_in(force=True)
+    bo = eng.bo
+    x = knapsack_optimum_x(p)
+    mb.to_ea_cuopt.items.append(_msg(x, p.toy_optimum, seq=2))
+    mb.info_cuopt.post(incumbent=p.toy_optimum, dual_bound=None, status="solving", solver="cuopt")
+    bo.c = -2.0                                                         # min(16, 0.5) = a 0.5-s sleep
+    eng.next_poll = time.monotonic() + 0.1
     t = time.monotonic()
     eng._bo_between()
-    assert time.monotonic() - t <= 0.15 + 0.06                     # never past the deadline
-    assert eng._should_stop() and eng.stop_reason == "budget"           # (step() returns without a generation)
+    dt = time.monotonic() - t
+    assert (bo.wakes, bo.forgiven) == (1, 0) and 0.45 <= dt <= 0.65 and bo.c < -1.5
+    assert any(b.src == "cuopt" for b in eng.pending)

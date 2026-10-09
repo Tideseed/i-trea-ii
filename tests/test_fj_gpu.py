@@ -695,6 +695,7 @@ def test_cap_cuts_at_busy_time_not_wall_time(bk):
     p = _Nap(cap / 2)
     out = fp.run(cp.asarray(X0), cap_s=cap, pace=p)
     assert out["cap_hits"] >= 1 and out["seconds"] < S
+    assert out["seconds"] >= cap - 1e-9                       # busy time REACHED the cap (a wall-clock cut: ~0 busy)
     assert out["seconds"] <= cap + max(out["max_launch_s"], 0.01) + 0.01       # one launch past the busy cap
     assert out["paused_s"] >= cap and out["wall_s"] > out["seconds"] + cap      # the wall clock went far beyond it
 

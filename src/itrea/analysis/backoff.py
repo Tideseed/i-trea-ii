@@ -3,7 +3,9 @@ rules the design fixed before any run (vault `80-reviews/2026-10-08 A9 GPU back-
 nothing is chosen by eye. Development only (D-010).
 
 Inputs: `datasets/runs.parquet` and `datasets/incumbents_checked.parquet` (`itrea build-runs`) for P(T) (`pt`, cuOpt's
-own `cuopt_pt`), cuOpt's checked first incumbent (`cuopt_t_first`) and the checked cuOpt trajectories; every run's
+own `cuopt_pt`), cuOpt's checked first incumbent (`cuopt_t_first`; a time censored at the budget —
+`cuopt_t_first_event` false, cuOpt found nothing — counts as missing / ∞, never as the budget) and the checked cuOpt
+trajectories; every run's
 directory (`run_dir`, relative to `--root`) for the EA summary's `backoff` block, the EA's `backoff` / `contrib` / `gen`
 / `rclock` / `lp` events, the partners' `send` / `incumbent` events and the runner's `gpu_health` and `stop` records.
 Runs are taken from one set (`--set`), status completed and not voided; a duplicate (instance, arm, seed) keeps the
@@ -13,17 +15,25 @@ highest attempt.
     itrea backoff-report --stage 1 [--set backoff1] [--stage0-set backoff0] [--json out.json]
 
 Stage 0 (seed 2; chromaticindex1024-7, sing44, comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}; ca and
-glass4 x A9@bo0). Readouts: S_first = cuOpt's first chromaticindex incumbent inside the arm / same-day A6's; the sing44
-shared-prefix stretch S = median t_arm(v) / t_A6(v) over cuOpt objectives v both reached, t_A6(v) >= 1 s, at least 5
-of them (else "n/a"); comp21's cuOpt-inside P against A6; the measured EA duty (busy share) and EA lane steps per wall
-second / bo0's; gpu_health mean_util; the fair-share model S = 1 / (1 − d/2). Rules:
+glass4 x A9@bo0; sing44 x A2, the zero-duty reference of rule (b), D-018 amendment: 18 runs). Readouts: S_first =
+cuOpt's first chromaticindex incumbent inside the arm / same-day A6's (∞ when the arm's cuOpt found none; undefined
+when A6's found none); sing44's late stretch S_late = t_arm(v*) / t_A2(v*), v* = the best cuOpt objective same-day A2
+reaches by 60 s and t(v) the first time cuOpt inside the run reaches an objective at least as good as v (an arm that
+never does within its budget: budget / t_A2(v*), and the limb fails); n/a when A2 has no cuOpt incumbent by 60 s;
+comp21's cuOpt-inside P against A6; the measured EA duty (busy share) and EA lane steps per wall second / bo0's;
+gpu_health mean_util; the fair-share model S = 1 / (1 − d/2) (1.33 / 1.14 / 1.07); reported only, not a rule: the
+shared-prefix stretch against A6 (median t_arm(v) / t_A6(v), t_A6(v) >= 1 s, at least 5 values — the statistic the
+amendment replaced: it sits in cuOpt's first seconds and barely responds to the duty). Rules:
   - sanity: a forced run counts only if its measured duty is within ±0.03 of d and its lane steps per wall second lie
     in [0.75, 1.5]·d × bo0's on the same instance; a run that does not count cannot qualify its d;
-  - (a) D_Y = the largest d in {1/2, 1/4, 1/8} with S_first <= 2.0 — if none: STOP, no stage 1 (MPS is next and
-    needs Berk);
-  - (b) D_min = the largest d with sing44 S <= 1.15 (or n/a) and comp21 cuOpt-inside P <= A6's + max(0.02, A6's
-    two-seed spread) — the spread from A6 runs of comp21 at the same budget outside this set (seeds 0 and 1 when
-    present); if none qualifies D_min = 1/8, a shortfall; L = log2(1/D_min);
+  - (a) D_Y = the largest d in {1/2, 1/4, 1/8} with S_first <= 2.0 — if none and every forced chromaticindex run
+    counted: STOP, no stage 1 (the pacing mechanism cannot protect cuOpt's first incumbent; MPS is next and needs
+    Berk); if none and a run did not count (or A6 found no incumbent): INVALID — the measurement failed, not the
+    mechanism; fix and rerun stage 0;
+  - (b) D_min = the largest d whose sing44 limb (S_late <= 1.15, or n/a) and comp21 limb (cuOpt-inside P <= A6's +
+    max(0.02, A6's two-seed spread) — the spread from A6 runs of comp21 at the same budget outside this set, seeds 0
+    and 1 when present) both pass; if none qualifies D_min = 1/8, a shortfall; L = log2(1/D_min); the report states
+    which limb decided;
   - (c) yield_until_s = max(30, ceil(2 x chromaticindex's first cuOpt incumbent at D_Y));
   - (d) patience_search_s = clamp(ceil(1.25 x (t_first_lead − t_first_partner)), 40, 90) from ca's bo0 run (shadow:
     busy = wall), the partner's first POSTED incumbent (first `send` of SCIP or cuOpt); 40 if no material lead;
@@ -33,7 +43,9 @@ The verdict prints the bo1 values (configs/itrea2-dev-rc-3way-bo1.yaml is writte
 
 Stage 1 (A9@bo0 shadow control vs A9@bo1 active, same-day A6, seeds 0–1, 14 instances): bounded d of bo1 vs bo0 on
 seed means (positive = bo1 better); band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference of bo0 or of
-A6). Mechanism M1–M5 (M6 reported) and outcome T, G, ladder, F and the mean guard exactly as the design states; the
+A6). Mechanism M1–M5 (M2: a censored bo1 first incumbent fails unless A6's is censored too — reported; M6 reported,
+on the governor's DUE times: `t_due` of the step-down records) and outcome T, G, ladder, F and the mean guard exactly
+as the design states; the
 noise rule (a guard failing by the letter while bo1 never left level 0 and phase Y lasted < 1 s), the ca / glass4 /
 sing44 fallbacks, "T fails with M2 failing" and "inside the band" are classified and printed. Adopt only if T, G, F,
 the mean guard and M1–M5 hold. The D-013 weak-set report, the relay latency (cuOpt send -> SCIP incumbent made from
@@ -56,7 +68,7 @@ from itrea.paths import DATASETS, ROOT
 from itrea.trace import read_events
 
 # ----------------------------------------------------------------------------------------------- the design's names
-A6, BO0, BO1 = "A6", "A9@bo0", "A9@bo1"
+A6, A2, BO0, BO1 = "A6", "A2", "A9@bo0", "A9@bo1"
 FORCED = {"A9@bof50": 0.5, "A9@bof25": 0.25, "A9@bof12": 0.125}
 DUTIES = (0.5, 0.25, 0.125)
 STAGE0_SEED = 2
@@ -74,6 +86,7 @@ M4_SET = ("neos-3656078-kumeu", COMP21, "neos-4763324-toguru", "radiationm18-12-
 STAGE1_SEEDS = (0, 1)
 # stage-0 thresholds
 S_FIRST_MAX, S_SING_MAX, P_COMP_SLACK = 2.0, 1.15, 0.02
+V_STAR_S = 60.0                           # rule (b): v* = A2's best cuOpt objective by this time
 DUTY_TOL, STEPS_LO, STEPS_HI = 0.03, 0.75, 1.5
 MIN_SHARED, MIN_T_REF = 5, 1.0
 # stage-1 thresholds
@@ -95,6 +108,11 @@ def _fin(v) -> bool:
 
 def _f(v) -> float:
     return float(v) if _fin(v) else math.nan
+
+
+def _due(e: dict) -> float:
+    """A `backoff` record's due wall time: `t_due` when present, else its logging time `t`."""
+    return _f(e.get("t_due")) if _fin(e.get("t_due")) else _f(e.get("t"))
 
 
 def bounded(a: float, b: float) -> float:
@@ -150,6 +168,16 @@ class RunView:
         return [e for e in self.events(role) if e.get("kind") == kind]
 
     # ---------------------------------------------------------------------------------------------- readouts
+    def cuopt_t_first(self) -> float:
+        """cuOpt's first checked incumbent (wall seconds); ∞ when censored at the budget (a time with
+        `cuopt_t_first_event` false: cuOpt found nothing); NaN when the run has no cuOpt time at all (build_runs then
+        stores NaN with the flag false)."""
+        t = _f(self.get("cuopt_t_first"))
+        ev = self.row.get("cuopt_t_first_event")
+        if _fin(t) and ev is not None and not (isinstance(ev, float) and math.isnan(ev)) and not bool(ev):
+            return math.inf
+        return t
+
     def measured_duty(self) -> float:
         return _f(self.bo.get("busy_share"))
 
@@ -195,18 +223,21 @@ class RunView:
         return _f(py.get("exit_t")), str(py.get("reason") or "")
 
     def first_escalation(self) -> tuple[float, float]:
-        """(wall t, busy seconds) of the first step down (shadow: the would-be one); NaN if none."""
+        """(wall t, busy seconds) of the first step down (shadow: the would-be one), at its DUE time — the record's
+        `t_due`, not the time it was logged (a shadow update comes once per generation); NaN if none."""
         evs = [e for e in self.kind("backoff") if e.get("reason") == "escalate"]
         if evs:
-            return _f(evs[0].get("t")), _f(evs[0].get("busy_s"))
+            e = min(evs, key=lambda x: _due(x))
+            return _due(e), _f(e.get("busy_s"))
         fe = self.bo.get("first_escalation")
         if isinstance(fe, dict):
             return _f(fe.get("t")), _f(fe.get("busy_s"))
         return math.nan, math.nan
 
     def level_timeline(self) -> list[tuple[float, str, int | None]]:
-        """(t, phase, level) after every change, from the `backoff` events (the start record first)."""
-        return [(_f(e.get("t")), str(e.get("phase")), e.get("level")) for e in self.kind("backoff")]
+        """(t, phase, level) after every change, from the `backoff` events (the start record first), each at its due
+        time (`t_due`; the logging time `t` for records without one)."""
+        return [(_due(e), str(e.get("phase")), e.get("level")) for e in self.kind("backoff")]
 
     def full_duty_share(self, t_end: float) -> float:
         """Share of the wall time in [0, t_end] spent in phase P at level 0."""
@@ -307,6 +338,34 @@ def stretch(arm: list[tuple[float, float]], ref: list[tuple[float, float]], min_
     return (float(np.median(ratios)) if len(ratios) >= min_shared else None), len(ratios)
 
 
+def first_reach(traj: list[tuple[float, float]], v: float, sense: int = 1, T: float = math.inf) -> float:
+    """The first time (<= T) a trajectory reaches an objective at least as good as v (sense +1 minimises, −1
+    maximises; relative tolerance 1e-9); ∞ if it never does."""
+    tol = REL_TOL * max(1.0, abs(v))
+    for t, o in traj:
+        if t <= T and sense * (o - v) <= tol:
+            return float(t)
+    return math.inf
+
+
+def late_stretch(arm: list[tuple[float, float]], ref: list[tuple[float, float]], sense: int = 1,
+                 t_ref: float = V_STAR_S, budget: float = 120.0) -> dict:
+    """Rule (b)'s sing44 limb (D-018 amendment): v* = the best objective of the reference (same-day A2, zero EA duty)
+    by t_ref; S_late = t_arm(v*) / t_ref(v*). An arm that never reaches v* within `budget` gets budget / t_ref(v*) and
+    `reached` false (the limb fails). {S_late: None} ("n/a") when the reference has no incumbent by t_ref."""
+    pts = [(t, o) for t, o in ref if t <= t_ref]
+    if not pts:
+        return dict(v_star=None, t_ref=None, t_arm=None, S_late=None, reached=None)
+    v = min(pts, key=lambda x: (sense * x[1], x[0]))[1]
+    tr = first_reach(ref, v, sense)
+    ta = first_reach(arm, v, sense, budget)
+    if not (tr > 0):
+        return dict(v_star=v, t_ref=tr, t_arm=ta, S_late=None, reached=None)
+    reached = _fin(ta)
+    return dict(v_star=v, t_ref=tr, t_arm=ta if reached else None, S_late=(ta if reached else budget) / tr,
+                reached=bool(reached))
+
+
 def _ceil(x: float) -> int:
     return int(math.ceil(x - 1e-9))
 
@@ -322,7 +381,7 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     R = load(runs, set_name, root)
     notes: list[str] = []
     if inc is None or not len(inc):
-        notes.append("no checked incumbents table: the sing44 stretch is n/a for every duty (rule b then rests on "
+        notes.append("no checked incumbents table: the sing44 limb is n/a for every duty (rule b then rests on "
                      "comp21 alone)")
 
     def run(inst, arm) -> RunView | None:
@@ -330,12 +389,22 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
 
     missing = [(i, a) for i in (CHROMATIC, SING44, COMP21) for a in (A6, BO0, *FORCED) if run(i, a) is None]
     missing += [(i, BO0) for i in (CA, GLASS4) if run(i, BO0) is None]
+    missing += [(SING44, A2)] if run(SING44, A2) is None else []
     arms = [(BO0, 1.0)] + list(FORCED.items())
     rd: dict = {}
     # ------------------------------------------------------------------------ readouts per duty
-    a6c, a6s, a6p = run(CHROMATIC, A6), run(SING44, A6), run(COMP21, A6)
-    t_a6 = _f(a6c.get("cuopt_t_first")) if a6c else math.nan
+    a6c, a6s, a6p, a2s = run(CHROMATIC, A6), run(SING44, A6), run(COMP21, A6), run(SING44, A2)
+    t_a6 = a6c.cuopt_t_first() if a6c else math.nan
+    a6_censored = a6c is not None and math.isinf(t_a6)
+    if a6_censored:
+        notes.append("chromaticindex A6: cuOpt found no incumbent within the budget (censored): S_first has no "
+                     "reference")
     traj_a6s = cuopt_traj(inc, a6s.get("run_id"), _f(a6s.get("budget"))) if a6s else []
+    traj_a2s = cuopt_traj(inc, a2s.get("run_id"), _f(a2s.get("budget"))) if a2s else []
+    sense_s = int(a2s.get("sense", 1) or 1) if a2s else 1
+    if a2s is not None and inc is not None and len(inc) and not any(t <= V_STAR_S for t, _ in traj_a2s):
+        notes.append(f"sing44 A2: no cuOpt incumbent by {V_STAR_S:g} s: the sing44 limb is n/a for every duty (rule "
+                     "b rests on comp21 alone)")
     p_a6 = _f(a6p.get("cuopt_pt", a6p.get("pt"))) if a6p else math.nan
     if a6p is not None and not _fin(p_a6):
         p_a6 = _f(a6p.get("pt"))
@@ -344,12 +413,21 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
         notes.append(f"comp21: fewer than two A6 seeds outside the set for the spread ({spread_seeds}); spread = 0")
     for arm, d in arms:
         c, s, p = run(CHROMATIC, arm), run(SING44, arm), run(COMP21, arm)
-        t_first = _f(c.get("cuopt_t_first")) if c else math.nan
-        s_first = (t_first / t_a6 if _fin(t_first) and t_a6 > 0 else (math.inf if c is not None else math.nan))
-        S, n_sh = (stretch(cuopt_traj(inc, s.get("run_id"), _f(s.get("budget"))), traj_a6s) if s and a6s
-                   else (None, 0))
+        t_first = c.cuopt_t_first() if c else math.nan          # ∞: the arm's cuOpt found nothing (censored)
+        if not (_fin(t_a6) and t_a6 > 0):
+            s_first = math.nan                                    # no reference (A6 missing or censored)
+        elif math.isinf(t_first):
+            s_first = math.inf
+        else:
+            s_first = t_first / t_a6 if _fin(t_first) else (math.inf if c is not None else math.nan)
+        traj_s = cuopt_traj(inc, s.get("run_id"), _f(s.get("budget"))) if s else []
+        S, n_sh = stretch(traj_s, traj_a6s) if s and a6s else (None, 0)
+        late = (late_stretch(traj_s, traj_a2s, sense_s, V_STAR_S, _f(s.get("budget")) if _fin(s.get("budget"))
+                             else 120.0) if s is not None and a2s is not None
+                else dict(v_star=None, t_ref=None, t_arm=None, S_late=None, reached=None))
         pc = _f(p.get("cuopt_pt")) if p else math.nan
-        rd[arm] = dict(d=d, t_first_chromatic=t_first, S_first=s_first, sing44_S=S, sing44_shared=n_sh,
+        rd[arm] = dict(d=d, t_first_chromatic=t_first, S_first=s_first, sing44_S_late=late["S_late"],
+                       sing44_late=late, sing44_S_prefix_A6=S, sing44_shared=n_sh,
                        comp21_cuopt_P=pc, model_S=1.0 / (1.0 - d / 2.0) if d < 1 else 1.0,
                        duty={i: (run(i, arm).measured_duty() if run(i, arm) else math.nan)
                              for i in (CHROMATIC, SING44, COMP21)},
@@ -360,6 +438,10 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     rd[A6] = dict(t_first_chromatic=t_a6, comp21_P=p_a6, comp21_spread=spread,
                   mean_util={i: (run(i, A6).mean_util() if run(i, A6) else math.nan)
                              for i in (CHROMATIC, SING44, COMP21)})
+    v_pts = [(t, o) for t, o in traj_a2s if t <= V_STAR_S]
+    v_star = min(v_pts, key=lambda x: (sense_s * x[1], x[0]))[1] if v_pts else None
+    rd[A2] = dict(v_star=v_star, t_v_star=first_reach(traj_a2s, v_star, sense_s) if v_star is not None else None,
+                  mean_util=run(SING44, A2).mean_util() if a2s else math.nan)
     # ------------------------------------------------------------------------ sanity
     sanity: dict = {}
     for arm, d in FORCED.items():
@@ -380,25 +462,31 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     arm_of = {d: a for a, d in FORCED.items()}
     # ------------------------------------------------------------------------ (a) D_Y
     rules: dict = {}
-    qual_a = [d for d in DUTIES if counts(arm_of[d], CHROMATIC) and rd[arm_of[d]]["S_first"] <= S_FIRST_MAX]
+    qual_a = [d for d in DUTIES if counts(arm_of[d], CHROMATIC) and _fin(rd[arm_of[d]]["S_first"])
+              and rd[arm_of[d]]["S_first"] <= S_FIRST_MAX]
     d_y = max(qual_a) if qual_a else None
     rules["a"] = dict(D_Y=d_y, qualifying=qual_a,
                       S_first={d: rd[arm_of[d]]["S_first"] for d in DUTIES},
                       not_counted=[d for d in DUTIES if not counts(arm_of[d], CHROMATIC)])
     # ------------------------------------------------------------------------ (b) D_min
     lim = p_a6 + max(P_COMP_SLACK, spread) if _fin(p_a6) else math.nan
-    qual_b = []
+    qual_b, limbs = [], {}
     for d in DUTIES:
         a = arm_of[d]
-        S = rd[a]["sing44_S"]
-        ok_s = S is None or S <= S_SING_MAX
+        late = rd[a]["sing44_late"]
+        S = late["S_late"]
+        sing = "n/a" if S is None else ("pass" if late["reached"] and S <= S_SING_MAX else "fail")
         ok_p = _fin(rd[a]["comp21_cuopt_P"]) and _fin(lim) and rd[a]["comp21_cuopt_P"] <= lim
-        if counts(a, SING44) and counts(a, COMP21) and ok_s and ok_p:
+        counted = counts(a, SING44) and counts(a, COMP21)
+        limbs[d] = dict(sing44=sing, S_late=S, reached=late["reached"], comp21="pass" if ok_p else "fail",
+                        comp21_P=rd[a]["comp21_cuopt_P"], counted=bool(counted))
+        if counted and sing != "fail" and ok_p:
             qual_b.append(d)
     shortfall = not qual_b
     d_min = max(qual_b) if qual_b else 0.125
     L = int(round(math.log2(1.0 / d_min)))
-    rules["b"] = dict(D_min=d_min, L=L, qualifying=qual_b, shortfall=shortfall, comp21_limit=lim,
+    rules["b"] = dict(D_min=d_min, L=L, qualifying=qual_b, shortfall=shortfall, comp21_limit=lim, limbs=limbs,
+                      v_star=v_star, decided_by=_floor_decision(limbs, d_min, shortfall),
                       not_counted=[d for d in DUTIES if not (counts(arm_of[d], SING44) and counts(arm_of[d], COMP21))])
     # ------------------------------------------------------------------------ (c) yield_until_s
     yu = None
@@ -433,12 +521,22 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     rules["e"] = dict(patience_own_s=po, lags=lags)
     # ------------------------------------------------------------------------ verdict
     bo1 = None
+    nc_a = rules["a"]["not_counted"]
     if missing:
         verdict = "INCOMPLETE: missing runs " + ", ".join(f"{i} {a}" for i, a in missing)
+    elif a6_censored:
+        verdict = ("INVALID: same-day A6 found no cuOpt incumbent on chromaticindex1024-7 within the budget "
+                   "(censored), so rule (a) has no reference — rerun stage 0; not a STOP.")
+    elif d_y is None and nc_a:
+        bad = "; ".join(f"d = {d}: duty {_fmt(sanity[(arm_of[d], CHROMATIC)].get('duty'), 3)}, steps ratio "
+                        f"{_fmt(sanity[(arm_of[d], CHROMATIC)].get('steps_ratio'), 2)}, S_first "
+                        f"{_fmt(rd[arm_of[d]]['S_first'], 2)}" for d in nc_a)
+        verdict = ("INVALID: no duty qualifies for rule (a), but the sanity check failed on chromaticindex for "
+                   f"{bad} — the measurement failed, not the mechanism; fix it and rerun stage 0 (not a STOP).")
     elif d_y is None:
         verdict = ("STOP: no duty in {1/2, 1/4, 1/8} brings cuOpt's first chromaticindex incumbent within 2.0x of "
-                   "A6's (rule a) — no stage 1; the pacing mechanism cannot protect cuOpt's first incumbent. MPS is "
-                   "the next candidate and needs Berk.")
+                   "A6's (rule a; every forced run counted) — no stage 1; the pacing mechanism cannot protect cuOpt's "
+                   "first incumbent. MPS is the next candidate and needs Berk.")
     elif yu is None or ps is None:
         verdict = "INCOMPLETE: rule (c) or (d) has no value"
     else:
@@ -446,9 +544,36 @@ def stage0(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
                    yield_until_s=float(yu), patience_search_s=float(ps), patience_own_s=float(po))
         verdict = "PROCEED to stage 1 with bo1 = " + json.dumps(bo1)
         if shortfall:
-            verdict += " (rule b shortfall: no duty met the floor's tests; D_min = 1/8)"
+            nc_b = rules["b"]["not_counted"]
+            verdict += (" (rule b shortfall: no duty met the floor's tests; D_min = 1/8" +
+                        (f"; the sanity check failed on sing44 / comp21 for d in {nc_b}, so the shortfall rests on "
+                         "runs that did not count" if nc_b else "") + ")")
     return dict(stage=0, set=set_name, seed=seed, readouts=rd, sanity={f"{a} {i}": v for (a, i), v in sanity.items()},
                 rules=rules, bo1=bo1, verdict=verdict, notes=notes, missing=missing)
+
+
+def _floor_decision(limbs: dict, d_min: float, shortfall: bool) -> str:
+    """Which limb of rule (b) decided the floor: the limbs at the next larger duty (the first one that did not
+    qualify), or at every duty for a shortfall."""
+    def why(d):
+        lb = limbs[d]
+        out = []
+        if not lb["counted"]:
+            out.append("sanity failed")
+        if lb["sing44"] == "fail":
+            out.append("sing44 limb fails (S_late " + (_fmt(lb["S_late"], 3) if lb["reached"] else
+                                                      f"{_fmt(lb['S_late'], 3)}, v* never reached") + ")")
+        if lb["comp21"] == "fail":
+            out.append(f"comp21 limb fails (P {_fmt(lb['comp21_P'], 3)})")
+        return ", ".join(out) or "qualifies"
+    sing_na = all(lb["sing44"] == "n/a" for lb in limbs.values())
+    tail = " (sing44 limb n/a: the floor rests on comp21)" if sing_na else ""
+    if shortfall:
+        return "shortfall — " + "; ".join(f"d = {d}: {why(d)}" for d in DUTIES) + tail
+    larger = [d for d in DUTIES if d > d_min]
+    if not larger:
+        return f"d = {d_min} (the largest duty) qualifies" + tail
+    return f"d = {min(larger)}: {why(min(larger))}" + tail
 
 
 def a6_spread(runs: pd.DataFrame, inst: str, set_name: str | None, budget: float) -> tuple[float, int]:
@@ -546,8 +671,16 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
         if r is None or a is None:
             m2.append(dict(seed=s, ok=False, why="missing run"))
             continue
-        tb, ta = _f(r.get("cuopt_t_first")), _f(a.get("cuopt_t_first"))
-        m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=bool(_fin(tb) and _fin(ta) and tb <= M2_X * ta)))
+        tb, ta = r.cuopt_t_first(), a.cuopt_t_first()          # ∞: censored at the budget (cuOpt found nothing)
+        cb, ca = math.isinf(tb), math.isinf(ta)
+        if math.isnan(tb) or math.isnan(ta):
+            m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=False, why="no cuOpt time"))
+        elif cb and ca:
+            m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=True,
+                           why="both censored: cuOpt found nothing in bo1 nor in A6 (reported, not failed)"))
+        else:
+            m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=bool(not cb and (ca or tb <= M2_X * ta)),
+                           why="bo1 censored" if cb else None))
     mech["M2"] = dict(ok=all(x["ok"] for x in m2), rows=m2)
     # M3
     m3 = []
@@ -707,7 +840,7 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     cls: list[str] = []
     ca_row = next(r for r in g_rows if r["instance"] == CA)
     if not ca_row["ok"] and CA not in noise_list:
-        cls.append(classify_ca(R, runs, stage0_set))
+        cls.append(classify_ca(R, runs, stage0_set, root))
     for i in (GLASS4, SING44):
         row = next(r for r in g_rows if r["instance"] == i)
         if not row["ok"] and i not in noise_list:
@@ -752,10 +885,11 @@ def _esc_before_lead(r: RunView | None) -> bool:
     return bool(_fin(te) and (not _fin(tl) or te < tl))
 
 
-def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None) -> str:
+def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None, root: Path = ROOT) -> str:
     """The design's ca diagnosis from the events: (P) bo1 stepped down before the EA's first ca lead -> next test
     patience_search_s = 1.25 x the control's lag; (Y) no such step and phase Y >= 10 s -> D_Y one step up, accepted
-    only if stage 0 showed S_first <= 3 at that duty; otherwise unclassified."""
+    only if stage 0 showed S_first <= 3 at that duty (duty 1 = stage 0's bo0, the shadow run); otherwise
+    unclassified."""
     rs = [R.get((CA, BO1, s)) for s in STAGE1_SEEDS]
     cs = [R.get((CA, BO0, s)) for s in STAGE1_SEEDS]
     if any(_esc_before_lead(r) for r in rs):
@@ -770,7 +904,7 @@ def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None) -> str:
         s0 = None
         if stage0_set:
             try:
-                s0 = stage0(runs, None, stage0_set)
+                s0 = stage0(runs, None, stage0_set, root)
             except Exception:  # noqa: BLE001 — the stage-0 runs may not be in this table
                 s0 = None
         level = None
@@ -779,9 +913,9 @@ def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None) -> str:
                 level = int(r.bo.get("yield_level", 2))
         if s0 is not None and level is not None and level >= 1:
             d_up = 2.0 ** -(level - 1)
-            arm = {v: k for k, v in FORCED.items()}.get(d_up)
-            sf = s0["readouts"].get(arm, {}).get("S_first") if arm else (1.0 if d_up >= 1 else None)
-            if sf is not None and sf <= 3.0:
+            arm = BO0 if d_up >= 1 else {v: k for k, v in FORCED.items()}.get(d_up)
+            sf = s0["readouts"].get(arm, {}).get("S_first") if arm else None
+            if sf is not None and _fin(sf) and sf <= 3.0:
                 return msg + f" Next variable: D_Y one step up ({d_up}; stage-0 S_first {sf:.2f} <= 3)."
             return msg + (f" D_Y one step up ({d_up}) is NOT accepted (stage-0 S_first {sf}); recorded as 'no single "
                           "phase-Y duty serves both' — the deferred progress exit is the next candidate.")
@@ -799,7 +933,8 @@ def floor_seconds(R, inc, inst: str) -> dict:
             if r is None:
                 continue
             if inst != "radiationm18-12-05":
-                out[f"{a} s{s}"] = _f(r.get("cuopt_t_first"))
+                t = r.cuopt_t_first()
+                out[f"{a} s{s}"] = "none" if math.isinf(t) else t      # censored: cuOpt found nothing
                 continue
             a6 = R.get((inst, A6, s))
             best = _f(a6.get("cuopt_best_obj", a6.get("best_obj"))) if a6 is not None else math.nan
@@ -897,14 +1032,22 @@ def print_stage0(res: dict, out=sys.stdout) -> None:
     p(f"Stage 0 — A9 GPU back-off calibration (set {res['set']}, seed {res['seed']})")
     p(f"A6: chromaticindex first cuOpt incumbent {_fmt(rd[A6]['t_first_chromatic'], 2)} s; comp21 P "
       f"{_fmt(rd[A6]['comp21_P'])} (two-seed spread {_fmt(rd[A6]['comp21_spread'])})")
-    p("arm        d      S_first  sing44 S (n)    model S  comp21 cuOpt P  duty c/s/p           steps/s ratio c/s/p")
+    a2 = rd.get(A2, {})
+    p(f"A2 (sing44, zero EA duty): v* = {_fmt(a2.get('v_star'), 6)} (best cuOpt objective by {V_STAR_S:g} s), "
+      f"reached at {_fmt(a2.get('t_v_star'), 2)} s")
+    p("arm        d      S_first  S_late (model)  S prefix|A6 (n, reported)  comp21 cuOpt P  duty c/s/p          "
+      "steps/s ratio c/s/p")
     for arm in (BO0, *FORCED):
         r = rd[arm]
         duty = "/".join(_fmt(r["duty"][i], 2) for i in (CHROMATIC, SING44, COMP21))
         ratio = "/".join(_fmt(res["sanity"].get(f"{arm} {i}", {}).get("steps_ratio"), 2)
                          for i in (CHROMATIC, SING44, COMP21)) if arm != BO0 else "1/1/1"
-        p(f"{arm:<10} {r['d']:<6} {_fmt(r['S_first'], 2):<8} {_fmt(r['sing44_S'], 2):>6} ({r['sing44_shared']:>3})"
-          f"      {_fmt(r['model_S'], 2):<8} {_fmt(r['comp21_cuopt_P']):<15} {duty:<20} {ratio}")
+        late = r["sing44_late"]
+        sl = _fmt(r["sing44_S_late"], 2) + ("!" if late.get("reached") is False else "")
+        p(f"{arm:<10} {r['d']:<6} {_fmt(r['S_first'], 2):<8} {sl:>6} ({_fmt(r['model_S'], 2)})"
+          f"     {_fmt(r['sing44_S_prefix_A6'], 2):>6} ({r['sing44_shared']:>3})"
+          f"                {_fmt(r['comp21_cuopt_P']):<15} {duty:<19} {ratio}")
+    p("  (S_late! = v* never reached within the budget: budget / t_A2(v*), the limb fails)")
     bad = {k: v for k, v in res["sanity"].items() if not v.get("ok")}
     why = {k: (", " + v["why"]) if "why" in v else "" for k, v in bad.items()}
     p("sanity: " + ("every forced run counts" if not bad else
@@ -912,8 +1055,13 @@ def print_stage0(res: dict, out=sys.stdout) -> None:
                                                 f"{_fmt(v.get('steps_ratio'), 2)}{why[k]})" for k, v in bad.items())))
     ru = res["rules"]
     p(f"(a) D_Y = {_fmt(ru['a']['D_Y'])}  (qualifying {ru['a']['qualifying']}; S_first <= {S_FIRST_MAX})")
-    p(f"(b) D_min = {ru['b']['D_min']} -> levels L = {ru['b']['L']}  (qualifying {ru['b']['qualifying']}; comp21 limit "
-      f"{_fmt(ru['b']['comp21_limit'])}{'; SHORTFALL' if ru['b']['shortfall'] else ''})")
+    p(f"(b) D_min = {ru['b']['D_min']} -> levels L = {ru['b']['L']}  (qualifying {ru['b']['qualifying']}; sing44 "
+      f"S_late <= {S_SING_MAX}; comp21 limit {_fmt(ru['b']['comp21_limit'])}"
+      f"{'; SHORTFALL' if ru['b']['shortfall'] else ''})")
+    for d, lb in ru["b"]["limbs"].items():
+        p(f"    d = {d}: sing44 limb {lb['sing44']} (S_late {_fmt(lb['S_late'], 3)}), comp21 limb {lb['comp21']} "
+          f"(P {_fmt(lb['comp21_P'], 3)}){'' if lb['counted'] else ', NOT counted (sanity)'}")
+    p(f"    decided by: {ru['b']['decided_by']}")
     p(f"(c) yield_until_s = {_fmt(ru['c']['yield_until_s'])}")
     p(f"(d) patience_search_s = {_fmt(ru['d'].get('patience_search_s'))}  (ca bo0 first lead "
       f"{_fmt(ru['d'].get('t_first_lead'), 2)} s, first partner incumbent {_fmt(ru['d'].get('t_first_partner'), 2)} s)")
