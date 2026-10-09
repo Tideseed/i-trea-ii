@@ -1,0 +1,19 @@
+# I-TREA II -- the A3 development default since D-017 (2026-10-09 16:1x): itrea2-dev-rc-3way (repair clock active,
+# adaptive strategy, own HiGHS LP, LP stream, deep repair) + `repair.continuous: lp_decode` (the LP decode worker, D-017,
+# issue #27). Effective hash f030e23909ad (= the D-017 treatment arm A3@ld1). Development only (D-010), never a
+# confirmatory configuration. Arm A9 / A3x keep `itrea2-dev-rc-3way.yaml`: the runner refuses lp_decode in the
+# single-core EA arms (the decoder would share the EA's one core).
+name: itrea2-dev-rc-ld
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+  continuous: lp_decode
+repair_clock:
+  enabled: true
+  mode: active

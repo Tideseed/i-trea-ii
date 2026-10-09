@@ -1,6 +1,6 @@
 # D-017 LP decode — re-optimise the continuous variables of selected candidates (2026-10-08, AgentRA on Berk's word)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
+**Status:** ADOPTED as the A3 development default (2026-10-09 16:1x; `configs/itrea2-dev-rc-ld.yaml`, f030e23909ad) with one stated deviation (M1 by the letter) — see Result. Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's 2026-10-08 "let's
 get to work" on [[2026-10-08 cuOpt population and diversity — what transfers]] (item 6); open to a superseding decision on
 evidence. Issue #27. Development only (D-010). Design: [[2026-10-08 lp_decode design (workflow)]]. Built on branch
 `dev-next` (f99a7de), merged into main only after its adversarial review and after the D-016 pool ends.
@@ -71,3 +71,24 @@ lp_decode` (on the rc1 control: f030e23909ad).
   `gain_F_entered_n`; copies kept but not entering are counted separately (`lpd_kept`, `lpd_dropped`). A pick site that
   reads a reply skips that generation's offer (`lpd_skip_pending`), so copies return to entering one generation after
   their offer (dev-next f0bccae).
+
+## Result (2026-10-09 14:49–16:07) — outcome ADOPT; mechanism M0, M2, M3 hold, M1 fails by the letter on item_placement
+Pool 20261009-144950 (main 87bc759): 24/24, 0 void, 0 `compiled_on_clock` (`tools/d017_report.py`).
+Outcome: ld1 vs rc1e mean d **+0.219 [+0.041, +0.429]**, 5 better / 1 worse, Wilcoxon p 0.16; item_placement 0.311 →
+**0.118** (+0.619), sing44 0.377 → 0.238 (+0.369, beyond its band), fhnw 1.000 → 0.652 (+0.348), ca +0.005, radiationm
++0.020, glass4 −0.047 (inside its 0.37 band). 9-instance mean with d = 0 on the inert three: +0.146.
+Mechanism: M0 PASS (equal P and dtype per block, worker ready ≤ 0.98 s except ca 4.3 s, never failed); M2 PASS (no warm
+time-limit hit; ca's priming solve Optimal in both); M3 PASS (sing44 gains 2.2 % / 4.8 %, 5 decoded incumbents in each
+seed; ca gains 0.94 % / 1.02 %, 1 and 2 decoded incumbents); M4: completion LP-feasible on item_placement (5,215 of 5,439
+screened I rows; 2,292 / 2,922 I copies entered, 11 / 17 incumbents), glass4 (87; 3 incumbents), ca (3), sing44 (2),
+never on radiationm (0 of 6,879) and fhnw (0 of 186). **M1 fails by the letter:** the decoder's EA-thread time was 1.39 %
+and 1.63 % of wall on item_placement (1,012 / 1,171 offers, ≈ 1.7 ms each; the 50-ms per-call limb holds everywhere, max
+20.5 ms on ca); every other run ≤ 0.9 %.
+**Deviation, stated:** M1 guards against the GPU waiting on the decoder — a cost to the treatment arm. Its failure can
+only have handicapped ld1, not produced its gain, so the outcome is read as lp_decode's. Second caveat: fhnw's +0.348 is
+NOT lp_decode's (the decoder kept no row on fhnw; the EA's first feasible point at 36.6 s in seed 0 also appeared in
+D-016's cl1 seed 0 — a trajectory change: lp_decode alters memory planning and chunking, hence the random stream).
+Excluding fhnw the mean d over the other five is +0.193. **Decision: adopted as the A3 development default**
+(`configs/itrea2-dev-rc-ld.yaml`); A9 / A3x keep `itrea2-dev-rc-3way` (the runner refuses lp_decode there). Follow-ups:
+cut the per-offer host time on fast-generation instances (offer every k-th generation, or batch the row copies) and drop
+completion where its LP is never feasible (radiationm) — each a separate variable; seeds 2–3 when convenient.
