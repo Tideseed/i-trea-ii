@@ -817,6 +817,7 @@ def d013_report(R, runs: pd.DataFrame, insts) -> dict:
     """D-013: for SCIP (A0, from any set at the same budget) and cuOpt (same-day A6), the weak set W_B (P_B >= 0.5,
     seed mean) and both A9 arms on it: share improved, mean P, mean d, worst P; and the mean d over all (guard)."""
     out = {}
+    budgets = {float(r.get("budget")) for r in R.values() if _fin(r.get("budget"))}
     for B, label in (("A0", "SCIP"), (A6, "cuOpt")):
         pb = {}
         for i in insts:
@@ -824,6 +825,8 @@ def d013_report(R, runs: pd.DataFrame, insts) -> dict:
                 p = _pmeans(R, i, A6)
             else:
                 df = runs[(runs["instance"] == i) & (runs["arm"] == "A0") & (runs["status"] == "completed")]
+                if budgets and "budget" in df:
+                    df = df[df["budget"].astype(float).isin(budgets)]
                 p = {int(s): float(v) for s, v in df.groupby("seed")["pt"].mean().items()}
             if p:
                 pb[i] = float(np.mean(list(p.values())))
