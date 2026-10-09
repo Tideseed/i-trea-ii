@@ -72,3 +72,29 @@ sing44 limb is "n/a" and the floor rests on comp21 (stated in the report).
 wake (the stage-0 dose stays fixed); a stage-0 verdict distinguishes INVALID (sanity failed) from STOP (no duty
 protects cuOpt); cuOpt "first incumbent" times censored at the budget count as missing/∞, never as 120 s; shadow mode
 logs ladder steps that fall due before a lead resets them, dated at their due time.
+
+## Stage 0, partial result (2026-10-09 16:12–17:10) — 13 of 18 runs; verdict INCOMPLETE (comp21 block missing)
+Pool 20261009-161249 (main a1fd414), seed 2, both LLM servers stopped; 13/13 completed, 0 void, 0 compile on the clock;
+the comp21-2idx block (5 runs) did not fit before the deadline. `itrea backoff-report --stage 0`:
+
+| arm | duty (measured) | chromaticindex: cuOpt first incumbent (S_first vs A6 8.12 s) | A9 P | sing44 S_late vs A2 (model) | sing44 A9 P |
+|---|---|---|---|---|---|
+| A6 / A2 | — | 8.12 s (A6) | 0.068 (A6) | 1 (A2, v* reached at 48.4 s) | 0.734 (A6), 0.579 (A2) |
+| bo0 (full) | 1.00 | 65.30 s (8.04) | 0.544 | 1.84 (1.00) | 0.453 |
+| bof50 | 0.501 | **8.33 s (1.03)** | **0.069** | **1.14** (1.33) | **0.361** |
+| bof25 | 0.252 | 9.81 s (1.21) | 0.082 | 1.06 (1.14) | 0.548 |
+| bof12 | 0.126 | 62.29 s (7.67) — anomaly, one seed | 0.519 | 1.00 (1.07) | 0.598 |
+
+ca bo0: first partner incumbent 32.6 s, the EA's first material lead 44.3 s → (d) patience_search_s = 40 (clamp);
+(e) lags sing44 24.6 s, glass4 79.4 s → patience_own_s = 40 (clamp).
+**Sanity rule:** the duty limb passes everywhere (0.501 / 0.252 / 0.126 within ±0.03); the lane-steps limb ([0.75, 1.5]·d
+× bo0's steps per wall second) fails on 5 of the 6 forced runs **in both directions** — chromaticindex 0.46d / 0.72d /
+0.72d (fewer steps per busy second when paced: launches restart short), sing44 0.92d / 1.72d / 1.84d (more steps per busy
+second at low duty: less contention from cuOpt). The limb encoded a premise (EA work ∝ duty) that contention refutes —
+the same situation as D-012's criterion (b). By the letter the counted set is empty, so (a) and (b) are "n/a".
+**Proposed deviation (stated now, applied when the comp21 block has run, unless Berk objects):** the sanity gate keeps
+the duty limb (the dose is what stage 0 sets) and reports the steps ratio; with it, (a) D_Y = ½ (S_first 1.03 ≤ 2.0; ¼
+also qualifies at 1.21, ⅛ does not at 7.67), (c) yield_until_s = max(30, ⌈2 × 8.33⌉) = 30, and (b) waits for comp21
+(sing44's limb passes at ½, ¼ and ⅛). The ⅛ anomaly (cuOpt late again) is to be replicated before ⅛ is ever used.
+**Reading (one seed, not an adoption test):** at duty ½ the three-way system matches cuOpt alone on chromaticindex and
+beats every arm on sing44 — the contention cost of A9 is recoverable by duty alone.

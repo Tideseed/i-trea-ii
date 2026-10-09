@@ -574,3 +574,11 @@ the continuous part of feasible solutions and completing super-optimal infeasibl
 gain of the development so far — item_placement drops from 0.31 to 0.12 although the EA runs 40 % fewer generations, and
 sing44's EA finds 10 incumbents through decoded copies. fhnw's gain is a trajectory change (the decoder kept nothing
 there). **Adopted as the A3 development default** with the M1 deviation stated (a cost to the arm): `configs/itrea2-dev-rc-ld.yaml`.
+
+## A9 GPU back-off — stage-0 calibration, partial (2026-10-09 16:12–17:10) — 13 of 18 runs
+See [[D-018 A9 — the EA backs off the GPU beside cuOpt (contribution-gated duty cycle)]], "Stage 0, partial result":
+fixed EA duty ½ brings cuOpt's first chromaticindex incumbent from 65.3 s (full duty) back to 8.3 s (alone 8.1 s) and
+A9's P there from 0.544 to 0.069 (cuOpt alone 0.068); on sing44 duty ½ gives A9 P 0.361 vs 0.453 at full duty, 0.579 for
+SCIP ‖ cuOpt, 0.734 for cuOpt alone, and the late stretch drops from 1.84 to 1.14. ⅛ duty: chromaticindex late again
+(62.3 s) — one-seed anomaly. comp21 block not run (deadline); the pre-stated lane-steps sanity limb fails in both
+directions (a refuted premise), deviation proposed in D-018. Verdict by the letter: INCOMPLETE.
