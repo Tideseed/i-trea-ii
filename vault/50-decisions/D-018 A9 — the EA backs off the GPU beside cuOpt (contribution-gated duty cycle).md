@@ -46,3 +46,10 @@ doubled cuOpt's P; low duty cycles did not. Duty is the lever; the EA must keep 
 ## Order
 Built on its own branch while lp_decode (D-017) is fixed and tested; merged after D-017's merge (both change the
 generation loop). Stage 0 needs A9's memory (≈ 73 GB → both LLM servers stopped).
+
+## Build note (2026-10-09 13:5x, before any run)
+Built on branch `dev-backoff` (ec5477c, 3a9cb74, 22dbe96) by a Claude Code agent; CPU 700 passed; every recorded hash
+unchanged; review workflow running. Builder's note recorded here before stage 0: on the A9 pilot the sing44 shared-prefix
+stretch as defined in rule (b) is already **1.136 over 55 shared values at full duty** (53 of the 55 in the first 7 s), i.e.
+under the 1.15 limit — so rule (b)'s sing44 limb may not bind and the floor will rest mostly on comp21's limb. The rule
+stays as written (no change after seeing data); the report will say which limb decided the floor.
