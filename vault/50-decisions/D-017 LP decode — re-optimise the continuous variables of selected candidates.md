@@ -67,3 +67,7 @@ lp_decode` (on the rc1 control: f030e23909ad).
 - **M2** reads the warm counters (`warm_solves`, warm time-limit hits) and the first priming solve's status.
 - **M3 / M4** read the per-kind (F = polish, I = completion) counters for solved / ok / entered / incumbents / posts.
 - One decoded batch at most per candidate set (copies normally join the generation after the offer).
+- (14:1x) **"Admitted" in M3 = entered the population** (survived its candidate set), read as `gain_F_entered_median` /
+  `gain_F_entered_n`; copies kept but not entering are counted separately (`lpd_kept`, `lpd_dropped`). A pick site that
+  reads a reply skips that generation's offer (`lpd_skip_pending`), so copies return to entering one generation after
+  their offer (dev-next f0bccae).
