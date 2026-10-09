@@ -5,16 +5,24 @@ read — READ-ONLY — for its stored vectors (ea.incumbents.npz, solver.incumbe
 file named in its ea.summary.json. The real `LPDecoder` worker (`src/itrea/ea/lp_decode.py`: 1 HiGHS thread, niced,
 OMP/OPENBLAS/MKL = 1, CUDA_VISIBLE_DEVICES="", inheriting this process's affinity) solves the distinct integer parts of
 those vectors, in their stored order (incumbents by time, then the frontier), as polish (F) rows in batches of
---per-gen. Reported per instance: worker ready time, the priming LP's status and seconds, warm LP seconds (median,
-p90, max), time-limit hits, worker maxrss and CPU seconds, codes, and the key gain of each copy over its stored vector
-(relative to max(1, |key|)). Nothing is written unless --json is given.
+--per-gen. Each request is padded, as the engine's largest one can be, to (OFFER_FACTOR + 1) x per-gen rows with
+repeats of its own rows marked as completion rows (the worker answers a repeat CACHED, without an LP), so the pipe
+carries an engine-sized payload in the engine's dtype (`int_part_dtype`: int8 on an all-binary instance); --no-pad
+sends the bare batch. Reported per instance: worker ready time (read by this process, and the worker's own), the
+priming LP's status and seconds, warm LP seconds (median, p90, max), time-limit hits (and starved ones: a hit whose
+solve got < STARVED_CPU_SHARE of a core), worker maxrss and CPU seconds, codes, the key gain of each copy over its
+stored vector (relative to max(1, |key|)), and the pipe on this side: the wall seconds of every `offer()` and of every
+`poll()` that read a reply (median, max), recv() seconds and the payload bytes (`LPDecoder.ipc`). Nothing is written
+unless --json is given.
 
 Gates (D-017 §7), evaluated where they apply:
   - ca: priming LP "Optimal" within the cold limit (10 s);
   - every instance: median warm LP <= 1 s;
   - no spurious time-limit hit: no LP stopped by "Time limit reached" in less than 90 % of its own limit (HiGHS's
     limit is cumulative; the worker rebases it at every solve), counted separately after > 2 s of cumulative run time;
-  - ca: worker maxrss <= 1.5 GB.
+  - ca: worker maxrss <= 1.5 GB;
+  - every instance: `offer()` and the `poll()` that reads a reply each <= 50 ms (D-017 M1's per-call bound; this
+    process runs on an X925 core, A3's EA on the slower A725 cores, so a pass here is a floor, not a guarantee).
 
 Run it pinned, on one core outside the GPU lane, inside the probe's time budget (the tool stops itself at --max-s):
     CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 taskset -c 15 .venv/bin/python tools/probe_lp_decode.py \\
@@ -49,6 +57,7 @@ GATE_COLD_S = 10.0
 GATE_WARM_MEDIAN_S = 1.0
 GATE_RSS_MB = 1.5 * 1024
 CUMULATIVE_S = 2.0
+GATE_CALL_S = 0.05
 
 
 def find_run(traces: Path, instance: str, variant: str, seed: int) -> Path | None:
@@ -137,24 +146,39 @@ def probe_instance(name: str, run_dir: Path, inst: Path, args, budget_s: float) 
             res["error"] = f"worker not ready: state {dec.state}, {dec.error}"
             return res
         res["ready_s"] = dec.ready_info.get("ready_after_s")
+        res["ready_s_worker"] = dec.ready_info.get("ready_after_s_worker")
         res["worker_read_s"] = dec.ready_info.get("read_s")
         req = 0
         R = np.vstack(rows)
+        pad = (L.OFFER_FACTOR + 1) * args.per_gen
+        offer_s, read_poll_s = [], []
         for s in range(0, len(rows), args.per_gen):
             if time.monotonic() >= end:
                 res["stopped_at_budget"] = True
                 break
             req += 1
             batch = R[s:s + args.per_gen]
+            send, kinds = batch, np.zeros(batch.shape[0], np.uint8)
+            if args.pad and batch.shape[0] < pad:          # engine-sized payload: repeats come back CACHED, no LP
+                extra = batch[np.arange(pad - batch.shape[0]) % batch.shape[0]]
+                send = np.vstack([batch, extra])
+                kinds = np.r_[kinds, np.full(extra.shape[0], L.KIND_I, np.uint8)]
             rt_before = float(stats.get("run_time", 0.0))
-            if not dec.offer(req, batch.astype(dt), np.zeros(batch.shape[0], np.uint8)):
+            t = time.perf_counter()
+            ok = dec.offer(req, send.astype(dt), kinds)
+            offer_s.append(time.perf_counter() - t)
+            if not ok:
                 res["error"] = f"offer refused: state {dec.state}, {dec.error}"
                 break
             rep = None
             while time.monotonic() < end + 60.0:          # an LP already started may overrun the budget by its limit
-                for m in dec.poll():
+                t = time.perf_counter()
+                msgs = dec.poll()
+                dt_poll = time.perf_counter() - t
+                for m in msgs:
                     if m[0] == "result":
                         rep = m[2]
+                        read_poll_s.append(dt_poll)
                     elif m[0] == "failed":
                         res["error"] = f"worker failed: {m[1]}"
                 if rep is not None or dec.state in ("failed", "stopped"):
@@ -182,6 +206,11 @@ def probe_instance(name: str, run_dir: Path, inst: Path, args, budget_s: float) 
     finally:
         dec.stop()
     res["worker_gone"] = _gone(dec.pid) if dec.pid else None
+    res["ipc"] = dict(dec.ipc, int_dtype=np.dtype(dt).name, padded_rows=pad if args.pad else None,
+                      offer_s_median=float(np.median(offer_s)) if offer_s else None,
+                      offer_s_max=max(offer_s) if offer_s else None,
+                      read_poll_s_median=float(np.median(read_poll_s)) if read_poll_s else None,
+                      read_poll_s_max=max(read_poll_s) if read_poll_s else None)
     solved = [r for r in per_row if r["status"]]
     prim = solved[0] if solved else None
     warm = [r["s"] for r in solved[1:]]
@@ -198,7 +227,10 @@ def probe_instance(name: str, run_dir: Path, inst: Path, args, budget_s: float) 
                copies_feasible=sum(1 for r in per_row if r.get("check")),
                worker=dict(maxrss_mb=stats.get("ru_maxrss_mb"), cpu_s=stats.get("cpu_s"),
                            run_time=stats.get("run_time"), iterations=stats.get("iterations"),
-                           restores=stats.get("restores"), cache_hits=stats.get("cache_hits")),
+                           restores=stats.get("restores"), cache_hits=stats.get("cache_hits"),
+                           priming_first_status=stats.get("priming_first_status"),
+                           warm_solves=stats.get("warm_solves"), warm_time_limit_hits=stats.get("warm_time_limit_hits"),
+                           time_limit_hits_starved=stats.get("time_limit_hits_starved")),
                wall_s=round(time.monotonic() - t_start, 3))
     g = res["gains"]
     res["gain_median"] = float(np.median(g)) if g else None
@@ -229,6 +261,11 @@ def gates(res: dict) -> dict:
         out["warm_median_le_1s"] = res["warm_median_s"] <= GATE_WARM_MEDIAN_S
     if pr is not None:
         out["no_spurious_time_limit_hit"] = res.get("spurious_time_limit_hits", 0) == 0
+    ipc = res.get("ipc") or {}
+    if ipc.get("offer_s_max") is not None:
+        out["offer_le_50ms"] = ipc["offer_s_max"] <= GATE_CALL_S
+    if ipc.get("read_poll_s_max") is not None:
+        out["reading_poll_le_50ms"] = ipc["read_poll_s_max"] <= GATE_CALL_S
     return out
 
 
@@ -245,6 +282,8 @@ def main(argv=None) -> int:
     ap.add_argument("--max-rows", type=int, default=64, help="distinct integer parts per instance, at most")
     ap.add_argument("--max-s", type=float, default=120.0, help="wall budget of the whole probe")
     ap.add_argument("--rows", action="store_true", help="keep every row in the JSON")
+    ap.add_argument("--no-pad", dest="pad", action="store_false",
+                    help="send the bare batch, not an engine-sized request (module docstring)")
     ap.add_argument("--json", default=None, help="write the results here")
     try:
         args = ap.parse_args(argv)
@@ -276,8 +315,12 @@ def main(argv=None) -> int:
         failed |= not all(res["gates"].values())
         results.append(res)
         pr = res.get("priming") or {}
+        ipc = res.get("ipc") or {}
         print(f"{name}: n={res.get('n')} active={res.get('active_columns')} rows={res.get('distinct_int_parts')} "
-              f"ready={res.get('ready_s')} priming={pr.get('status')}/{pr.get('s', float('nan')):.3f}s "
+              f"ready={res.get('ready_s')} (worker {res.get('ready_s_worker')}) "
+              f"priming={pr.get('status')}/{pr.get('s', float('nan')):.3f}s "
+              f"offer max={ipc.get('offer_s_max')} read-poll max={ipc.get('read_poll_s_max')} "
+              f"bytes={ipc.get('offer_bytes_max')}/{ipc.get('read_bytes_max')} ({ipc.get('int_dtype')}) "
               f"warm median={res.get('warm_median_s')} max={res.get('warm_max_s')} "
               f"tl_hits={res.get('time_limit_hits')} spurious={res.get('spurious_time_limit_hits')} "
               f"rss={(res.get('worker') or {}).get('maxrss_mb')}MB gain median={res.get('gain_median')} "

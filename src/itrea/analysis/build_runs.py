@@ -551,28 +551,50 @@ def cuopt_attribution(run: Run, inc: pd.DataFrame, T: float) -> dict:
     return out
 
 
-LPD_INT_COLS = ("lpd_offers", "lpd_rows_offered", "lpd_solved", "lpd_ok", "lpd_infeasible", "lpd_time_limit",
-                "lpd_range_fail", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_entered", "lpd_incumbents", "lpd_posts",
-                "lpd_lost", "lpd_failed")
+LPD_INT_COLS = ("lpd_offers", "lpd_rows_offered", "lpd_rows_F", "lpd_rows_I", "lpd_busy", "lpd_replies",
+                "lpd_solved", "lpd_solved_F", "lpd_solved_I", "lpd_ok", "lpd_ok_F", "lpd_ok_I", "lpd_infeasible",
+                "lpd_time_limit", "lpd_other", "lpd_range_fail", "lpd_cached", "lpd_not_solved", "lpd_after_deadline",
+                "lpd_no_gain", "lpd_kept", "lpd_kept_F", "lpd_kept_I", "lpd_batches", "lpd_entered", "lpd_entered_F",
+                "lpd_entered_I", "lpd_incumbents", "lpd_incumbents_F", "lpd_incumbents_I", "lpd_posts", "lpd_posts_F",
+                "lpd_posts_I", "lpd_lost", "lpd_failed")
+# (column, key in the summary's lp_decode block) and (column, key in its worker statistics), float columns
+LPD_BLOCK_COLS = (("lpd_host_s", "host_s"), ("lpd_host_s_max", "host_s_max"), ("lpd_sync_s", "sync_s"),
+                  ("lpd_sync_s_max", "sync_s_max"), ("lpd_ready_t", "ready_t"),
+                  ("lpd_ready_t_worker", "ready_t_worker"), ("lpd_wait_s_total", "wait_s_total"),
+                  ("lpd_wait_s_max", "wait_s_max"), ("lpd_batch_rows_max", "batch_rows_max"))
+LPD_IPC_COLS = (("lpd_offer_s_max", "offer_s_max"), ("lpd_offer_s_total", "offer_s_total"),
+                ("lpd_offer_bytes_max", "offer_bytes_max"), ("lpd_read_s_max", "read_s_max"),
+                ("lpd_read_s_total", "read_s_total"), ("lpd_read_bytes_max", "read_bytes_max"))
+LPD_WORKER_COLS = (("lpd_priming_s", "priming_s"), ("lpd_priming_first_s", "priming_first_s"),
+                   ("lpd_priming_solves", "priming_solves"), ("lpd_priming_time_limit_hits", "priming_time_limit_hits"),
+                   ("lpd_worker_solves", "solves"), ("lpd_warm_solves", "warm_solves"),
+                   ("lpd_worker_time_limit_hits", "time_limit_hits"),
+                   ("lpd_warm_time_limit_hits", "warm_time_limit_hits"),
+                   ("lpd_time_limit_hits_starved", "time_limit_hits_starved"), ("lpd_screen_pass", "screen_pass"),
+                   ("lpd_screen_fail", "screen_fail"), ("lpd_worker_solve_s", "solve_s_total"),
+                   ("lpd_worker_solve_cpu_s", "solve_cpu_s_total"), ("lpd_worker_maxrss_mb", "ru_maxrss_mb"))
 
 
 def lp_decode_cols(run: Run) -> dict:
     """The LP decode's record (`repair.continuous: lp_decode`, D-017) from the EA's summary: its state, the counters
-    in LPD_INT_COLS, the EA-thread seconds (`lpd_host_s`, `lpd_host_s_max`), the worker's ready time and its priming
-    and time-limit statistics. Runs without the decode leave every column missing (-1 / NaN / ""); an instance on which
-    it was inert has `lpd_state` "inert" and nothing else."""
+    in LPD_INT_COLS (per kind of source where D-017's M3 / M4 need it), the block's EA-side times (LPD_BLOCK_COLS: host
+    and device-sync seconds for M1, the worker's own ready time for M0, the replies' wait in the pipe), the pipe's
+    send / read times and bytes (LPD_IPC_COLS) and the worker's statistics (LPD_WORKER_COLS, with the priming / warm
+    split for M2), plus `lpd_priming_first_status`. Runs without the decode leave every column missing (-1 / NaN /
+    ""); an instance on which it was inert has `lpd_state` "inert" and nothing else."""
     s = run.summary(EA_ROLE)
     blk = s.get("lp_decode")
     if not isinstance(blk, dict):
         st = (s.get("startup") or {}).get("lp_decode") if isinstance(s.get("startup"), dict) else None
         return {"lpd_state": str(st.get("state") or "")} if isinstance(st, dict) else {}
     w = blk.get("worker") if isinstance(blk.get("worker"), dict) else {}
+    ipc = blk.get("ipc") if isinstance(blk.get("ipc"), dict) else {}
     out: dict = {"lpd_state": str(blk.get("state") or "")}
     out.update({k: _counter(s, k) for k in LPD_INT_COLS})
-    out.update(lpd_host_s=_fl(blk.get("host_s")), lpd_host_s_max=_fl(blk.get("host_s_max")),
-               lpd_ready_t=_fl(blk.get("ready_t")), lpd_priming_s=_fl(w.get("priming_s")),
-               lpd_worker_solves=_fl(w.get("solves")), lpd_worker_time_limit_hits=_fl(w.get("time_limit_hits")),
-               lpd_worker_maxrss_mb=_fl(w.get("ru_maxrss_mb")))
+    out.update({col: _fl(blk.get(key)) for col, key in LPD_BLOCK_COLS})
+    out.update({col: _fl(ipc.get(key)) for col, key in LPD_IPC_COLS})
+    out.update({col: _fl(w.get(key)) for col, key in LPD_WORKER_COLS})
+    out["lpd_priming_first_status"] = str(w.get("priming_first_status") or "")
     return out
 
 
@@ -1037,9 +1059,11 @@ RUN_COLUMNS = {
     "cuopt_inject_msgs": "int", "cuopt_injected": "int", "ea_inc_from_cuopt": "int", "cuopt_posts": "int",
     "cuopt_posts_accepted": "int", "cuopt_posts_became_incumbent": "int", "solver_inc_from_cuopt": "int",
     # D-017: the LP decode (repair.continuous: lp_decode); missing (-1 / NaN / "") for runs without it
-    "lpd_state": "str", **{k: "int" for k in LPD_INT_COLS}, "lpd_host_s": "float", "lpd_host_s_max": "float",
-    "lpd_ready_t": "float", "lpd_priming_s": "float", "lpd_worker_solves": "int",
-    "lpd_worker_time_limit_hits": "int", "lpd_worker_maxrss_mb": "float",
+    "lpd_state": "str", **{k: "int" for k in LPD_INT_COLS},
+    **{c: ("int" if c == "lpd_batch_rows_max" else "float") for c, _ in LPD_BLOCK_COLS},
+    **{c: ("int" if c.endswith("_bytes_max") else "float") for c, _ in LPD_IPC_COLS},
+    **{c: ("float" if c.endswith(("_s", "_mb")) else "int") for c, _ in LPD_WORKER_COLS},
+    "lpd_priming_first_status": "str",
     "crashed": "bool", "crashed_roles": "str", "crash_t": "float", "exit_codes": "str",
     "gpu_arm": "bool", "gpu_health": "str", "gpu_median_sm_mhz": "float", "gpu_foreign_share": "float",
     "gpu_void": "bool", "block_void": "bool",

@@ -102,7 +102,9 @@ def files(tmp_path_factory):
 
 
 def _decoder(path, prob, per_gen=1000, time_limit=0.05, cold_limit=1.0, deadline=math.inf, **kw):
-    return L.LPDecoder(path, L.model_digest(prob.names, prob.isint), "int32", per_gen, time_limit, cold_limit, 1e-6,
+    ints = np.asarray(prob.ints)                              # the engine's payload dtype (int8 on these binaries)
+    dt = L.int_part_dtype(np.asarray(prob.lb)[ints], np.asarray(prob.ub)[ints])
+    return L.LPDecoder(path, L.model_digest(prob.names, prob.isint), dt, per_gen, time_limit, cold_limit, 1e-6,
                        deadline, **kw).start()
 
 
@@ -217,10 +219,22 @@ def test_model_digest_and_int_part_dtype():
     assert d == L.model_digest(list(p.names), np.asarray(p.isint))
     assert d != L.model_digest(list(reversed(p.names)), p.isint)
     assert d != L.model_digest(p.names, ~np.asarray(p.isint))
-    assert L.int_part_dtype(np.array([0.0, -3.0]), np.array([5.0, 7.0])) == np.int32
+    # the smallest integer type that holds every bound (ca: all binary -> int8, a quarter of int32's payload)
+    assert L.int_part_dtype(np.zeros(4), np.ones(4)) == np.int8
+    assert L.int_part_dtype(np.array([0.0, -3.0]), np.array([5.0, 7.0])) == np.int8
+    assert L.int_part_dtype(np.array([-128.0]), np.array([127.0])) == np.int8
+    assert L.int_part_dtype(np.array([0.0]), np.array([128.0])) == np.int16
+    assert L.int_part_dtype(np.array([-32768.0]), np.array([32767.0])) == np.int16
+    assert L.int_part_dtype(np.array([0.0]), np.array([40000.0])) == np.int32
+    assert L.int_part_dtype(np.array([-2.0 ** 31]), np.array([2.0 ** 31 - 1])) == np.int32
+    assert L.int_part_dtype(np.zeros(0), np.zeros(0)) == np.int8
     assert L.int_part_dtype(np.array([0.0]), np.array([np.inf])) == np.float64
     assert L.int_part_dtype(np.array([0.5]), np.array([3.0])) == np.float64
     assert L.int_part_dtype(np.array([0.0]), np.array([2.0 ** 40])) == np.float64
+    for lo, hi in ((-128.0, 127.0), (-300.0, 300.0), (-40000.0, 40000.0)):   # a clipped value survives the cast
+        dt = L.int_part_dtype(np.array([lo]), np.array([hi]))
+        v = np.array([lo, hi, 0.0])
+        assert np.array_equal(v.astype(dt).astype(np.float64), v)
 
 
 def _sel(**kw):
@@ -393,7 +407,9 @@ def test_worker_ready_codes_and_optimum(codes_worker):
     dec, path, prob = codes_worker
     info = dec.ready_info
     assert info["n"] == 10 and info["n_int"] == 6 and info["n_cont"] == 4 and info["nice"] >= L.NICE
-    assert info["omp_num_threads"] == "1"
+    assert info["omp_num_threads"] == "1" and dec.int_dtype == np.int8
+    # the worker's own ready time (its clock, sent with "ready") precedes the EA's read of it
+    assert 0.0 < info["ready_after_s_worker"] <= info["ready_after_s"] and info["t_sent"] <= info["t_read"]
     good, good2 = [1, 1, 1, 1, 1, 0], [1, 0, 1, 1, 1, 1]
     infeas, screen_fail = [0, 0, 1, 1, 1, 0], [1, 1, 1, 0, 1, 0]
     rows = np.array([good, infeas, good2, screen_fail, good, good2], np.int32)
@@ -415,6 +431,14 @@ def test_worker_ready_codes_and_optimum(codes_worker):
     assert [L.CODE_NAMES[c] for c in rep2["codes"]] == ["cached", "cached", "range_fail"]   # solved before: no LP
     st = rep2["stats"]
     assert st["cache_hits"] == 4 and st["screen_fail"] == 2 and st["solves"] == 3 and st["priming_solves"] == 1
+    assert st["priming_first_status"] == st["priming_last_status"] == "Optimal" and st["warm_solves"] == 2
+    assert st["priming_first_s"] == pytest.approx(rep["secs"][0]) and st["priming_time_limit_hits"] == 0
+    assert np.all(rep["cpu"][[0, 1, 2]] >= 0) and rep["cpu"][3] == 0 and st["solve_cpu_s_total"] > 0
+    # the pipe's timing on both sides: the worker's send time, the EA's read time and recv() seconds
+    assert rep["t_sent"] <= rep["t_read"] and rep["read_s"] >= 0
+    ipc = dec.ipc
+    assert ipc["offers"] == ipc["reads"] == 2 and ipc["offer_bytes_max"] == rows.size    # int8: one byte per value
+    assert ipc["read_bytes_max"] == rep["conts"].nbytes and ipc["offer_s_max"] >= 0 and ipc["read_s_max"] >= 0
 
 
 @pytest.mark.solver
@@ -435,21 +459,64 @@ def test_worker_budget_split_and_not_solved(files):
     assert _gone(pid)
 
 
+def _distinct_rows(seed: int, k: int, n_int: int = 30) -> np.ndarray:
+    """k distinct binary integer parts of `gen` with x0 = 1, so every fixed-integer LP is feasible and screens."""
+    rs = np.random.default_rng(seed)
+    rows = rs.integers(0, 2, size=(k, n_int)).astype(np.int8)
+    rows[:, 0] = 1
+    assert len({r.tobytes() for r in rows}) == k               # no CACHED repeat inside the batch
+    return rows
+
+
+@pytest.mark.solver
+@pytest.mark.parametrize("n_f, n_i, solved_f, solved_i", [(0, 6, 0, 4), (1, 5, 1, 3), (2, 5, 2, 2), (3, 1, 3, 1)])
+def test_worker_short_kind_passes_its_share(files, n_f, n_i, solved_f, solved_i):
+    """The worker's own budget at N = 4: a kind that is short passes its share to the other — with no polish row all
+    four LPs go to completion rows (the screen lets four through), with one polish row three; with three polish rows
+    and one completion row the polish rows take three. Rows beyond the budget are NOT_SOLVED. (A generous time limit,
+    so contention cannot turn a solved row into a time-limit code: only solved / not solved is asserted.)"""
+    path, prob = files["gen"]
+    rows = _distinct_rows(13 + n_f + 10 * n_i, n_f + n_i)
+    kinds = np.r_[np.full(n_f, L.KIND_F), np.full(n_i, L.KIND_I)].astype(np.uint8)
+    with _decoder(path, prob, time_limit=5.0, cold_limit=10.0) as dec:
+        _wait(dec)
+        rep = _solve(dec, rows, kinds, per_gen=4)
+        pid = dec.pid
+    codes = [L.CODE_NAMES[c] for c in rep["codes"]]
+    solved = [c not in ("not_solved", "cached", "range_fail", "after_deadline") for c in codes]
+    assert solved == [True] * solved_f + [False] * (n_f - solved_f) + [True] * solved_i + [False] * (n_i - solved_i), \
+        codes
+    assert all(c == "not_solved" for c, s in zip(codes, solved) if not s), codes
+    assert rep["stats"]["screen_pass"] == min(n_i, max(4 - n_f, 2)) and rep["stats"]["screen_fail"] == 0
+    assert _gone(pid)
+
+
 @pytest.mark.solver
 def test_worker_rebases_the_cumulative_time_limit(files):
-    """HiGHS's time_limit is cumulative over runs: 100 warm solves at L = 0.02 s each, whose total HiGHS run time
-    exceeds L, all end Optimal because every solve sets time_limit = getRunTime() + L."""
+    """HiGHS's time_limit is cumulative over runs (and wall-clock), and the worker sets time_limit = getRunTime() + L
+    at every solve. 100 solves at L = 0.02 s whose total HiGHS run time exceeds L: once the cumulative run time is past
+    L, an un-rebased limit would stop every later solve at once (secs ~ 0); rebased, a solve stops only after running
+    for about L. So the test fails on a "Time limit reached" row that stopped in less than 0.9 L (the probe's
+    "spurious" rule) — a preemption of the niced worker on contended cores can legitimately stop a row at >= L wall
+    seconds, and that is allowed."""
+    L_s = 0.02
     path, prob = files["big"]
     rs = np.random.default_rng(7)
-    rows = rs.integers(0, 2, size=(100, 40)).astype(np.int32)
+    rows = rs.integers(0, 2, size=(100, 40)).astype(np.int8)
     rows[:, 0] = 1
-    with _decoder(path, prob, time_limit=0.02, cold_limit=0.02) as dec:
+    with _decoder(path, prob, time_limit=L_s, cold_limit=L_s) as dec:
         _wait(dec)
-        reps = [_solve(dec, rows[s:s + 25], per_gen=25) for s in range(0, 100, 25)]
-    status = [s for r in reps for s in r["status"]]
+        reps = [_solve(dec, rows[s:s + 10], per_gen=10) for s in range(0, 100, 10)]
     st = reps[-1]["stats"]
-    assert st["run_time"] > 0.02, st                         # otherwise the test proves nothing
-    assert status == ["Optimal"] * 100 and st["time_limit_hits"] == 0 and st["solves"] == 100
+    assert st["run_time"] > L_s and st["solves"] == 100, st   # otherwise the test proves nothing
+    after = [b for b in range(1, len(reps)) if reps[b - 1]["stats"]["run_time"] > L_s]
+    assert after, [r["stats"]["run_time"] for r in reps]      # some batches ran entirely after cumulative > L
+    spurious = [(b, i, r["status"][i], float(r["secs"][i])) for b, r in enumerate(reps) for i in range(10)
+                if r["status"][i] == "Time limit reached" and r["secs"][i] < 0.9 * r["limit"][i]]
+    assert spurious == [], spurious
+    late = [s for b in after for s in reps[b]["status"]]
+    assert "Optimal" in late and set(late) <= {"Optimal", "Time limit reached"}, late
+    assert st["time_limit_hits"] == sum(s == "Time limit reached" for r in reps for s in r["status"])
 
 
 @pytest.mark.solver
@@ -459,34 +526,48 @@ def test_worker_priming_limit_and_basis_restore(files):
     basis, not from the infeasible solve's."""
     path, prob = files["gen"]
     rs = np.random.default_rng(11)
-    A, B, B2 = (rs.integers(0, 2, size=30).astype(np.int32) for _ in range(3))
+    A, B, B2 = (rs.integers(0, 2, size=30).astype(np.int8) for _ in range(3))
     A[0] = B[0] = B2[0] = 1
     C = A.copy()
     C[:2] = 0                                                # x0 = x1 = 0: LP infeasible
-    with _decoder(path, prob, time_limit=0.05, cold_limit=1.0, cache_cap=0, hooks={"cold_limits": [0.0]}) as dec:
-        _wait(dec)
-        r1 = _solve(dec, [A])
-        assert r1["status"][0] == "Time limit reached" and r1["limit"][0] == 0.0, r1
-        r2 = _solve(dec, [A])
-        assert r2["limit"][0] == 1.0 and r2["status"][0] == "Optimal"          # still priming: the cold limit
-        r3 = _solve(dec, [B2])
-        assert r3["limit"][0] == 0.05 and r3["status"][0] == "Optimal"
-        ok = _solve(dec, [A, B])
-        bad = _solve(dec, [A, C, B])
+
+    def sequence(hooks):
+        # generous warm limits: contention must not turn a warm solve into a non-optimal status
+        with _decoder(path, prob, time_limit=5.0, cold_limit=10.0, cache_cap=0, hooks=hooks) as dec:
+            _wait(dec)
+            r1 = _solve(dec, [A])
+            assert r1["status"][0] == "Time limit reached" and r1["limit"][0] == 0.0, r1
+            r2 = _solve(dec, [A])
+            assert r2["limit"][0] == 10.0 and r2["status"][0] == "Optimal"     # still priming: the cold limit
+            r3 = _solve(dec, [B2])
+            assert r3["limit"][0] == 5.0 and r3["status"][0] == "Optimal"
+            ok = _solve(dec, [A, B])
+            bad = _solve(dec, [A, C, B])
         assert [L.CODE_NAMES[c] for c in bad["codes"]] == ["ok", "infeasible", "ok"]
-        assert bad["iters"][2] <= ok["iters"][1] + 2, (ok["iters"], bad["iters"])
-        assert bad["stats"]["restores"] >= 1 and bad["stats"]["restore_errors"] == 0
-        assert bad["stats"]["priming_solves"] == 2 and bad["stats"]["time_limit_hits"] >= 1
+        return ok, bad
+    ok, bad = sequence({"cold_limits": [0.0]})
+    # single-thread HiGHS from the same (restored) basis takes exactly the iterations it took from it before
+    assert bad["iters"][2] == ok["iters"][1], (ok["iters"], bad["iters"])
+    st = bad["stats"]
+    assert st["restores"] == 1 and st["restore_errors"] == 0
+    assert st["priming_solves"] == 2 and st["time_limit_hits"] == st["priming_time_limit_hits"] == 1
+    assert st["priming_first_status"] == "Time limit reached" and st["priming_last_status"] == "Optimal"
+    assert st["warm_solves"] == 6 and st["warm_time_limit_hits"] == 0
+    # negative control: without the restore the same row starts from the infeasible solve's basis (seed 11: 15 vs 13)
+    ok_n, bad_n = sequence({"cold_limits": [0.0], "no_restore": True})
+    assert ok_n["iters"][1] == ok["iters"][1] and bad_n["stats"]["restores"] == 0
+    assert bad_n["iters"][2] != ok_n["iters"][1], (ok_n["iters"], bad_n["iters"])
 
 
 @pytest.mark.solver
 def test_worker_digest_mismatch_fails(files):
     path, prob = files["gen"]
-    dec = L.LPDecoder(path, "0" * 32, "int32", 4, 0.05, 1.0, 1e-6).start()
+    dec = L.LPDecoder(path, "0" * 32, "int8", 4, 0.05, 1.0, 1e-6).start()
     msgs = _wait(dec, states=("failed",))
     assert dec.state == "failed" and "digest" in dec.error and any(m[0] == "failed" for m in msgs)
-    assert not dec.offer(1, np.zeros((1, 30), np.int32), [0])
-    assert _gone(dec.pid) and dec.stop() is False and dec.state == "failed"
+    assert not dec.offer(1, np.zeros((1, 30), np.int8), [0]) and dec.poll() == []
+    # the failure only signalled the worker (the EA never waits on it); stop() joins it, after the clock
+    assert dec.stop() is False and dec.state == "failed" and _gone(dec.pid)
 
 
 @pytest.mark.solver
@@ -516,6 +597,123 @@ def test_worker_poll_never_blocks_and_eof_ends_it(files):
     assert _gone(dec.pid)
 
 
+class _FakeProc:
+    """Stands in for the worker's Process in LPDecoder unit tests (no process is started): records the calls."""
+
+    def __init__(self, alive=True, on_is_alive=None):
+        self.alive, self.on_is_alive = alive, on_is_alive
+        self.calls: list = []
+        self.exitcode = None if alive else 0
+        self.pid = None
+
+    def is_alive(self):
+        self.calls.append("is_alive")
+        if self.on_is_alive is not None:
+            f, self.on_is_alive = self.on_is_alive, None
+            f(self)
+        return self.alive
+
+    def terminate(self):
+        self.calls.append("terminate")
+
+    def kill(self):
+        self.calls.append("kill")
+
+    def join(self, timeout=None):
+        self.calls.append(("join", timeout))
+
+
+def _bare_decoder(proc, state="busy"):
+    dec = L.LPDecoder("<none>", "0" * 32, "int8", 4, 2.0, 10.0, 1e-6)
+    parent, child = mp.Pipe(duplex=True)
+    dec._proc, dec._conn, dec._t_start, dec.state = proc, parent, time.monotonic(), state
+    dec.outstanding = 1 if state == "busy" else None
+    return dec, child
+
+
+def test_poll_survives_a_failure_sent_just_before_the_worker_exits():
+    """The race of the review (2026-10-08): the worker sends ("failed", ...) and exits after poll()'s first read found
+    nothing but before is_alive() ran. The drain after is_alive() must handle it and return the failure — not call
+    poll() on the pipe that the failure closed (AttributeError, which would have ended the EA)."""
+    def send_and_exit(p):
+        child.send(("failed", "boom", "tb"))
+        child.close()
+        p.alive, p.exitcode = False, 1
+    proc = _FakeProc(alive=True, on_is_alive=send_and_exit)
+    dec, child = _bare_decoder(proc)
+    out = dec.poll()
+    assert out == [("failed", "boom", "tb")] and dec.state == "failed" and dec.error == "boom"
+    assert dec._conn is None and dec.poll() == []
+
+
+def test_fail_never_waits_for_the_worker():
+    """A failure on the EA thread signals the worker and closes the pipe, without a join; poll() reaps it later
+    without blocking; only stop() (after the clock) joins."""
+    proc = _FakeProc(alive=True)
+    dec, child = _bare_decoder(proc)
+    child.send(("failed", "boom", "tb"))
+    t = time.perf_counter()
+    out = dec.poll()
+    assert time.perf_counter() - t < 0.5
+    assert out == [("failed", "boom", "tb")] and dec.state == "failed" and dec._conn is None
+    assert "terminate" in proc.calls and not any(isinstance(c, tuple) for c in proc.calls), proc.calls
+    proc.alive, proc.exitcode = False, -15                    # the worker died of the signal: reaped without a join
+    assert dec.poll() == [] and dec.exitcode == -15 and not any(isinstance(c, tuple) for c in proc.calls)
+    assert dec.stop() is False and dec.state == "failed"
+    assert any(isinstance(c, tuple) and c[0] == "join" for c in proc.calls)   # stop() joins
+    child.close()
+
+
+@pytest.mark.solver
+def test_offer_to_a_dead_worker_fails_without_waiting(files):
+    """The worker dies while idle (an OOM kill, a segfault) between a poll and the next offer: the send fails, the
+    decoder is "failed" with the error, and nothing waits."""
+    import signal
+    path, prob = files["gen"]
+    dec = _decoder(path, prob)
+    try:
+        _wait(dec)
+        os.kill(dec.pid, signal.SIGKILL)
+        dec._proc.join(10)                                    # dead and reaped: its end of the pipe is closed
+        ok = dec.offer(1, np.ones((1, 30), np.int8), [0])
+        assert not ok and dec.state == "failed" and "send failed" in dec.error, (dec.state, dec.error)
+        assert dec.poll() == []
+    finally:
+        dec.stop()
+    assert _gone(dec.pid)
+
+
+class _SendFailStub(E._WarmupDecoder):
+    """A decoder whose send fails at its first offer, as LPDecoder.offer reports it (state "failed", `error`)."""
+
+    error = None
+
+    def offer(self, req_id, rows, kinds, per_gen=None):
+        if self.state != "idle":
+            return False
+        self.state, self.error = "failed", "send failed: BrokenPipeError(32, 'Broken pipe')"
+        return False
+
+
+def test_engine_records_a_failed_send(files):
+    """A failed send reaches the engine like any worker failure: `lpd_failed`, the error, a "failed" event; no
+    request is counted (`lpd_req` and `lpd_offers` stay 0)."""
+    path, prob = files["gen"]
+    eng = Engine(prob, cfg_for(), seed=2, warmup=False, decoder_factory=_SendFailStub)
+    eng.prepare()
+    events = []
+    real_event = eng.trace.event
+    eng.trace.event = lambda kind, t=None, **d: (events.append((kind, d)), real_event(kind, t, **d))
+    eng.begin(time.monotonic(), 3600.0)
+    _run_until(eng, lambda e: e.lpd_failed, timeout=30)
+    for _ in range(2):
+        eng.step()
+    out = eng.finish()
+    assert out["lpd_failed"] == 1 and out["lp_decode"]["state"] == "failed"
+    assert "send failed" in out["lp_decode"]["error"] and eng.lpd_req == 0 and out["lpd_offers"] == 0
+    assert [d["error"] for k, d in events if k == "lp_decode" and d.get("what") == "failed"] == [eng.lpd_error]
+
+
 @pytest.mark.solver
 def test_worker_no_solve_after_the_deadline_and_stop_is_idempotent(files):
     path, prob = files["gen"]
@@ -543,7 +741,8 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
     """The real worker on the generated toy: copies carry ORIGIN_LP_DECODE, their source's strategy, no parents and
     `lpd_src`; their integer parts are their sources' (rounded), their continuous values LP-optimal; polish copies beat
     their sources by imp_tol; every decoded incumbent passes the float64 check; the counters add up; the genealogy
-    goes through the lineage analysis; the worker is gone after finish."""
+    goes through the lineage analysis; at most one decoded batch joins a candidate set; the per-kind counters and the
+    M0 / M1 / M2 fields are there; the worker is gone after finish."""
     from scipy.optimize import linprog
     from itrea.analysis.lineage import run_tables
     from itrea.trace import Trace, read_events
@@ -566,16 +765,25 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
                 i = pos[int(sid)]
                 src_x[int(sid)] = (np.asarray(cand.X[i], float).copy(), int(cand.strat[i]))
 
-    def result(req_id, rep):
+    def result(req_id, rep, site="exchange"):
         n0 = len(eng.pending)
-        real_result(req_id, rep)
+        real_result(req_id, rep, site=site)
         batches.extend(b for b in eng.pending[n0:] if b.src == "lp_decode")
+    per_set = []                                             # (generation, decoded batches, decoded rows) per set
+    real_with = eng._with_pending
+
+    def with_pending(cand, meta):
+        d = [b for b in eng.pending if b.src == "lp_decode"]
+        per_set.append((eng.gen, len(d), sum(int(b.X.shape[0]) for b in d)))
+        return real_with(cand, meta)
     monkeypatch.setattr(eng, "_lpd_offer", offer)
     monkeypatch.setattr(eng, "_lpd_result", result)
+    monkeypatch.setattr(eng, "_with_pending", with_pending)
     before = _children()
     eng.begin(time.monotonic(), 3600.0)
     pid = eng.lpd.pid
-    _run_until(eng, lambda e: e.c["lpd_entered"] >= 3 and e.c["lpd_incumbents"] >= 1 and e.c["lpd_kept_F"] >= 2)
+    _run_until(eng, lambda e: e.c["lpd_entered"] >= 3 and e.c["lpd_incumbents"] >= 1 and e.c["lpd_kept_F"] >= 2
+               and e.c["lpd_replies"] >= 5)
     out = eng.finish()
     eng.write_outputs(tmp_path)
     tr.close(sense=prob.sense, **{k: v for k, v in out.items() if k not in ("best_x", "frontier")})
@@ -606,6 +814,29 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
     for r in rows:
         if r["kind"] == "F" and r["kept"]:
             assert r["key"] < r["key_src"] - 1e-9 * max(1.0, abs(r["key_src"]))
+    # a source is screened or solved at most once (NOT_SOLVED / AFTER_DEADLINE rows may be offered again)
+    done = [r["src"] for r in rows if r["code"] not in ("not_solved", "after_deadline")]
+    assert len(done) == len(set(done))
+    # at most one decoded batch (at most N rows) per candidate set; copies enter one generation after their offer
+    # when the reply came before that generation's candidate set (read there: site "candidates" / "exchange"), two
+    # when it was read at the pick site
+    N = cfg.repair.lp_decode_per_gen
+    assert max(n for _, n, _ in per_set) == 1 and max(k for _, _, k in per_set) <= N, per_set
+    res = [e for e in ev if e["what"] == "result"]
+    entering = {g: k for g, n, k in per_set if n}
+    for e in res:
+        assert e["wait_s"] is not None and e["wait_s"] >= 0 and e["t_sent"] <= e["t"] + 1e-6 and e["read_s"] >= 0
+        if e["gen_enters"] is None:
+            assert e["kept"] == 0 or e["site"] == "finish"
+            continue
+        if e["gen_enters"] > eng.gen:                        # read at the last pick site: the run ended first
+            continue
+        lag = e["gen_enters"] - e["gen_offered"]
+        assert lag == (e["gen"] - e["gen_offered"]) + (1 if e["site"] == "pick" else 0) and lag >= 1, e
+        assert entering.get(e["gen_enters"]) == e["kept"], (e["gen_enters"], entering)
+    # replies are read just before the candidate set (the exact lags are pinned by the stub test below: the niced
+    # worker on contended cores may answer several generations late)
+    assert any(e["site"] == "candidates" for e in res), [(e["site"], e["gen_offered"], e["gen_enters"]) for e in res]
     # genealogy
     g = eng.genealogy()
     dec = g["lpd_src"] >= 0
@@ -630,11 +861,32 @@ def test_engine_decoded_copies(files, tmp_path, monkeypatch):
     assert c["lpd_solved"] == c["lpd_ok"] + c["lpd_infeasible"] + c["lpd_time_limit"] + c["lpd_other"]
     assert c["lpd_ok"] == c["lpd_kept"] + c["lpd_no_gain"] and c["lpd_kept"] == c["lpd_kept_F"] + c["lpd_kept_I"]
     assert c["lpd_entered"] <= c["lpd_kept"] and c["lpd_failed"] == 0
+    # per kind of the copy's source (D-017 M3 / M4)
+    for k in ("solved", "ok", "kept", "entered", "incumbents", "posts"):
+        assert c[f"lpd_{k}_F"] + c[f"lpd_{k}_I"] == c[f"lpd_{k}"], k
+    assert c["lpd_kept_F"] + c["lpd_no_gain"] == c["lpd_ok_F"] and c["lpd_kept_I"] == c["lpd_ok_I"]
+    assert c["lpd_ok_F"] == sum(r["kind"] == "F" and r["code"] == "ok" for r in rows)
+    kind_of_src = {r["src"]: r["kind"] for r in rows}
+    for copy_id, src in eng.lpd_src_of.items():
+        assert ("F" if eng.lpd_kind_of[copy_id] == L.KIND_F else "I") == kind_of_src[src]
+    n_dec_F = sum(1 for iid, *_ in eng.inc_stack if iid in eng.lpd_ids and eng.lpd_kind_of[iid] == L.KIND_F)
+    assert n_dec_F == c["lpd_incumbents_F"]
     blk = out["lp_decode"]
     assert blk["state"] in ("idle", "busy") and blk["worker"]["solves"] >= c["lpd_ok"] and blk["host_s"] > 0
     assert blk["ready"]["nice"] >= L.NICE and blk["host_s_max"] <= blk["host_s"]
+    # M0: the worker's own ready time precedes the EA's read of it; M1 / IPC fields
+    assert 0 < blk["ready_t_worker"] <= blk["ready_t"] and "t_sent" not in blk["ready"]
+    assert 0 <= blk["sync_s_max"] <= blk["sync_s"] + 1e-12 and 0 <= blk["wait_s_max"] <= blk["wait_s_total"] + 1e-12
+    assert blk["ipc"]["offers"] == c["lpd_offers"] and blk["ipc"]["reads"] == c["lpd_replies"]
+    assert 1 <= blk["batch_rows_max"] <= N
+    w = blk["worker"]
+    assert w["priming_first_status"] == "Optimal" and w["warm_solves"] + w["priming_solves"] == w["solves"]
+    from itrea.analysis import build_runs as B                # every field the derived table reads exists
+    assert all(key in blk for _, key in B.LPD_BLOCK_COLS) and all(key in blk["ipc"] for _, key in B.LPD_IPC_COLS)
+    assert all(key in w for _, key in B.LPD_WORKER_COLS) and all(k in out for k in B.LPD_INT_COLS)
     gens = [e for e in read_events(tmp_path / "ea.events.jsonl") if e["kind"] == "gen"]
-    assert all("lpd_offers" in e and "lpd_host_s" in e for e in gens)
+    assert all(all(k in e for k in E.LPD_GEN_FIELDS) and "lpd_host_s" in e and "lpd_sync_s" in e for e in gens)
+    assert gens[-1]["lpd_entered_F"] + gens[-1]["lpd_entered_I"] == gens[-1]["lpd_entered"] == c["lpd_entered"]
     lin = run_tables(tmp_path)
     assert lin["rows"] == len(g["id"]) and lin["cases_without_parents"] >= 0
 
@@ -666,9 +918,8 @@ def test_engine_stops_the_worker_after_an_exception(files, monkeypatch):
 
 
 @pytest.mark.solver
-def test_engine_run_reads_the_last_reply_and_stops_the_worker(files):
-    """`run()` to its budget: finish() reads a reply waiting at the deadline before it stops the worker, so the
-    summary's statistics are those of the last reply read; the worker is gone afterwards."""
+def test_engine_run_to_its_budget_stops_the_worker(files):
+    """`run()` to its budget: the counters add up (at most the last request is lost) and the worker is gone."""
     path, prob = files["gen"]
     eng = Engine(prob, cfg_for(), seed=6, warmup=False)
     eng.prepare()
@@ -685,6 +936,32 @@ def test_engine_run_reads_the_last_reply_and_stops_the_worker(files):
     assert out["lpd_replies"] + out["lpd_lost"] == out["lpd_offers"] and out["lpd_lost"] <= 1
     assert blk["worker"]["requests"] == out["lpd_replies"]       # the stats are those of the last reply read
     assert pids and _gone(pids[0]) and eng.lpd.state == "stopped"
+
+
+@pytest.mark.solver
+def test_finish_reads_the_reply_waiting_at_the_end(files):
+    """finish() reads a reply that is waiting in the pipe before it stops the worker — also when a decoded batch read
+    at the last pick site is still pending (finish reads without the one-batch hold) — so it is not counted lost and
+    the summary's statistics are those of the last request. Deterministic: the step that offered is the last one, and
+    the test waits until the reply is in the pipe without reading it."""
+    path, prob = files["gen"]
+    eng = Engine(prob, cfg_for(), seed=6, warmup=False)
+    eng.prepare()
+    eng.begin(time.monotonic(), 3600.0)
+    pid = eng.lpd.pid
+    end = time.monotonic() + 60.0
+    while eng.lpd_req_info is None and time.monotonic() < end:
+        eng.step()
+    assert eng.lpd_req_info is not None and eng.lpd.state == "busy"
+    assert eng.lpd._conn.poll(30)                             # the reply is there; nothing has read it
+    # as if the last pick site had read a previous reply: a decoded batch is pending (it never enters now)
+    X = eng.bk.xp.asarray(np.zeros((1, prob.n))).astype(eng.gene_dtype)
+    eng.pending.append(_Batch(X, np.full(1, ORIGIN_LP_DECODE, np.uint16), repair=False, src="lp_decode", t=0.0,
+                              src_ids=np.array([-5]), src_kinds=np.array([L.KIND_I], np.uint8)))
+    out = eng.finish()
+    assert out["lpd_lost"] == 0 and out["lpd_replies"] == out["lpd_offers"] >= 1
+    assert out["lp_decode"]["worker"]["requests"] == out["lpd_offers"] and out["lp_decode"]["state"] == "idle"
+    assert _gone(pid) and eng.lpd.state == "stopped"
 
 
 @pytest.mark.solver
@@ -711,18 +988,21 @@ def test_warmup_runs_the_decode_path_with_the_stub(files, monkeypatch):
     seen = []
     real = Engine._lpd_entering
 
-    def spy(self, ids, src_ids):
+    def spy(self, ids, src_ids, kinds=None):
         seen.append((str(self.prob.path), self.lpd_warm_rows, len(ids)))
-        return real(self, ids, src_ids)
+        return real(self, ids, src_ids, kinds)
     monkeypatch.setattr(Engine, "_lpd_entering", spy)
     before = _children()
     eng = Engine(prob, cfg_for(), seed=4)
     st = eng.prepare()
     assert _children() == before
     w = st["warmup"]
-    assert w["many"]["lp_decode_warmed"] >= 1 and w["one"]["lp_decode_warmed"] >= 1, w
+    # the start-up record: the largest decoded batch (rows) per pass — several rows in "many", one in "one"
+    assert w["many"]["lp_decode_warmed"] >= 2 and w["one"]["lp_decode_warmed"] == 1, w
+    assert w["many"]["lp_decode_warmed_batches"] >= 1 and w["one"]["lp_decode_warmed_batches"] >= 1, w
     assert {p for p, _, _ in seen} == {"<synthetic warm-up>"}
     assert {k for _, r, k in seen if r == 3} == {3} and {k for _, r, k in seen if r == 1} == {1}
+    assert w["many"]["lp_decode_warmed"] == 3
     assert not hasattr(eng, "c")                             # nothing of the instance before t0
 
 
@@ -736,6 +1016,188 @@ def test_warmup_stub_answers_on_the_next_poll():
     (kind, req, rep), = stub.poll()
     assert kind == "result" and req == 1 and list(rep["codes"]) == [L.OK, L.OK] and rep["conts"].shape == (2, 2)
     assert stub.poll() == [] and stub.stop() is False
+
+
+# ============================================================================== engine: replies, without a worker
+def _stub_engine(prob, lpd_warm_rows=0, **over):
+    eng = Engine(prob, cfg_for(**over), seed=1, warmup=False, decoder_factory=E._WarmupDecoder,
+                 lpd_warm_rows=lpd_warm_rows)
+    eng.prepare()
+    eng.begin(time.monotonic(), 3600.0)
+    return eng
+
+
+def _req_info(eng, rows, kinds, keys):
+    k = len(kinds)
+    kinds = np.asarray(kinds, np.uint8)
+    return dict(req=77, gen=eng.gen, t=0.0, ids=np.arange(k, dtype=np.int64) + 1000, kinds=kinds,
+                rows=np.asarray(rows, float), key=np.asarray(keys, float), V=np.zeros(k), feasible=kinds == L.KIND_F,
+                strat=np.zeros(k, np.uint8), anc_rank=np.zeros((k, eng.depth), np.uint8),
+                anc_ops=np.zeros((k, eng.depth), np.uint16), rank=np.full(k, -1, np.int8))
+
+
+def _reply(codes, ok_rows, conts):
+    k = len(codes)
+    return dict(codes=np.asarray(codes, np.uint8), ok_rows=np.asarray(ok_rows, np.int64),
+                conts=np.asarray(conts, float).reshape(len(ok_rows), -1), obj=np.zeros(k),
+                iters=np.zeros(k, np.int64), secs=np.zeros(k), limit=np.zeros(k), status=["Optimal"] * k, stats={})
+
+
+@pytest.mark.parametrize("warm_rows", [0, 1])
+def test_no_gain_filter_keeps_only_polish_copies_that_beat_their_source(files, warm_rows):
+    """D-017's F acceptance: a polish copy is kept only if its key beats its source's by imp_tol·max(1, |key|) — not
+    when equal, not when better by less than that; a completion copy always. The warm-up (lpd_warm_rows > 0) keeps
+    every copy, so its batches have the forced size."""
+    path, prob = files["gen"]
+    eng = _stub_engine(prob, lpd_warm_rows=warm_rows)
+    imp = eng.cfg.ranks.imp_tol
+    rs = np.random.default_rng(3)
+    rows = _distinct_rows(21, 4).astype(float)
+    conts = rs.uniform(0.0, 3.0, size=(4, len(prob.conts)))
+    keys = []
+    for r in range(4):                                        # the copies' keys, as the engine computes them
+        y = np.zeros(prob.n)
+        y[prob.ints], y[prob.conts] = rows[r], conts[r]
+        keys.append(float(prob.key(y)))
+    k0, k1, k2, k3 = keys
+    src = [k0,                                                # F, equal: no gain
+           k1 + 0.5 * imp * max(1.0, abs(k1)),                # F, better by half the tolerance: no gain
+           k2 + 1.0,                                          # F, better by 1: kept
+           k3 - 1.0]                                          # I, worse than its source: kept anyway
+    eng.lpd_req_info = _req_info(eng, rows, [L.KIND_F, L.KIND_F, L.KIND_F, L.KIND_I], src)
+    eng.pending = []
+    eng._lpd_result(77, _reply([L.OK] * 4, [0, 1, 2, 3], conts), site="candidates")
+    (b,) = [b for b in eng.pending if b.src == "lp_decode"]
+    if warm_rows == 0:
+        assert eng.c["lpd_no_gain"] == 2 and list(b.src_ids) == [1002, 1003]
+        assert list(b.src_kinds) == [L.KIND_F, L.KIND_I] and eng.c["lpd_kept_F"] == eng.c["lpd_kept_I"] == 1
+        Xk = np.asarray(b.X, float)
+        assert [float(prob.key(x)) for x in Xk] == [k2, k3]
+    else:
+        assert eng.c["lpd_no_gain"] == 0 and list(b.src_ids) == [1000, 1001, 1002, 1003]
+    assert eng.c["lpd_ok_F"] == 3 and eng.c["lpd_ok_I"] == 1
+    eng.finish()
+
+
+def test_sources_count_as_offered_only_once_screened_or_solved(files):
+    """A source is recorded as offered (never offered again) when the reply screened or solved it — ok, infeasible,
+    time limit, other, range fail, cached — but not when the worker's budget left it NOT_SOLVED or the deadline
+    AFTER_DEADLINE: those stay eligible for a later batch."""
+    path, prob = files["gen"]
+    eng = _stub_engine(prob)
+    codes = [L.OK, L.OK, L.NOT_SOLVED, L.NOT_SOLVED, L.INFEASIBLE, L.TIME_LIMIT, L.OTHER, L.RANGE_FAIL, L.CACHED,
+             L.AFTER_DEADLINE]
+    kinds = [L.KIND_F] * 4 + [L.KIND_I] * 6
+    rows = _distinct_rows(5, len(codes)).astype(float)
+    eng.lpd_req_info = _req_info(eng, rows, kinds, np.full(len(codes), np.inf))
+    eng.lpd_offered = set()
+    eng._lpd_result(77, _reply(codes, [0, 1], np.zeros((2, len(prob.conts)))))
+    assert eng.lpd_offered == {1000, 1001, 1004, 1005, 1006, 1007, 1008}
+    assert eng.c["lpd_solved_F"] == 2 and eng.c["lpd_solved_I"] == 3 and eng.c["lpd_not_solved"] == 2
+    eng.finish()
+
+
+def test_not_solved_sources_are_offered_again(files):
+    """Two batches selected from the same candidate set: the polish rows the worker's budget left NOT_SOLVED are
+    offered again; the rows it solved are not (the review's case: 4 F rows, 2 solved)."""
+    path, prob = files["gen"]
+    eng = Engine(prob, cfg_for(), seed=1, warmup=False, decoder_factory=E._WarmupDecoder)
+    eng.prepare()
+    held = {}
+    eng._lpd_tick = lambda cand: held.__setitem__("cand", cand)       # no automatic offers: the test offers
+    eng.begin(time.monotonic(), 3600.0)
+    for _ in range(40):
+        eng.step()
+        if eng.lpd.state == "idle" and eng._lpd_surv is not None and eng._lpd_surv[2].sum() >= 6:
+            break
+    cand = held["cand"]
+    assert eng.lpd.state == "idle" and eng._lpd_surv[2].sum() >= 6     # six feasible candidates at least
+    eng._lpd_offer(cand)
+    first = eng.lpd_req_info
+    f_ids = [int(i) for i, k in zip(first["ids"], first["kinds"]) if k == L.KIND_F]
+    assert len(f_ids) == eng.cfg.repair.lp_decode_per_gen == 4
+    codes = [L.OK, L.OK, L.NOT_SOLVED, L.NOT_SOLVED] + [L.NOT_SOLVED] * (len(first["ids"]) - 4)
+    eng._lpd_result(first["req"], _reply(codes, [0, 1], np.zeros((2, len(prob.conts)))))
+    eng.lpd.state, eng.lpd._req = "idle", None                       # the stub's request is answered by hand
+    eng._lpd_offer(cand)
+    second = eng.lpd_req_info
+    f2 = [int(i) for i, k in zip(second["ids"], second["kinds"]) if k == L.KIND_F]
+    assert second["req"] == first["req"] + 1 and f2[:2] == f_ids[2:4] and not set(f2) & set(f_ids[:2]), (f_ids, f2)
+    i1 = [int(i) for i, k in zip(first["ids"], first["kinds"]) if k == L.KIND_I]
+    i2 = [int(i) for i, k in zip(second["ids"], second["kinds"]) if k == L.KIND_I]
+    assert i2 == i1                                                  # every I row was left NOT_SOLVED
+    eng.lpd_req_info = None
+    eng.finish()
+
+
+class _LagStub(E._WarmupDecoder):
+    """The warm-up stub, but a reply becomes readable only at the `delays[j]`-th poll() after request j (cycling). The
+    engine does not call poll() while a decoded batch is pending, so a held reply stays "in the pipe"."""
+
+    delays = (3, 1)
+
+    def __init__(self, eng):
+        super().__init__(eng)
+        self.n_req, self.wait = 0, 0
+
+    def offer(self, req_id, rows, kinds, per_gen=None):
+        ok = super().offer(req_id, rows, kinds, per_gen)
+        if ok:
+            self.wait = self.delays[self.n_req % len(self.delays)]
+            self.n_req += 1
+        return ok
+
+    def poll(self):
+        if self.state == "busy" and self._req is not None:
+            self.wait -= 1
+            if self.wait > 0:
+                return []
+        return super().poll()
+
+
+@pytest.mark.parametrize("hold", [True, False], ids=["one_batch", "negative_control"])
+def test_at_most_one_decoded_batch_joins_a_candidate_set(files, monkeypatch, hold):
+    """A reply read at the pick site is pending while the next request is answered before the next candidate set: the
+    exchange and pre-candidate polls then leave that reply in the pipe, so one decoded batch (at most N rows: what
+    plan_memory counts) joins each candidate set. Copies enter one generation after their offer, or two when read at
+    the pick site. The negative control polls without the hold and does see two batches in one set (the test is not
+    vacuous)."""
+    path, prob = files["gen"]
+    eng = Engine(prob, cfg_for(**{"exchange.poll_s": 1e-6}), seed=1, warmup=False, decoder_factory=_LagStub,
+                 lpd_warm_rows=2)                            # 2 rows per batch, every copy kept (no-gain filter off)
+    eng.prepare()
+    events = []
+    eng.trace.event = lambda kind, t=None, **d: events.append((kind, d)) if kind == "lp_decode" else None
+    if not hold:
+        real_poll = eng._lpd_poll
+        monkeypatch.setattr(eng, "_lpd_poll", lambda timed=True, site="exchange", hold=True:
+                            real_poll(timed=timed, site=site, hold=False))
+    per_set = []
+    real_with = eng._with_pending
+
+    def with_pending(cand, meta):
+        d = [b for b in eng.pending if b.src == "lp_decode"]
+        per_set.append((eng.gen, len(d), sum(int(b.X.shape[0]) for b in d)))
+        return real_with(cand, meta)
+    monkeypatch.setattr(eng, "_with_pending", with_pending)
+    eng.begin(time.monotonic(), 3600.0)
+    for _ in range(30):
+        eng.step()
+    eng.finish()
+    most = max(n for _, n, _ in per_set)
+    res = [d for k, d in events if d.get("what") == "result"]
+    assert len(res) >= 10
+    if not hold:
+        assert most == 2, per_set
+        return
+    assert most == 1 and max(r for _, _, r in per_set) <= eng.cfg.repair.lp_decode_per_gen, per_set
+    entering = {g: r for g, n, r in per_set if n}
+    entered = [d for d in res if d["gen_enters"] is not None and d["gen_enters"] <= eng.gen]
+    for d in entered:          # this generation's candidate set if read before it, the next one's if at the pick site
+        assert d["gen_enters"] == d["gen"] + (1 if d["site"] == "pick" else 0) > d["gen_offered"], d
+        assert entering[d["gen_enters"]] == d["kept"] == 2
+    assert {d["site"] for d in entered} >= {"pick", "candidates"}
+    assert {d["gen_enters"] - d["gen_offered"] for d in entered} >= {1, 2}
 
 
 # ======================================================================================================= runner
@@ -762,8 +1224,14 @@ def test_build_runs_lp_decode_columns(tmp_path):
     from test_build_runs import X_70, X_85, make_run, toy_problem
     p, mps = toy_problem(tmp_path)
     raw = tmp_path / "raw"
-    blk = dict(state="idle", host_s=0.5, host_s_max=0.01, ready_t=1.2,
-               worker=dict(priming_s=0.3, solves=12, time_limit_hits=1, ru_maxrss_mb=80.0))
+    blk = dict(state="idle", host_s=0.5, host_s_max=0.01, sync_s=0.02, sync_s_max=0.004, ready_t=1.2,
+               ready_t_worker=0.9, wait_s_total=0.3, wait_s_max=0.1, batch_rows_max=4,
+               ipc=dict(offers=9, offer_s_total=0.05, offer_s_max=0.012, offer_bytes_max=2342400, reads=8,
+                        read_s_total=0.03, read_s_max=0.006, read_bytes_max=5098000),
+               worker=dict(priming_s=0.3, priming_first_s=0.25, priming_first_status="Optimal", priming_solves=1,
+                           priming_time_limit_hits=0, solves=12, warm_solves=11, time_limit_hits=1,
+                           warm_time_limit_hits=1, time_limit_hits_starved=1, screen_pass=7, screen_fail=2,
+                           solve_s_total=1.5, solve_cpu_s_total=1.25, ru_maxrss_mb=80.0))
     cnt = {k: i + 1 for i, k in enumerate(B.LPD_INT_COLS)}
     make_run(raw, p, mps, "A3", 1000, 10, {"solver": [(2.0, X_85, "self")], "ea": [(3.0, X_70, "self")]},
              summary_extra={"ea": dict(lp_decode=blk, **cnt)}, cfg="lpd000000000")
@@ -778,8 +1246,17 @@ def test_build_runs_lp_decode_columns(tmp_path):
     assert r.loc[1000, "lpd_priming_s"] == 0.3 and r.loc[1000, "lpd_worker_solves"] == 12
     for k, v in cnt.items():
         assert r.loc[1000, k] == v, k
+    for col, key in B.LPD_BLOCK_COLS:
+        assert r.loc[1000, col] == blk[key], col
+    for col, key in B.LPD_IPC_COLS:
+        assert r.loc[1000, col] == blk["ipc"][key], col
+    for col, key in B.LPD_WORKER_COLS:
+        assert r.loc[1000, col] == blk["worker"][key], col
+    assert r.loc[1000, "lpd_priming_first_status"] == "Optimal" and r.loc[1000, "lpd_ready_t_worker"] == 0.9
     assert r.loc[1001, "lpd_state"] == "inert" and r.loc[1001, "lpd_offers"] == -1
     assert r.loc[1002, "lpd_state"] == "" and r.loc[1002, "lpd_offers"] == -1 and math.isnan(r.loc[1002, "lpd_host_s"])
+    assert r.loc[1002, "lpd_priming_first_status"] == "" and r.loc[1002, "lpd_warm_solves"] == -1
+    assert set(B.RUN_COLUMNS) >= {c for c, _ in B.LPD_BLOCK_COLS + B.LPD_IPC_COLS + B.LPD_WORKER_COLS}
 
 
 # ======================================================================================================= CuPy path
@@ -833,7 +1310,8 @@ def test_cupy_cold_cache_compiles_the_decode_path_before_the_clock(tmp_path):
         assert pr.returncode == 0, (pr.stdout + pr.stderr).decode(errors="replace")
         s = _summary(rd)
         assert s["gene_dtype"] == "float64" and s["startup"]["lp_decode"]["state"] == "configured"
-        assert all(s["startup"]["warmup"][p]["lp_decode_warmed"] >= 1 for p in ("many", "one"))
+        wu = s["startup"]["warmup"]                          # the largest decoded batch per pass (rows)
+        assert wu["many"]["lp_decode_warmed"] >= 2 and wu["one"]["lp_decode_warmed"] == 1, wu
         ev = [e for e in read_events(rd / "ea.events.jsonl") if e["kind"] == "lp_decode"]
         assert any(e["what"] == "result" and e["kept"] >= 1 for e in ev), (name, "never reached")
         assert s["lpd_entered"] >= 1 and s["lp_decode"]["state"] != "failed", (name, s["lp_decode"])

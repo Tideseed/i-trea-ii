@@ -13,13 +13,15 @@ event; the start-up record says `lp_decode = {state: "inert", reason}`. `cont_ob
 non-zero cost; without it no LP can improve a feasible point's key, so only completion rows are offered.
 
 The engine side (`ea.engine`, module docstring "LP decode"): every generation, after the survival, over the whole
-candidate set, it polls the worker without blocking and, if the worker is idle, sends ONE batch chosen by
-`select_offers` (no random draw): F (polish) = feasible rows by (key, id), at most N = `lp_decode_per_gen`; I
-(completion) = infeasible rows better than the incumbent by imp_tol (all infeasible rows in the feasibility phase; with
-no continuous cost also not beyond the solver's proven bound), by (V, key, id), at most OFFER_FACTOR * N. Rows that are
-duplicates, non-finite, unchanged solver finds, decoded copies or already offered are never offered. Only integer parts
-travel (int32 when every integer column's bounds are finite integers inside int32, else float64); the reply carries the
-continuous values of the rows solved with a primal-feasible point.
+candidate set, it polls the worker and, if the worker is idle, sends ONE batch chosen by `select_offers` (no random
+draw): F (polish) = feasible rows by (key, id), at most N = `lp_decode_per_gen`; I (completion) = infeasible rows better
+than the incumbent by imp_tol (all infeasible rows in the feasibility phase; with no continuous cost also not beyond the
+solver's proven bound), by (V, key, id), at most OFFER_FACTOR * N. Rows that are duplicates, non-finite, unchanged
+solver finds, decoded copies or already offered are never offered; a row counts as offered once a reply has screened or
+solved it (rows the worker left NOT_SOLVED or AFTER_DEADLINE stay eligible). Only integer parts travel, in the smallest
+of int8 / int16 / int32 that holds every integer column's bounds when they are finite integers (`int_part_dtype`; ca,
+all binary: int8), else float64; the reply carries the continuous values (float64) of the rows solved with a
+primal-feasible point.
 
 The worker (`LPDecoder`, a "spawn" process started at t0 — the read of the instance and every solve are on the clock,
 D-002): one persistent `highspy.Highs` (output off, 1 thread, `solve_relaxation`, presolve at its default), niced by
@@ -40,14 +42,31 @@ Per batch (`_DecodeSolver.solve`):
      I rows; `run()`; the row is OK iff HiGHS holds a primal-FEASIBLE point (an optimum, or a feasible point at the time
      limit — counted as a time-limit hit too), else INFEASIBLE / TIME_LIMIT / OTHER; on "Optimal" the basis becomes the
      anchor. No solve starts at or after the deadline (t0 + budget, `time.monotonic()`, system-wide): AFTER_DEADLINE.
-Every reply carries the worker's cumulative statistics (solves, priming seconds, LP seconds total / max, simplex
-iterations, time-limit hits, cache hits, screen passes / fails, basis restores, HiGHS run time, maxrss, CPU seconds).
-Pipe EOF, OSError or a broken pipe end the worker quietly; any other exception is sent back as ("failed", repr,
-traceback). At most one request is outstanding; `poll()` never blocks; `stop()` terminates, joins (so the PID is gone)
-and is idempotent.
+
+Statistics. Every reply carries the worker's cumulative statistics: requests, rows, solves, optimal, ok, simplex
+iterations, LP seconds (`solve_s_total` / `solve_s_max`, wall) and CPU seconds (`solve_cpu_s_total`), cache hits,
+screen passes / fails, basis restores (and errors), after-deadline rows, HiGHS run time, maxrss, process CPU seconds;
+and, for D-017's M2, the priming / warm split: `priming_solves`, `priming_s`, `priming_first_status` and
+`priming_first_s` (the FIRST cold solve, set once), `priming_last_status`, `priming_time_limit_hits`, `warm_solves`,
+`warm_time_limit_hits` (warm = an anchor basis existed), `time_limit_hits` (all) and `time_limit_hits_starved` (a hit
+whose solve got less than STARVED_CPU_SHARE of a core: the worker was starved, not the LP slow — HiGHS's limit is wall
+time). Per row the reply has the wall seconds `secs`, the CPU seconds `cpu` and the limit. The worker stamps its own
+clock (`time.monotonic()`, system-wide) as `t_sent` on "ready" and on every reply, so the EA records when the worker
+was ready and how long a finished reply waited before it was read (D-017 M0).
+
+IPC. Pipe EOF, OSError or a broken pipe end the worker quietly; any other exception is sent back as ("failed", repr,
+traceback). At most one request is outstanding. `offer()` refuses unless idle and returns once the pipe has taken the
+request (on ca the worker reads most of it meanwhile). `poll()` never waits for the worker to answer — it reads only
+when a message has begun to arrive — but the recv() of a large reply (≤ N × n_cont float64, about 5 MB on ca) waits
+while the worker writes the rest. Both are timed on the EA side (`LPDecoder.ipc`: wall seconds and payload bytes of
+every send and read) and count in the engine's `lpd_host_s`. Shared memory is deferred until that measurement asks for
+it (D-017 M1). A failure (`_fail`: digest mismatch, a worker exception, a dead worker, a failed send) never waits
+either: the worker gets SIGTERM, the pipe is closed, the process is reaped later without blocking; only `stop()` joins
+(so the PID is gone) — it is idempotent and runs after the clock.
 
 Constants (echoed in the start-up record; any of them must become a `_LATE_DEFAULTS` configuration field before it is
-changed): OFFER_FACTOR = 3, I_LIMIT_FACTOR = 0.5, NICE = 10, CACHE_CAP = 65,536 integer parts.
+changed): OFFER_FACTOR = 3, I_LIMIT_FACTOR = 0.5, NICE = 10, CACHE_CAP = 65,536 integer parts; STARVED_CPU_SHARE = 0.5
+(a diagnostic threshold only).
 
 This module imports no other `itrea` module (the spawned worker unpickles its target from here) and never CuPy; highspy
 is imported inside the worker.
@@ -68,6 +87,7 @@ OFFER_FACTOR = 3              # at most OFFER_FACTOR * N completion (I) rows off
 I_LIMIT_FACTOR = 0.5          # an I row's warm LP gets this share of lp_time_limit (cuOpt: 2 s / 1 s)
 NICE = 10                     # os.nice of the worker
 CACHE_CAP = 65_536            # integer parts remembered as solved (oldest forgotten first)
+STARVED_CPU_SHARE = 0.5       # diagnostic only: a time-limit hit whose solve got < this share of a core was starved
 
 KIND_F, KIND_I = 0, 1         # polish (feasible source) / completion (infeasible source)
 OK, INFEASIBLE, TIME_LIMIT, OTHER, RANGE_FAIL, CACHED, NOT_SOLVED, AFTER_DEADLINE = range(8)
@@ -77,7 +97,8 @@ _THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
 def constants() -> dict:
     """The module's constants, for the start-up record and the summary."""
-    return dict(offer_factor=OFFER_FACTOR, i_limit_factor=I_LIMIT_FACTOR, nice=NICE, cache_cap=CACHE_CAP)
+    return dict(offer_factor=OFFER_FACTOR, i_limit_factor=I_LIMIT_FACTOR, nice=NICE, cache_cap=CACHE_CAP,
+                starved_cpu_share=STARVED_CPU_SHARE)
 
 
 # ------------------------------------------------------------------------------------------------ pure functions
@@ -111,15 +132,21 @@ def model_digest(names, isint) -> str:
 
 
 def int_part_dtype(lb: np.ndarray, ub: np.ndarray) -> np.dtype:
-    """int32 when every integer column's bounds are finite integers inside int32 (so a rounded, clipped value is an
-    exact int32), else float64."""
+    """The payload dtype of the integer parts: the smallest of int8 / int16 / int32 that holds every integer column's
+    bounds when they are all finite integers (so a rounded, clipped value is exact — an all-binary instance such as ca
+    sends int8, a quarter of int32's bytes), else float64."""
     lb, ub = np.asarray(lb, float), np.asarray(ub, float)
-    lim = 2.0 ** 31 - 1
     if lb.size == 0:
-        return np.dtype(np.int32)
-    ok = (np.all(np.isfinite(lb)) and np.all(np.isfinite(ub)) and np.all(lb == np.round(lb))
-          and np.all(ub == np.round(ub)) and lb.min() >= -lim and ub.max() <= lim)
-    return np.dtype(np.int32 if ok else np.float64)
+        return np.dtype(np.int8)
+    if not (np.all(np.isfinite(lb)) and np.all(np.isfinite(ub)) and np.all(lb == np.round(lb))
+            and np.all(ub == np.round(ub))):
+        return np.dtype(np.float64)
+    lo, hi = float(lb.min()), float(ub.max())
+    for dt in (np.int8, np.int16, np.int32):
+        info = np.iinfo(dt)
+        if lo >= info.min and hi <= info.max:
+            return np.dtype(dt)
+    return np.dtype(np.float64)
 
 
 def select_offers(key, viol, feasible, *, ids, dup, solver_find, decoded, offered, inc: float, dual_key: float,
@@ -254,10 +281,13 @@ class _DecodeSolver:
         self.last_optimal = False
         self.hooks = dict(hooks or {})
         self.cold_overrides = list(self.hooks.get("cold_limits", ()))
-        self.stats = dict(requests=0, rows=0, solves=0, priming_solves=0, priming_s=0.0, priming_status=None,
-                          solve_s_total=0.0, solve_s_max=0.0, iterations=0, time_limit_hits=0, optimal=0, ok=0,
-                          cache_hits=0, screen_pass=0, screen_fail=0, restores=0, restore_errors=0, after_deadline=0,
-                          run_time=0.0, ru_maxrss_mb=None, cpu_s=None)
+        # cumulative statistics (module docstring "Statistics"); every reply carries a copy
+        self.stats = dict(requests=0, rows=0, solves=0, priming_solves=0, priming_s=0.0, priming_first_status=None,
+                          priming_first_s=None, priming_last_status=None, priming_time_limit_hits=0, warm_solves=0,
+                          warm_time_limit_hits=0, solve_s_total=0.0, solve_s_max=0.0, solve_cpu_s_total=0.0,
+                          iterations=0, time_limit_hits=0, time_limit_hits_starved=0, optimal=0, ok=0, cache_hits=0,
+                          screen_pass=0, screen_fail=0, restores=0, restore_errors=0, after_deadline=0, run_time=0.0,
+                          ru_maxrss_mb=None, cpu_s=None)
 
     def ready_info(self) -> dict:
         return dict(pid=os.getpid(), read_s=round(self.read_s, 6), n=self.n, m=self.m,
@@ -276,6 +306,7 @@ class _DecodeSolver:
         obj = np.full(k, np.nan)
         iters = np.zeros(k, np.int64)
         secs = np.zeros(k)
+        cpu = np.zeros(k)
         limit = np.full(k, np.nan)
         status = [""] * k
         hashes = [hashlib.blake2b(np.ascontiguousarray(rows[r]).tobytes(), digest_size=16).digest()
@@ -307,9 +338,9 @@ class _DecodeSolver:
                 codes[r] = AFTER_DEADLINE
                 st["after_deadline"] += 1
                 continue
-            code, o, it, dt, L, s, vals = self._solve_one(rows[r], kind)
+            code, o, it, dt, dc, L, s, vals = self._solve_one(rows[r], kind)
             self._remember(hashes[r])
-            codes[r], obj[r], iters[r], secs[r], limit[r], status[r] = code, o, it, dt, L, s
+            codes[r], obj[r], iters[r], secs[r], cpu[r], limit[r], status[r] = code, o, it, dt, dc, L, s
             if code == OK:
                 ok_rows.append(r)
                 conts.append(vals)
@@ -324,7 +355,7 @@ class _DecodeSolver:
         n_c = int(self.cont_idx.size)
         return dict(codes=codes, ok_rows=np.asarray(ok_rows, np.int64),
                     conts=np.vstack(conts) if conts else np.zeros((0, n_c)), obj=obj, iters=iters, secs=secs,
-                    limit=limit, status=status, stats=dict(st))
+                    cpu=cpu, limit=limit, status=status, stats=dict(st))
 
     def _remember(self, hsh: bytes) -> None:
         if self.cache_cap <= 0:
@@ -340,8 +371,8 @@ class _DecodeSolver:
             time.sleep(float(sleep))                      # tests only: a slow batch
         x = np.asarray(row, dtype=np.float64)
         h.changeColsBounds(int(self.int_idx.size), self.int_idx, x, x)
-        if not self.last_optimal and self.anchor is not None:
-            if h.setBasis(self.anchor) == hs.HighsStatus.kError:
+        if not self.last_optimal and self.anchor is not None and not self.hooks.get("no_restore"):
+            if h.setBasis(self.anchor) == hs.HighsStatus.kError:   # ("no_restore": tests only, a negative control)
                 st["restore_errors"] += 1
             else:
                 st["restores"] += 1
@@ -351,9 +382,9 @@ class _DecodeSolver:
         else:
             L = self.time_limit if kind == KIND_F else I_LIMIT_FACTOR * self.time_limit
         h.setOptionValue("time_limit", float(h.getRunTime()) + max(0.0, L))
-        t = time.perf_counter()
+        t, c = time.perf_counter(), time.process_time()
         h.run()
-        dt = time.perf_counter() - t
+        dt, dc = time.perf_counter() - t, time.process_time() - c
         ms = h.getModelStatus()
         info = h.getInfo()
         it = int(info.simplex_iteration_count)
@@ -367,8 +398,11 @@ class _DecodeSolver:
             code = TIME_LIMIT
         else:
             code = OTHER
-        if ms == MS.kTimeLimit:
+        hit = ms == MS.kTimeLimit
+        if hit:
             st["time_limit_hits"] += 1
+            if dc < STARVED_CPU_SHARE * dt:               # stopped by the wall clock while barely running
+                st["time_limit_hits_starved"] += 1
         optimal = ms == MS.kOptimal
         if optimal:
             self.anchor = h.getBasis()                    # a copy (checked with highspy 1.15.1)
@@ -378,18 +412,25 @@ class _DecodeSolver:
         st["iterations"] += it
         st["solve_s_total"] += dt
         st["solve_s_max"] = max(st["solve_s_max"], dt)
+        st["solve_cpu_s_total"] += dc
         s = h.modelStatusToString(ms)
         if priming:
             st["priming_solves"] += 1
             st["priming_s"] += dt
-            st["priming_status"] = s
+            st["priming_last_status"] = s
+            st["priming_time_limit_hits"] += int(hit)
+            if st["priming_first_status"] is None:        # the first priming solve, kept (D-017 M2)
+                st["priming_first_status"], st["priming_first_s"] = s, dt
+        else:
+            st["warm_solves"] += 1
+            st["warm_time_limit_hits"] += int(hit)
         vals = None
         o = math.nan
         if code == OK:
             st["ok"] += 1
             vals = np.asarray(h.getSolution().col_value, dtype=np.float64)[self.cont_idx]
             o = float(info.objective_function_value)
-        return code, o, it, dt, L, s, vals
+        return code, o, it, dt, dc, L, s, vals
 
 
 def _decoder_main(conn, path: str, digest: str, int_dtype: str, time_limit: float, cold_limit: float,
@@ -406,14 +447,17 @@ def _decoder_main(conn, path: str, digest: str, int_dtype: str, time_limit: floa
             conn.send(("failed", "model digest mismatch: the worker's column names / integrality differ from the "
                                  "EA's", ""))
             return
-        conn.send(("ready", solver.ready_info()))
+        # the worker's own clock (time.monotonic(), system-wide): when it was ready and when each reply left it
+        conn.send(("ready", dict(solver.ready_info(), t_sent=time.monotonic())))
         while True:
             msg = conn.recv()
             if not isinstance(msg, tuple) or not msg or msg[0] == "stop":
                 return
             if msg[0] == "solve":
                 _, req_id, rows, kinds, per_gen = msg
-                conn.send(("result", int(req_id), solver.solve(rows, kinds, per_gen)))
+                rep = solver.solve(rows, kinds, per_gen)
+                rep["t_sent"] = time.monotonic()
+                conn.send(("result", int(req_id), rep))
     except (EOFError, BrokenPipeError, ConnectionError):
         return                                            # the EA closed the pipe (or died): exit quietly
     except BaseException as e:  # noqa: BLE001 — anything else goes back to the EA as a failure
@@ -431,16 +475,19 @@ def _decoder_main(conn, path: str, digest: str, int_dtype: str, time_limit: floa
 class LPDecoder:
     """The LP decode worker as seen from the EA (module docstring).
 
-        dec = LPDecoder(path, model_digest(prob.names, prob.isint), "int32", per_gen=4, time_limit=2.0,
+        dec = LPDecoder(path, model_digest(prob.names, prob.isint), "int8", per_gen=4, time_limit=2.0,
                         cold_limit=10.0, feas_tol=1e-6, deadline=t0 + budget).start()      # AFTER t0
-        msgs = dec.poll()            # never blocks: [("ready", info) | ("result", req_id, reply) | ("failed", err, tb)]
+        msgs = dec.poll()    # never waits for an answer: [("ready", info) | ("result", req_id, reply) | ("failed", err,
+                             # tb)]; reading a large reply waits for the rest of its transfer (module docstring "IPC")
         dec.offer(req_id, rows, kinds)   # False unless idle
-        dec.stop()                   # True if a request was outstanding (lost); idempotent
+        dec.stop()                   # True if a request was outstanding (lost); idempotent; joins the worker
 
     States: "not_started", "starting" (until "ready"; counts as busy), "idle", "busy" (one request outstanding),
-    "failed" (digest mismatch, an exception in the worker, or the worker died; the process is stopped), "stopped".
-    `cache_cap` and `hooks` ({"sleep_s": s before every solve, "cold_limits": [L, ...] for the first cold solves}) exist
-    for tests; a run uses the defaults."""
+    "failed" (digest mismatch, an exception in the worker, the worker died, or a send failed; the worker was signalled
+    and the pipe closed, `error` says why), "stopped". A result's reply dict gains `t_read` (the EA's monotonic read
+    time) and `read_s` (seconds in recv()); `ipc` holds the EA-side send / read seconds and bytes. `cache_cap` and
+    `hooks` ({"sleep_s": s before every solve, "cold_limits": [L, ...] for the first cold solves, "no_restore": skip the
+    basis restore}) exist for tests; a run uses the defaults."""
 
     def __init__(self, path, digest: str, int_dtype, per_gen: int, time_limit: float, cold_limit: float,
                  feas_tol: float, deadline: float = math.inf, *, cache_cap: int = CACHE_CAP, hooks: dict | None = None):
@@ -458,6 +505,10 @@ class LPDecoder:
         self.error: str | None = None
         self.outstanding: int | None = None
         self.ready_info: dict | None = None
+        # the EA thread's side of the pipe (module docstring "IPC"): wall seconds inside send() of a request and inside
+        # recv() of a message that poll() found waiting, and the payload bytes (integer parts / continuous values)
+        self.ipc = dict(offers=0, offer_s_total=0.0, offer_s_max=0.0, offer_bytes_max=0, reads=0, read_s_total=0.0,
+                        read_s_max=0.0, read_bytes_max=0)
         self._proc = None
         self._conn = None
         self._t_start: float | None = None
@@ -499,42 +550,75 @@ class LPDecoder:
             return False
         rows = np.ascontiguousarray(np.asarray(rows).astype(self.int_dtype, copy=False))
         kinds = np.asarray(kinds, np.uint8)
+        t = time.perf_counter()
         try:
             self._conn.send(("solve", int(req_id), rows, kinds, int(per_gen if per_gen is not None else self.per_gen)))
         except (OSError, EOFError) as e:
             self._fail(f"send failed: {e!r}")
             return False
+        dt = time.perf_counter() - t
+        ipc = self.ipc
+        ipc["offers"] += 1
+        ipc["offer_s_total"] += dt
+        ipc["offer_s_max"] = max(ipc["offer_s_max"], dt)
+        ipc["offer_bytes_max"] = max(ipc["offer_bytes_max"], int(rows.nbytes))
         self.state = "busy"
         self.outstanding = int(req_id)
         return True
 
     def poll(self) -> list[tuple]:
-        """The messages waiting, without blocking (see the class docstring); a dead worker becomes ("failed", ...)."""
+        """The messages waiting (see the class docstring); a dead worker becomes ("failed", ...). It never waits for the
+        worker to answer: it reads only when `conn.poll()` says a message has begun to arrive — the recv() of a large
+        reply then waits while the worker writes the rest of it (timed in `ipc`)."""
         out: list[tuple] = []
+        if self.state == "failed":
+            self._reap()
         if self.state in ("not_started", "failed", "stopped") or self._conn is None:
             return out
         try:
-            while self.state not in ("failed", "stopped") and self._conn.poll():
-                out.append(self._handle(self._conn.recv()))
+            while self._conn is not None and self.state not in ("failed", "stopped") and self._conn.poll():
+                out.append(self._handle(self._recv()))
         except (EOFError, OSError):
             pass
-        if self.state not in ("failed", "stopped") and not self._proc.is_alive():
+        if self.state not in ("failed", "stopped") and not self._proc.is_alive():   # is_alive() reaps it
             try:                                          # it may have sent and exited between the two checks
-                while self._conn.poll():
-                    out.append(self._handle(self._conn.recv()))
+                while self._conn is not None and self.state not in ("failed", "stopped") and self._conn.poll():
+                    out.append(self._handle(self._recv()))
             except (EOFError, OSError):
                 pass
             if self.state not in ("failed", "stopped"):
-                self._proc.join(timeout=1.0)
                 self.exitcode = self._proc.exitcode
                 self._fail(f"the decoder worker exited (exit code {self.exitcode})")
                 out.append(("failed", self.error, ""))
         return out
 
+    def _recv(self):
+        """One waiting message; a result's reply dict gets the EA's read time `t_read` (time.monotonic()) and the
+        seconds recv() took `read_s`."""
+        t = time.perf_counter()
+        msg = self._conn.recv()
+        t_read = time.monotonic()
+        dt = time.perf_counter() - t
+        if isinstance(msg, tuple) and len(msg) > 2 and msg[0] == "result" and isinstance(msg[2], dict):
+            rep = msg[2]
+            rep["t_read"], rep["read_s"] = t_read, dt
+            ipc = self.ipc
+            ipc["reads"] += 1
+            ipc["read_s_total"] += dt
+            ipc["read_s_max"] = max(ipc["read_s_max"], dt)
+            c = rep.get("conts")
+            ipc["read_bytes_max"] = max(ipc["read_bytes_max"], int(getattr(c, "nbytes", 0)))
+        elif isinstance(msg, tuple) and len(msg) > 1 and msg[0] == "ready" and isinstance(msg[1], dict):
+            msg[1]["t_read"] = t_read
+        return msg
+
     def _handle(self, msg) -> tuple:
         kind = msg[0] if isinstance(msg, tuple) and msg else None
         if kind == "ready":
-            self.ready_info = dict(msg[1], ready_after_s=round(self.elapsed(), 6))
+            info = dict(msg[1], ready_after_s=round(self.elapsed(), 6))   # read by the EA, seconds after start()
+            if self._t_start is not None and isinstance(info.get("t_sent"), (int, float)):
+                info["ready_after_s_worker"] = round(float(info["t_sent"]) - self._t_start, 6)   # sent by the worker
+            self.ready_info = info
             self.state = "idle"
             return ("ready", self.ready_info)
         if kind == "result":
@@ -549,11 +633,41 @@ class LPDecoder:
         return ("failed", self.error, "")
 
     def _fail(self, why: str) -> None:
+        """The decoder fails for the rest of the run. Runs on the EA thread during the run, so it never waits: SIGTERM
+        to the worker and our end of the pipe closed (a worker blocked in send() then gets EPIPE); the process is
+        reaped later without blocking (`poll()`), and joined only by `stop()`, after the clock."""
         self.error = why
-        self._terminate()
+        p = self._proc
+        if p is not None:
+            try:
+                if p.is_alive():                          # is_alive() reaps a worker that already exited
+                    p.terminate()
+                self.exitcode = p.exitcode
+            except (OSError, ValueError, AssertionError):
+                pass
+        self._close()
         self.state = "failed"
 
+    def _reap(self) -> None:
+        """Without blocking: record the exit code of a failed worker once it has exited."""
+        p = self._proc
+        if p is not None and self.exitcode is None:
+            try:
+                if not p.is_alive():
+                    self.exitcode = p.exitcode
+            except (OSError, ValueError, AssertionError):
+                pass
+
+    def _close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except OSError:
+                pass
+            self._conn = None
+
     def _terminate(self) -> None:
+        """`stop()` only (after the clock): terminate, join, kill, join — so the PID is gone."""
         p = self._proc
         if p is not None:
             if p.is_alive():
@@ -565,12 +679,7 @@ class LPDecoder:
             else:
                 p.join(timeout=2.0)                       # reap it, so its PID is gone
             self.exitcode = p.exitcode
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except OSError:
-                pass
-            self._conn = None
+        self._close()
 
     def stop(self) -> bool:
         """Terminate and join the worker (idempotent). Returns True if a request was outstanding (lost)."""

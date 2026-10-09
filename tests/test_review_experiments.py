@@ -497,6 +497,12 @@ def test_launcher_failure_before_ready_is_void_and_halts_the_pool(toy, fake, tmp
 
 # ======================================================================== F12: runner process, sampler
 def test_runner_env_and_pinning_in_a_fresh_process():
+    if not set(pair.RUNNER_CORES) & os.sched_getaffinity(0):
+        # pin_runner() pins to RUNNER_CORES within the caller's affinity and returns None when they do not overlap
+        # (its documented behaviour); a test process confined to other cores (e.g. `taskset -c 15,16,17` beside a
+        # timed run) cannot check the pinning, so the test is skipped there rather than failed
+        pytest.skip(f"this process's CPU affinity {sorted(os.sched_getaffinity(0))} excludes pair.RUNNER_CORES "
+                    f"{sorted(pair.RUNNER_CORES)}: the runner's pinning cannot be checked here")
     env = {k: v for k, v in os.environ.items() if k not in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                                                               "MKL_NUM_THREADS")}
     code = ("import os; from itrea.experiments import pool, pair; "
