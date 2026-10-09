@@ -57,3 +57,13 @@ lp_decode` (on the rc1 control: f030e23909ad).
   LP-level keys and feasible children may become rarer — sing44 above all); warm starts are only fast for nearby integer
   parts; the decoder shares the EA's 3 A725 cores in A3; D-016 and D-017 interact in Rank 1 (under clearing a source and
   its copy share a niche).
+
+## Amendment before any run (2026-10-09 13:xx) — after the review fixes (dev-next 68db348, a8196b5)
+- **M0 "ready ≤ 10 s after t0"** is read on the worker's own ready time (`ready_t_worker`, stamped by the worker), not on
+  the EA's first read of it (`ready_t`): on fhnw the EA's initial repair alone exceeds 10 s, so the EA-side time would
+  void both fhnw blocks for no worker reason.
+- **M1** reads `lpd_host_s` / `lpd_host_s_max`, which since the fixes exclude the device sync before the row copies
+  (recorded separately as `lpd_sync_s`) and include the new pre-candidate poll; no run exists under the old definition.
+- **M2** reads the warm counters (`warm_solves`, warm time-limit hits) and the first priming solve's status.
+- **M3 / M4** read the per-kind (F = polish, I = completion) counters for solved / ok / entered / incumbents / posts.
+- One decoded batch at most per candidate set (copies normally join the generation after the offer).
