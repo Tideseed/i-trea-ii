@@ -98,3 +98,11 @@ also qualifies at 1.21, ⅛ does not at 7.67), (c) yield_until_s = max(30, ⌈2 
 (sing44's limb passes at ½, ¼ and ⅛). The ⅛ anomaly (cuOpt late again) is to be replicated before ⅛ is ever used.
 **Reading (one seed, not an adoption test):** at duty ½ the three-way system matches cuOpt alone on chromaticindex and
 beats every arm on sing44 — the contention cost of A9 is recoverable by duty alone.
+
+## Deviation applied (2026-10-09 19:1x, Berk's "go ahead for one more hour"; no objection to the proposal)
+`itrea backoff-report --stage 0` now gates the sanity rule on the duty limb only (|measured duty − d| ≤ 0.03) and reports
+the lane-steps ratio (`--steps-gate` reproduces the rule as first written; branch dev-backoff, merged after the comp21
+block). Why, once more: the steps limb assumed EA work ∝ duty; contention moves it both ways (sing44 1.72d–1.84d at ¼ and
+⅛, chromaticindex 0.46d–0.72d), so as written no forced run could count and stage 0 could never decide anything. This
+is the second stated deviation of D-018's letter; like D-012's, it is development-only and the confirmatory test
+(prereg-v2) will state its own sanity rule in advance.
