@@ -320,7 +320,11 @@ def test_stage0_config_files():
         if mode == "forced":
             assert c.backoff.forced_duty == d
         assert c.with_overrides({"backoff.enabled": False}).hash() == "1d12ad490dd0"
-    assert not (root / "itrea2-dev-rc-3way-bo1.yaml").exists()      # written after stage 0 only
+    bo1 = root / "itrea2-dev-rc-3way-bo1.yaml"                     # written after stage 0 (D-018), from its values
+    if bo1.exists():
+        c = EAConfig.from_yaml(bo1)
+        assert c.backoff.enabled and c.backoff.mode == "active" and not c.exchange.from_cuopt
+        assert c.with_overrides({"backoff.enabled": False}).hash() == "1d12ad490dd0"
 
 
 # ------------------------------------------------------------------------------------------------- mailboxes

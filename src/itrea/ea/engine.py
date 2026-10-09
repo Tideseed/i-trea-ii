@@ -1629,7 +1629,9 @@ class Engine:
                             if bo.wake(now):
                                 self._bo_log(bo.snapshot(now, "wake"))
                             break
-                        continue
+                        now = time.monotonic()          # no improvement: sleep on (a slice at least 1 ms)
+                        if now >= end or bo.duty >= 1.0:
+                            break
                     if bo.in_phase_y and self._bo_peek(now):
                         break
                     self._bo_sleep(min(cfg.backoff.slice_s, end - now, max(self.next_poll - now, 1e-3)), "gen")
