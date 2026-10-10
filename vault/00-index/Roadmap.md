@@ -18,12 +18,12 @@ is not a primary objective** — "we don't expect to solve simple problems a few
 integral on hard instances is. **Practice first, then scale:** develop on the small set until the algorithm settles,
 then go to more seeds and the larger problem set.
 
-Each stage lists its GitHub issues (`Tideseed/i-trea-ii`). Status as of 2026-10-06 21:00.
+Each stage lists its GitHub issues (`Tideseed/i-trea-ii`). Status as of 2026-10-10: development defaults — A3 `configs/itrea2-dev-rc-ld.yaml` (lp_decode, D-017), A9 `configs/itrea2-dev-rc-3way.yaml` with the back-off (D-018) past stage 0; D-016 (Rank 1 clearing) not adopted; milestones C1 (2026-10-23) and v1 (end of November) on GitHub.
 
 ## 1. Development on the 9-instance set — NOW ([[D-010 Develop the algorithm first on a small development set]], [[D-011 Solver streams good infeasible solutions to the EA]])
 Baseline: A3@lps1 (adaptive repair strategy + the EA's own HiGHS LP + LP stream + deep repair) — vs SCIP alone 7 of 8
 better, mean d +0.43 [+0.23, +0.65]; vs cuOpt alone 6 of 9 better ([[Quantification 2026-10-06 (dev set)]]).
-- #14 repair clock — adaptive repair depth (Stage 0/1 being built; shadow measurement next window)
+- #14 repair clock — adaptive repair depth: active since 2026-10-07 (D-012 addendum 2), part of every development default
 - #15 fhnw-binpack4-48 — deep repair + two-scale survival
 - #17 radiationm18-12-05 — a non-local operator for the min-max objective
 - #18 LP stream follow-ups; #19 owed one-variable runs; #20 pool guard (infra)
@@ -32,8 +32,9 @@ better, mean d +0.43 [+0.23, +0.65]; vs cuOpt alone 6 of 9 better ([[Quantificat
 
 - D-013 follow-ups: HiGHS alone (H0) and HiGHS ↔ EA (H3) on the development set (#22).
 - D-015: three-way arm A9 (SCIP ↔ EA ← cuOpt) — use cuOpt's feasible solutions (#23); then cuOpt restarts from the EA's best.
-- #25 elite reserve — Rank 1 as a genotype-diverse reserve of 32 (cuOpt's clearing rule); then partner-incumbent
-  recombination bursts in A9 and `lp_decode` ([[2026-10-08 cuOpt population and diversity — what transfers]]).
+- #25 elite reserve — Rank 1 by cuOpt's clearing rule: built, NOT adopted after seeds 0–3 (D-016; issue closed). Then partner-incumbent
+  recombination bursts in A9 (#26, after D-018 stage 1) and `lp_decode` (D-017: ADOPTED for A3; in A9 pending the core layout, #30)
+  ([[2026-10-08 cuOpt population and diversity — what transfers]]).
 - D-012: the repair clock (active) is the development default for repair depth (Stage 2, 2026-10-07).
 
 ## 2. Practice → scale

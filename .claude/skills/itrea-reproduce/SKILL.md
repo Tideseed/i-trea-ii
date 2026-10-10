@@ -8,8 +8,16 @@ description: >
 
 # Reproducing I-TREA II's numbers
 
-Status: the analysis chain is being built (`src/itrea/analysis/`); this skill is the contract it must meet. Model:
-optopt's `optopt reproduce`.
+Status: the chain is built — `itrea reproduce [--recheck] [--restore]` (`src/itrea/analysis/reproduce.py`) runs
+`build_runs` → `hardset select` → `lineage` → `prereg`, each step only if its outputs exist, and compares every file
+under `datasets/` and `paper/generated/` with git HEAD (or, for an untracked file, with the copy before the run); exit
+0 = identical, 1 = a step failed or a file changed or appeared, 2 = no traces under `traces/raw/`. On 2026-10-10
+`datasets/runs.parquet` and `incumbents_checked.parquet` are untracked, and `hard_pool.csv` / `reference.csv` do not
+exist yet (#1, #2). Model: optopt's `optopt reproduce`.
+
+Development tests (D-010) are outside that compare set: re-derive them with `itrea build-runs`, then the test's
+report (`tools/d016_report.py`, `tools/d017_report.py`, `itrea backoff-report --stage 0|1 [--json out.json]`),
+single-threaded, and compare with the decision record's Result section and the Development log.
 
 ## Two different things
 - **Re-analysis** — the same traces, re-derived. Expected: every committed table reproduced **exactly** (text byte

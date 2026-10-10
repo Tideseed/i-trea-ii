@@ -443,7 +443,7 @@ def backoff_stage0(budget: float = BACKOFF0_BUDGET, seed: int = BACKOFF0_SEED, s
 
 def backoff_stage1(seeds=(0, 1), budget: float = BACKOFF1_BUDGET, set_: str = BACKOFF1_SET,
                    tables=INSTANCE_TABLES) -> list[dict]:
-    """D-018 stage 1: the 14 instances of `analysis.backoff.STAGE1` x seeds x {A9@bo0, A9@bo1, A6} (84 runs for seeds
+    """D-018 stage 1: the 14 instances of `analysis.backoff.STAGE1` x seeds x {A9@bo1s (control: bo1's values in shadow mode), A9@bo1, A6} (84 runs for seeds
     0-1). `configs/itrea2-dev-rc-3way-bo1.yaml` is written from the stage-0 report before this file is used; the pool
     refuses a job whose configuration file is missing."""
     from itrea.analysis.backoff import STAGE1
@@ -506,7 +506,7 @@ def main(argv=None) -> int:
     b0 = sub.add_parser("backoff0", help="D-018 stage 0: A9 GPU back-off calibration (18 runs)")
     b0.add_argument("--budget", type=float, default=BACKOFF0_BUDGET)
     b0.add_argument("--seed", type=int, default=BACKOFF0_SEED)
-    b1 = sub.add_parser("backoff1", help="D-018 stage 1: A9@bo0 vs A9@bo1 + A6 (42 runs per seed)")
+    b1 = sub.add_parser("backoff1", help="D-018 stage 1: A9@bo1s (shadow control) vs A9@bo1 + A6 (42 runs per seed)")
     b1.add_argument("--budget", type=float, default=BACKOFF1_BUDGET)
     b1.add_argument("--seeds", default="0,1", help="comma-separated (one window per seed: 0, then 1)")
     for p in (s1, s2, e1, e4, cf, sm, b0, b1):

@@ -1,26 +1,49 @@
 # I-TREA II
 
-**A GPU evolutionary algorithm coupled with an exact MIP solver.** I-TREA II (Interactive Three Ranks Evolutionary
-Algorithm, part II) runs a GPU-resident evolutionary algorithm beside a mixed-integer programming solver — SCIP as the
-primary partner, HiGHS as a replication partner, NVIDIA cuOpt as a control — and lets the two exchange solutions in
-both directions while they run: the solver's incumbent, very good pool solutions, proven bound and root LP flow into
-the population, and the population's better incumbents flow into the solver as new starting points. The population
-is organised in three ranks: Rank 0 holds infeasible solutions whose objective beats the best feasible one (at most
-x % of the population), Rank 1 protects the best y % of the feasible solutions, and Rank 2 holds the rest. Beside the
-ranks the EA keeps a frontier of diverse near-optimal feasible solutions. The project succeeds two pieces of the
-author's work: his master's research I-TREA (Orbay 2011, M.S. thesis, Middle East Technical University, open access
-at hdl:11511/20509; thesis) — an interactive three-rank evolutionary
-algorithm for a bi-objective facility relocation problem — whose idea of keeping good infeasible solutions it carries
-over (part I reserved a share of the population for them as a floor; part II caps it), and the optopt study ([`berkorbay/optopt`](https://github.com/berkorbay/optopt)), whose CPU
-evolutionary partner beside SCIP found no gain at 60 s and whose verdict named the changes tested here: a GPU
-population, longer budgets and instances where the solver's own heuristics struggle.
+**A GPU evolutionary algorithm coupled with exact MIP solvers.** I-TREA II (Interactive Three Ranks Evolutionary
+Algorithm, part II) runs a GPU-resident evolutionary algorithm (EA) beside a mixed-integer programming solver and lets
+them exchange solutions while they run. **SCIP** is the primary partner, in both directions: its incumbent, very good
+pool solutions, proven bound, root LP and a stream of good infeasible node-LP points flow into the population, and the
+population's better incumbents flow into SCIP as new starting points. **HiGHS** is a replication partner. **NVIDIA
+cuOpt** is a control (cuOpt alone, SCIP ‖ cuOpt) and, since 2026-10-07, a one-way source: in the three-way arm **A9
+(SCIP ↔ EA ← cuOpt)** cuOpt streams its incumbents into the EA, which hands SCIP whatever beats SCIP's incumbent —
+cuOpt's vectors unchanged as well as the EA's own improvements. cuOpt never receives solutions mid-solve (its
+`SetSolutionCallback` disables its presolve). The population is organised in three ranks: Rank 0 holds infeasible
+solutions whose objective beats the best feasible one (at most x % of the population), Rank 1 protects the best y % of
+the feasible solutions, and Rank 2 holds the rest. Beside the ranks the EA keeps a frontier of diverse near-optimal
+feasible solutions. The project succeeds two pieces of the author's work: his master's research I-TREA (Orbay 2011,
+M.S. thesis, Middle East Technical University, open access at hdl:11511/20509; journal
+version: Orbay 2011 thesis) — an interactive three-rank evolutionary algorithm for a bi-objective
+facility relocation problem — whose idea of keeping good infeasible solutions it carries over (part I reserved a share
+of the population for them as a floor; part II caps it), and the optopt study
+([`berkorbay/optopt`](https://github.com/berkorbay/optopt)), whose CPU evolutionary partner beside SCIP found no gain
+at 60 s and whose verdict named the changes tested here: a GPU population, longer budgets and instances where the
+solver's own heuristics struggle.
 
 **The claim under test** (the author, 2026-10-06, vault `D-007`): *a GPU-based evolutionary algorithm metaheuristic
-coupled with an exact solver can beat either single solution.* Pre-registered as (vault `D-002` v3): on hard MIP
-instances, does the coupled system find good feasible solutions sooner — a lower primal integral over 300 s — than
-**the solver alone and the EA alone** (both must hold), and does the exchange add anything beyond running the two side
-by side? Secondary controls: SCIP ‖ cuOpt on the same GPU, SCIP ‖ SCIP, tuned SCIP; mechanism: the EA alone with and
-without Rank 0.
+coupled with an exact solver can beat either single solution.* Pre-registered as vault `D-002` v3.1 (binding from the
+git tag `prereg-v1`): on hard MIP instances, does the coupled system find good feasible solutions sooner — a lower
+primal integral over 300 s — than **the solver alone and the EA alone**, and does the exchange add anything beyond
+running the two side by side? **Refined by the author on 2026-10-07** (vault `D-013`): the coupling is meant to lift
+each solver's weakest cases, not to be better in general — the primary measure is the improvement on each solver's
+**weak set** (the instances where that solver alone has P ≥ 0.5, chosen on seeds not used for the evaluation), with the
+mean over all instances as a non-inferiority guard (mean d ≥ −0.05). The refinement and the v1 targets below enter a
+revised pre-registration (`prereg-v2`) before any confirmatory run.
+
+**v1** (vault `D-019`, decided by the author 2026-10-10): arm A9 frozen — SCIP 10 ↔ GPU EA ← cuOpt on one GB10.
+Checkpoint **C1 on Fri 2026-10-23** (development closes on cuOpt 26.08; MIPfeas harness calibrated; an interim A9 result
+on the 17 development and class-probe instances; go / no-go for the final phase). **v1 at the end of November 2026**
+(aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10; if 26.10 is not released by 11-06, the v1 runs proceed on 26.08 and
+26.10 follows as an addendum. Daytime windows only. Targets:
+- **Confirmatory, unseen hard instances** (about 32 × 2 seeds × {SCIP alone, cuOpt alone, A9}, T = 300 s): on SCIP's
+  weak set at minimum a significant gain (mean d > 0 with its 95 % interval above 0), target mean P −40 % with ≥ 70 %
+  of the weak set improved (stretch −55 %); on cuOpt's weak set at minimum a significant gain, target mean P −25 % with
+  ≥ 60 % improved (stretch −40 %); on all instances mean d ≥ −0.05 against each solver alone.
+- **Mittelmann's MIPfeas protocol** (233 feasible MIPLIB 2017 benchmark instances, 600 s, primal integral 0–2, shifted
+  geometric mean with shift 0.001): at minimum A9's geometric mean ≤ our own cuOpt-26.10-alone run on the same GB10;
+  target mean integral −25 % on the instances hard for cuOpt (our cuOpt-alone integral ≥ 0.1 or no solution) and
+  geometric mean −10 %; stretch ≤ 0.0274 (SCIP concurrent 11, published). The reference is our own same-version run
+  because the published rows are cuOpt 26.08 and aggregates only.
 
 None of the parts is new, and no "first" is claimed (`vault/40-literature/Prior art.md`): heuristics and
 branch-and-bound exchanged incumbents both ways in Puchinger, Raidl & Gruber (2005) and Nwana et al. (2005); ReXi runs
@@ -29,19 +52,67 @@ candidates; cuOpt itself runs a GPU population beside its own branch-and-bound; 
 for infeasible solutions. What is studied here is the combination: a GPU population coupled with an external, general
 MIP solver, with a capped, incumbent-relative share of infeasible solutions.
 
-## Status
-**Built and tested on toy models (2026-10-06). No experiment has run; there are no results.** The whole pipeline is
-written: configuration, problem reader, evaluation, three-rank survival, frontier, operators, feasibility-jump local
-search (GPU kernel, single-core CPU reference, dense baseline), engine and EA process, the SCIP / HiGHS / cuOpt
-processes, both exchange transports, the runner, job builder and pool with their safety gates, and the analysis
-(exact checker, metrics, pre-registered statistics, lineage). The design was revised after a three-lens critique
-(`vault/80-reviews/`). The test suite (toy models and synthetic problems only) passed 413 tests, 2 skipped, on
-2026-10-06 01:2x. The repository has no commit yet; the hypotheses, arms, metrics and analysis become binding at the
-git tag `prereg-v1`, before the first timed run on a candidate instance (the screening pass). Nothing here should be
-read as a performance claim.
+## Status (2026-10-10)
+**Development. No confirmatory experiment has run;** every number below comes from development runs (small samples,
+two seeds or fewer per instance unless stated) and is descriptive, not a performance claim.
+- **Pre-registration and screening.** `D-002` v3.1 is tagged `prereg-v1` (2026-10-06). Hard-pool screening: stage 1
+  complete (324 candidates, SCIP alone, 300 s, seed 900); stage 2 (seed 901) 35 of 234 runs done, deferred until the
+  pool freeze (`D-010` §5, issue #1).
+- **Development** since 2026-10-06 on a 9-instance set (`D-010`, `datasets/dev_set.csv`, permanently excluded from the
+  test set) and 8 class-probe instances (`D-014`, `datasets/classprobe_set.csv`), judged on the coupled arm at 120 s
+  (`D-011`). Every change, result and failure: `vault/30-results/Development log.md`.
+- **Development defaults.** A3 (SCIP ↔ EA): `configs/itrea2-dev-rc-ld.yaml` (hash `f030e23909ad`) — self-adaptive repair
+  strategy, the EA's own HiGHS LP, SCIP's LP stream, deep repair under the repair clock, LP decode. A9 and its matched
+  control A3x (A3 with A9's EA footprint): `configs/itrea2-dev-rc-3way.yaml` (`1d12ad490dd0`); the runner refuses LP
+  decode there because the EA has one core (a two-core layout is issue #30).
+- **Development numbers** (P = primal integral, lower is better; d = bounded per-instance difference, positive = the
+  coupled arm lower; seed means):
+  - A3@lps1 (the 2026-10-06 baseline) against SCIP alone: lower P on 7 of 8 instances, mean d +0.43 [+0.23, +0.65],
+    Wilcoxon p = 0.016; against cuOpt alone 6 lower / 3 higher, +0.11 [−0.33, +0.50], inconclusive
+    (`vault/30-results/Quantification 2026-10-06 (dev set).md`).
+  - Out of sample (class probe, 8 new instances, A3@lp1, no cuOpt; `D-014` inconclusive): against SCIP alone
+    3 lower / 1 higher of 4 informative instances, mean d +0.14 [−0.00, +0.28], lower on only 2 of SCIP's 8 weak
+    instances; against cuOpt alone 1 lower / 5 higher, mean d −0.51 [−0.84, −0.12]. The development set overstates
+    the effect.
+  - A9 pilot (7 instances, seed 0): against SCIP alone lower on 7 of 7, mean d +0.68 [+0.42, +0.90]; against cuOpt
+    alone 3 lower / 4 higher, −0.07 [−0.42, +0.25]; cuOpt runs slower beside the EA (chromaticindex1024-7: cuOpt's
+    P inside A9 0.545 vs 0.071 alone).
+  - LP decode (`D-017`, 6 instances × 2 seeds): mean d +0.219 [+0.041, +0.429] against the previous default
+    (item_placement 0.311 → 0.118, sing44 0.377 → 0.238) — adopted for A3.
+  - Rank 1 by cuOpt's clearing rule (`D-016`, 9 instances, seeds 0–3, rail01 seeds 0–1 only; 102 runs): mean d
+    −0.033 [−0.122, +0.050] — kept as an option (`ranks.rank1_mode`, off by default), not adopted.
+  - A9 GPU back-off (`D-018`): stage-0 calibration (18 runs) gave PROCEED — duty ½ until the first incumbent, floor ⅛,
+    yield 30 s, patiences 40 / 40 (`configs/itrea2-dev-rc-3way-bo1.yaml`; control `-bo1s.yaml`, the same values in
+    shadow mode). At duty ½ cuOpt's first chromaticindex1024-7 incumbent came at 8.3 s against 65.3 s at full duty
+    (8.1 s alone). Stage 1 (84 runs, two daytime windows) is next.
+- **Tests (2026-10-09):** CPU suite 816 passed; the GPU tests of the new code (pace, back-off, lp_decode, elite,
+  ea_run) 40 passed.
+- **Next:** GitHub milestone *C1 checkpoint (2026-10-23)* — #23 (A9 and its back-off, stage 1), #26 (recombine each
+  partner incumbent with the elite), #27 (lp_decode: adopted for A3; open for A9 and follow-ups), #29 (MIPfeas
+  harness, calibrated on cuOpt 26.08), #30 (A9 core layout for LP decode); milestone *v1 (end of November 2026)* — #1
+  (pool freeze), #31 (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper). Plan:
+  `vault/00-index/Roadmap.md`.
 
-For AI agents and for anyone extending the work: start at [`AGENTS.md`](AGENTS.md); the research vault starts at
-[`vault/00-index/Home.md`](vault/00-index/Home.md).
+## How to start
+1. Read [`AGENTS.md`](AGENTS.md) (every rule for agents and the code map), then the vault's
+   [`vault/00-index/Home.md`](vault/00-index/Home.md), the newest checkpoint in `vault/90-checkpoints/` and the
+   Roadmap.
+2. Install and run the tests (below).
+3. A toy run needs no lease and no GPU — SCIP alone on a toy knapsack for 10 s, the runner's own example
+   (`src/itrea/experiments/pair.py`); it takes the runner lock, so it refuses to start while a pool runs, and `--no-pin`
+   skips the GB10 core pinning on other machines:
+   ```bash
+   python -c "from itrea.benchmarks.toy import knapsack, write_mps; write_mps(knapsack(), '/tmp/toy.mps')"
+   itrea pair --instance /tmp/toy.mps --arm A0 --seed 0 --budget 10 --set smoke
+   ```
+4. Timed runs on real instances happen only inside a window on the shared DGX Spark — repository skills
+   `itrea-window` (box-window lease, the local LLM servers stopped and restored with `tools/serving-window.sh`, memory,
+   thermal and GPU-health gates) and `itrea-new-experiment` (job file, frozen configuration, pool). Job files run with
+   `itrea pool JOBS --layout pair`; then `itrea build-runs` and the experiment's report. Two practices learned from
+   incidents (`vault/60-incidents/Mistakes and incidents.md`): before a window that runs new GPU code, the GPU-marked
+   cold-cache tests (`pytest -m gpu -k cold_cache`) must pass and must reach the new code after `t0`; and no commit to
+   `src/` or `configs/` while a pool can still launch runs (each run imports the current source) — develop in a git
+   worktree.
 
 ## Install
 ```bash
@@ -49,13 +120,14 @@ git clone https://github.com/Tideseed/i-trea-ii && cd i-trea-ii     # private wh
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev,plots]"          # CPU backend (NumPy/SciPy/Numba), HiGHS, SCIP, Redis client, tests, plots
 uv pip install -e ".[gpu]"                # + CuPy for CUDA 13 (the GPU backend)
-uv pip install -e ".[cuopt]" --extra-index-url https://pypi.nvidia.com   # + NVIDIA cuOpt 26.08 (control arms)
+uv pip install -e ".[cuopt]" --extra-index-url https://pypi.nvidia.com   # + NVIDIA cuOpt 26.08 (arms A2, A6, A9, H2)
 pytest -q                                 # toy-scale tests (GPU tests skip without CuPy; -m "not integration" is faster)
 ```
 Versions are pinned in `pyproject.toml` to the ones used for the study: Python 3.12, NumPy 2.4.6, SciPy 1.18.1,
 Numba 0.64.0, HiGHS 1.15.1, PySCIPOpt 6.2.1 / SCIP 10, pandas 3.0.3, PyArrow 23.0.1, redis-py 8.1.0, PyYAML 6.0.3,
-CuPy 14.2.0 (`cupy-cuda13x`), cuOpt 26.08, pytest 9.1.1, Hypothesis 6.168.1. One entry point, `itrea <command>`, reaches
-every tool (`itrea --help`; `src/itrea/cli.py`).
+CuPy 14.2.0 (`cupy-cuda13x`), cuOpt 26.08, pytest 9.1.1, Hypothesis 6.168.1. cuOpt 26.10 will get its own environment
+when it is released (issue #31). One entry point, `itrea <command>`, reaches every tool (`itrea --help` lists the
+commands, `itrea <command> --help` their arguments; `src/itrea/cli.py`).
 
 **On the author's machine the environment was built offline** (no network): every wheel came from uv's local cache;
 cuOpt's dependency closure (28 distributions) was hard-linked from the optopt environment following each
@@ -64,51 +136,56 @@ without `hiredis` (the pure-Python parser is used). On a networked machine the c
 versions.
 
 The exchange platform is a Redis 7 server of the project's own on 127.0.0.1:6390 (container `itrea-redis` from the
-`redis:7-alpine` image, no persistence, 2 GB cap): `python -m itrea.experiments.exchange_ctl up|status|down`. Without
-Redis, the file mailbox on `/dev/shm` offers the same API.
+`redis:7-alpine` image, no persistence, 2 GB cap): `itrea exchange up|status|flush RUN_ID|down`. Without Redis, the
+file mailbox on `/dev/shm` offers the same API; the runner and the pool use it by default (`--mailbox file|redis`).
 
 ## Layout
 | path | what |
 |---|---|
-| `src/itrea/` | the package: `cli` (the `itrea` command), `config`, `problem`, `backend`, `trace`, `paths`; `ea/` (evaluation, population, ranks, operators, feasibility-jump local search on GPU and CPU, continuous decoding, frontier, engine, EA process); `exchange/` (file mailbox, Redis); `solvers/` (SCIP, HiGHS, cuOpt processes); `experiments/` (gates, GPU health, Redis container control, environment record, runner, job builder, pool); `analysis/` (exact checker, metrics, run tables, pre-registered statistics, lineage, re-derivation); `benchmarks/` (toy models, hard-pool screening and freeze, reference values) |
-| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`), `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison), `itrea2-adaptive.yaml` (development: self-adaptive repair strategy — row scale l2/rhs x LP guidance off/on per individual — and the EA's own LP point), `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
+| `src/itrea/` | the package: `cli` (the `itrea` command), `config`, `problem`, `backend`, `trace`, `paths`; `ea/` (evaluation, population, three-rank survival, elite clearing, operators, feasibility-jump local search on GPU and CPU, continuous decoding and the LP decode worker, repair clock, A9 GPU back-off, equality aggregation (not wired in), frontier, engine, EA process); `exchange/` (file mailbox, Redis); `solvers/` (SCIP, HiGHS, cuOpt processes); `experiments/` (gates, GPU health, Redis container control, environment record, runner, job builder, pool); `analysis/` (exact checker, metrics, run tables, pre-registered statistics, lineage, re-derivation, the back-off report); `benchmarks/` (toy models, hard-pool screening and freeze, reference values) |
+| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`); development files (never confirmatory): `itrea2-adaptive.yaml` (`584ddee83747`), `itrea2-adaptive-lps.yaml` (`a2ad94e9188d`), `itrea2-adaptive-lps-rc.yaml` (the repair clock in shadow mode), `itrea2-dev-rc-3way.yaml` (repair clock active; `1d12ad490dd0`; A9 / A3x), `itrea2-dev-rc-ld.yaml` (+ LP decode; `f030e23909ad`; the A3 default), `itrea2-dev-rc-3way-bo*.yaml` (A9 back-off: `bo0` shadow, `bof50` / `bof25` / `bof12` forced duty, `bo1` active, `bo1s` its shadow control); `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison); `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
 | `tests/` | correctness tests on toy models and synthetic problems (`-m gpu` needs CuPy, `-m solver` runs a real solver for seconds, `-m integration` launches real processes through the runner) |
-| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`) |
-| `jobs/`, `traces/`, `datasets/` | job files; run outputs (raw traces are not committed, resource records are); derived tables |
+| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`), `probe_lp_decode.py` (the LP decode worker on stored vectors), `cuopt_verify_mipstart.py` (cuOpt MIP start check, GPU), `d016_report.py` / `d017_report.py` (decision reports), development probes |
+| `jobs/`, `traces/`, `datasets/` | job files; run outputs (raw traces are not committed, resource records are); derived tables (`dev_set.csv`, `classprobe_set.csv`, the run tables) |
 | `data/` | instances (not in git; symbolic links to the public sets, see `vault/10-design/Datasets.md`) |
 | `paper/` | LaTeX source of the paper (skeleton; no results) |
-| `vault/` | research vault (Obsidian): journal, design notes, decisions, results, literature, incidents, reviews, checkpoints |
+| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-019, results, literature, incidents, upstream drafts, reviews, checkpoints — start at `vault/00-index/Home.md` |
 | `tutorials/` | tutorials (planned) |
 | `.claude/skills/` | repository skills for AI agents (window, journal, result note, new experiment, literature, reproduce) |
 
 ## How a run is assembled
-A run is one (instance, arm, seed, budget). The runner (`itrea.experiments.pair`; job files run through
-`itrea pool`, which applies every gate) creates a run directory
-`traces/raw/<set>/<run_id>/` and a fresh exchange space — a directory `/dev/shm/itrea/<run_id>/` or the Redis key space
-`itrea:<run_id>:*` (`redis://127.0.0.1:6390/0?run=<run_id>`) — writes the canonical variable order, and launches the
-arm's processes, each one pinned, memory-capped and single-threaded:
+A run is one (instance, arm, seed, budget). The runner (`itrea pair`; job files run through `itrea pool`, which applies
+every gate) creates a run directory `traces/raw/<set>/<run_id>/` and a fresh exchange space — a directory
+`/dev/shm/itrea/<run_id>/` or the Redis key space `itrea:<run_id>:*` (`redis://127.0.0.1:6390/0?run=<run_id>`) —
+writes the canonical variable order, and launches the arm's processes, each one pinned, memory-capped and
+single-threaded:
 ```bash
 python -m itrea.solvers.scip_run --instance P --seed S --budget T --run-dir D --mailbox M --recv --send
 python -m itrea.ea.run --instance P --config configs/itrea2-default.yaml --seed S --budget T --run-dir D --mailbox M
 ```
-Each process reads the instance and reports ready; the runner releases a start barrier with a shared `t0` on the
-system-wide monotonic clock, waits for the budget, writes `stop`, checks every exit code, and writes `run.json` (cores,
-caps, temperatures, GPU health, co-running services, git revision) with the merged trajectories. Every process stores
-every incumbent vector, so the independent exact checker can verify each one before it enters a metric. Contract:
-`vault/10-design/Process interface.md`; file formats and metrics: `vault/10-design/Trace format and metrics.md`.
+In A9 a third process, `itrea.solvers.cuopt_run --send`, writes cuOpt's incumbents to its own channels; SCIP runs on
+one Cortex-X925 core, the EA on a second, cuOpt on three Cortex-A725 cores, and the memory gate counts two CUDA
+processes. Each process reads the instance and reports ready; the runner releases a start barrier with a shared `t0` on
+the system-wide monotonic clock (kernel warm-up, including every crossover and mutation operator on 1-, 2- and
+3-child batches, happens before it), waits for the budget, writes `stop`, checks every exit code, and writes
+`run.json` (cores, caps, temperatures, GPU health, co-running services, git revision) with the merged trajectories.
+Every process stores every incumbent vector, so the independent exact checker can verify each one before it enters a
+metric. Contract: `vault/10-design/Process interface.md`; file formats and metrics: `vault/10-design/Trace format and
+metrics.md`.
 
 `itrea.exchange.redis_mailbox.open_mailbox(spec, role)` returns either transport behind one API (`to_solver`,
-`to_ea`, `info`, `lp` channels, barrier, stop flag, verdicts); Redis adds a shared solution pool and a history of every
-exchange. Which transport the confirmatory runs use is decided by a pre-registered overhead measurement (vault `D-006`).
+`to_ea`, `info`, `lp`, `lps` channels, A9's `to_ea_cuopt` / `info_cuopt`, barrier, stop flag, verdicts); Redis adds a
+shared solution pool and a history of every exchange. Which transport the confirmatory runs use is decided by a
+pre-registered overhead measurement (vault `D-006`; not run yet — every run so far used the file mailbox).
 
 ## Reproducibility plan
-- **Pre-registration.** Hypotheses, arms, instance-pool rules, metrics and analysis are written before any run
-  (vault `D-002`), committed and tagged `prereg-v1`; the pool is frozen as `pool-v1`, the configuration as `frozen-e2`.
-  The pool refuses test-set jobs unless the configuration hash equals `frozen-e2`'s and `prereg-v1` is an ancestor of
-  HEAD, and other non-smoke jobs without the tag. Later changes are dated decisions; results under the old plan are
-  still reported.
+- **Pre-registration.** Hypotheses, arms, instance-pool rules, metrics and analysis were written before any run
+  (vault `D-002`), committed and tagged `prereg-v1`; the pool will be frozen as `pool-v1`, the configuration as
+  `frozen-e2`. The pool refuses test-set jobs unless the configuration hash equals `frozen-e2`'s and `prereg-v1` is an
+  ancestor of HEAD, and other non-smoke jobs without the tag. Later changes are dated decisions; the D-013 aim and the
+  D-019 targets go into `prereg-v2` before any confirmatory run. Results under the old plan are still reported.
 - **Exact definitions.** Job files in `jobs/` define every run (instance, arm, seed, budget, configuration hash);
-  seeds are fixed (screening 900/901, tuning 0–99, confirmatory 1000/1001).
+  seeds are fixed (screening 900/901, development 0–3, tuning 0–99, confirmatory 1000/1001).
 - **Checked numbers.** Every reported objective comes from an incumbent re-checked with another library in exact
   arithmetic; every crash and void is reported.
 - **Re-derivation.** `itrea build-runs` turns the run directories into `datasets/runs.parquet` and
@@ -122,10 +199,12 @@ exchange. Which transport the confirmatory runs use is decided by a pre-register
 The study runs on a shared DGX Spark (unified memory, two local LLM servers, other sessions). The runner enforces the
 rules in vault `D-003`: a box-window lease before any timed run; a run-set memory gate that counts GPU memory
 explicitly (a systemd `MemoryMax` does not charge GPU allocations on this machine), with a 20 GB reserve and a live
-watchdog; one GPU arm at a time, with the same GPU memory limit for the EA's pool and cuOpt (12 GB, set by cuOpt's
-measured need); pinned single-threaded processes; a thermal gate (start below 80 °C, pause at 92 °C);
-GPU-health voiding (stuck-low-clock fault, foreign GPU activity); the LLM servers stopped and restored only through
-`tools/serving-window.sh`; no downloads; toy models only in tests. See `AGENTS.md` → "Rules for new experiments".
+watchdog (A9 needs about 73 GB, so both LLM servers are stopped); one GPU run at a time, with the same GPU memory
+limit for the EA's pool and cuOpt (12 GB, set by cuOpt's measured need); pinned single-threaded processes; a thermal
+gate (`D-008`: GPU arms start below 80 °C, CPU-only arms below 88 °C; pause at 92 °C); the fan governor's rest breaks
+and no night windows (`D-009`, `D-019`); GPU-health voiding (stuck-low-clock fault, foreign GPU activity); the LLM
+servers stopped and restored only through `tools/serving-window.sh`; no downloads; toy models only in tests. See
+`AGENTS.md` → "Rules for new experiments".
 
 ## Credits
 Author: Berk Orbay (berk.orbay@tideseed.com). The design and the code are developed with **AgentRA** (Agent Research

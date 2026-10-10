@@ -1,10 +1,10 @@
-# Process interface — how a pair run is put together (contract, 2026-10-05)
+# Process interface — how a pair run is put together (contract, 2026-10-05; updated 2026-10-10 to the built code)
 
 A **run** = one (instance, arm, seed, budget). The runner (`itrea.experiments.pair`) creates a run directory
-`traces/raw/<set>/<run_id>/` and a mailbox directory `/dev/shm/itrea/<run_id>/`, writes `order.npy` (canonical names,
-HiGHS column order), launches the arm's processes, waits until every process wrote `ready.<role>`, releases the
-barrier (`start` with `t0`), waits `budget + grace`, writes `stop`, waits for exits, **checks every exit code** (optopt
-X1: a dead SCIP logged "ok"), records resources and merges the trajectories.
+`traces/raw/<set>/<run_id>/` and a mailbox directory `/dev/shm/itrea/<run_id>/`, writes `order.json` (canonical names,
+HiGHS column order; into the mailbox and the run directory), launches the arm's processes, waits until every process
+wrote `ready.<role>`, releases the barrier (`start` with `t0`), waits `budget + grace`, writes `stop`, waits for exits,
+**checks every exit code** (optopt X1: a dead SCIP logged "ok"), records resources and merges the trajectories.
 
 `run_id = <instance-stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`.
 
@@ -52,6 +52,25 @@ solver itself held).
 | A3x `scip_ea_x925` | as A3, but the EA on the lane's second X925 core (A9's footprint, no cuOpt) — A9's matched control, below |
 | ablations | A3 with `--set` overrides (`ranks.x=0`, `ranks.y=0`, `exchange.to_solver=false`, …) and the matching solver flags |
 
+## Helper processes of the EA (after t0)
+The EA starts up to two HiGHS processes of its own, both with multiprocessing "spawn" at t0, so they inherit its CPU
+affinity and, as its descendants, count as the run's own for GPU health:
+- the **LP worker** of `seeding.lp_source: highs_async` (the EA's own root LP, at most `seeding.lp_time_limit`, then it
+  exits);
+- the **LP decode worker** of `repair.continuous: lp_decode` ([[D-017 LP decode — re-optimise the continuous variables
+  of selected candidates]], `ea/lp_decode.py`) on an instance with an active column: one persistent `highspy.Highs`, 1
+  thread, niced 10, `OMP/OPENBLAS/MKL_NUM_THREADS=1` and `CUDA_VISIBLE_DEVICES=""`, a pipe to the EA, stopped by the EA
+  after the clock. Its "ready" event records its `cpus`. In A3 (the development default `configs/itrea2-dev-rc-ld.yaml`
+  since 2026-10-09) both workers share the EA's three A725 cores.
+
+**The runner refuses `lp_decode` in A9 and A3x** (`pair.plan`: `RunError` for an EA on its own X925 core,
+`ProcSpec.x925`, when the effective configuration says `repair.continuous: lp_decode`). `plan` runs when the pool
+budgets a job (`job_budget`) and again before launch, so such a job fails before any process starts; A3 with the same
+file is accepted (`tests/test_lp_decode.py::test_runner_refuses_lp_decode_for_the_single_core_arms`). Reason (D-017):
+the decode worker would share the EA's one core with the EA's host loop and the LP worker, and one more pending batch
+would take the candidate set's concatenate to CuPy's 8-part limit. It stays refused until a decision allows it (issue
+#30, the A9 core layout, milestone C1).
+
 ## Three-way arm A9 (2026-10-07, [[D-015 Use cuOpt's feasible solutions — three-way arm A9]])
 **SCIP ⇄ EA ← cuOpt.** cuOpt runs as shipped (no SetSolutionCallback, presolve on) beside SCIP and the GPU EA and
 streams every incumbent to the EA; the EA injects them and keeps exchanging with SCIP exactly as in A3, so cuOpt's
@@ -59,7 +78,13 @@ vectors — unchanged or polished by the EA — reach SCIP through the EA's post
 - **Channels.** cuOpt writes its OWN channels: `to_ea_cuopt` (file `to_ea_cuopt.npz`, Redis stream `ch:to_ea_cuopt`;
   one row, ORIGIN_SOLVER) and `info_cuopt` (`to_ea_cuopt_info.json` / key `info_cuopt`: incumbent, bound, status). A
   channel keeps only its latest message, so sharing SCIP's `to_ea` / `info` would let either process overwrite the
-  other's. `cuopt_run --send` is passed only in A9; A2 and A6 never send.
+  other's. `cuopt_run --send` is passed only in A9; A2 and A6 never send. The EA reads cuOpt's channels only with
+  `exchange.from_cuopt`, at every exchange tick after SCIP's.
+- **Info-channel peek (D-018).** `InfoChannel.peek` (file mailbox) and `_Info.peek` (Redis) return the latest info
+  message WITHOUT consuming it: the reader's `_seen` / `last_seq` are left alone, so the next `poll` still returns it.
+  Only the EA's GPU back-off uses it: in phase Y, at most every `exchange.poll_s`, it peeks SCIP's `info` (when the EA
+  reads the solver) and `info_cuopt` at both pace points — between generations and inside a repair call, where no
+  exchange tick runs — and a finite incumbent ends phase Y (reason "peek"). Shadow mode never peeks.
 - **Cores.** SCIP on the lane's first X925 core, the EA on its second (`ProcSpec.x925`), cuOpt on the three A725
   cores (`--cpu-threads 3`): the two partners never share a core. On the GPU lane: SCIP 5, EA 6, cuOpt 1–3.
 - **Memory.** Two CUDA processes: the gate counts the EA's CuPy pool and cuOpt's RMM limit (both `gpu_mem_gb`, 12 GB)
@@ -67,7 +92,11 @@ vectors — unchanged or polished by the EA — reach SCIP through the EA's post
   75 GB with Redis (A3: 48 / 50 GB).
 - **Configuration.** The runner adds `exchange.from_cuopt: true` (arm-implied, like A5's "no exchange"); SCIP gets A3's
   flags. Development jobs use `configs/itrea2-dev-rc-3way.yaml` (the repair clock's Stage 2 configuration, hash
-  `1d12ad490dd0`).
+  `1d12ad490dd0`) — not the A3 default `itrea2-dev-rc-ld.yaml`, because the runner refuses `lp_decode` here (above).
+  The GPU back-off (D-018) is configured in files built on it: stage 0 `-bo0` (shadow) and `-bof50` / `-bof25` /
+  `-bof12` (forced duty ½ / ¼ / ⅛); stage 1 `-bo1` (active, run hash f67354be775d) and `-bo1s` (the same values in
+  shadow mode, the control, 62bf82b236f6). The governor exists only where `exchange.from_cuopt` is true, so an A3x job
+  with a back-off file runs without one.
 - **Matched control: A3x, not A3** (review of 2026-10-07). A3x = A3 with A9's EA footprint: SCIP on X925 5 with A3's
   flags, the EA on X925 6, the A725 cores idle, no cuOpt; same configuration file, same run hash as A3 (the arm label
   tells the run ids apart), A3's memory budget (48 GB with the reserve). A3 differs from A9 by the EA's cores as well:

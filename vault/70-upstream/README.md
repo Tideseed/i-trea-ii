@@ -21,7 +21,7 @@ not cover any particular one. The same applies to anything submitted elsewhere (
 ## Drafts
 | file | project | status |
 |---|---|---|
-| — | — | none yet |
+| [[2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve]] — NVIDIA/cuopt#2073 (feature request: accept solutions mid-run without disabling presolve; filed 2026-10-07 with Berk's yes, edited to add how SCIP handles it) | cuOpt | open; labelled P1, the maintainer aims for 26.12 (2026-10-08) |
 
 Candidates seen so far (not drafted): none. Items from the predecessor (HiGHS `time_limit` on `s100`, ERGO-Code/HiGHS
 #3314) are optopt's and are not re-filed from here.

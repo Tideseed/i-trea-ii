@@ -17,7 +17,7 @@
 
 **Primary question.** On hard MIP instances, does the coupled system — a GPU evolutionary algorithm and an exact solver
 exchanging solutions both ways — find good feasible solutions sooner (lower primal integral) than **the solver alone and
-the EA alone**?
+the EA alone**? *(Refined on 2026-10-07 and given a v1 target on 2026-10-10 — see the dated note at the end.)*
 
 Three secondary questions make the answer informative: does the coupling beat the same two methods running side by
 side **without** exchange (is the interaction itself worth something, beyond running two methods)? Is our GPU EA a
@@ -77,3 +77,37 @@ problems easier so time to first solution is not primary objective; we don't exp
 seconds faster at all. Once we practice enough we can go for the larger set of seeds and problems." Earlier the same
 day: "being better in a subset of problems is still a strong win." → the primal integral on hard instances is the
 measure; a split against cuOpt is a strong position; scale after practice. See [[Roadmap]].
+
+## What D-013 and D-019 changed (note added 2026-10-10; Berk's words above are unchanged)
+The text above is the brief of 2026-10-05/06. Where later decisions changed it:
+- **Aim refined** (Berk, 2026-10-07, [[D-013 Aim — lift each solver's weakest cases]]): "I don't aim our coupling to
+  be generally better but to help both SCIP, cuOpt (and Highs if possible) in some of the hardest problems where they
+  are the weakest." The primary question is now the improvement on each solver's **weak set** W_B — the instances where
+  solver B alone has P ≥ 0.5, chosen on seeds never used for the evaluation — for B = SCIP, cuOpt and, if possible,
+  HiGHS; the mean over all instances is a guard (mean d ≥ −0.05 against B alone). It amends D-007 and enters prereg-v2
+  before any confirmatory run.
+- **The EA alone** is a diagnostic in development, not a target
+  ([[D-011 Solver streams good infeasible solutions to the EA]], Berk 2026-10-06: "You are benchmarking EA but our EA
+  shall be coupled with a solver similar to what cuopt does"). D-002 v3.1's H1b (coupled < EA alone) stays
+  pre-registered until prereg-v2 is written; v1's confirmatory runs (D-019) are {SCIP alone, cuOpt alone, A9} and
+  contain no EA-alone arm.
+- **cuOpt is also a source, not only a rival** ([[D-015 Use cuOpt's feasible solutions — three-way arm A9]], Berk
+  2026-10-07: "We can use cuopt's feasible solutions"). In arm A9 (SCIP ↔ EA ← cuOpt) cuOpt streams its incumbents into
+  the EA, which passes to SCIP whatever beats SCIP's incumbent — cuOpt's vectors unchanged as well as the EA's own
+  improvements. The X2 lesson above still holds: cuOpt never receives solutions
+  mid-solve. Why: out of sample the coupling without cuOpt was far weaker than on the development set (class probe,
+  [[D-014 Class probe — predictions fixed before the runs]]: against cuOpt alone 1 better / 5 worse, mean d −0.51
+  [−0.84, −0.12]).
+- **Budgets:** 120 s in development (D-010), 300 s in the confirmatory test, 600 s under the MIPfeas protocol (v1's
+  external run); 1,800 s stays exploratory (E5).
+- **v1** (Berk, 2026-10-10, [[D-019 v1 — deadline and performance target]]): "So let's put a target (both as deadline
+  and performance) to our little project for v1"; then "we shall have a checkpoint in the next 2 weeks and end in
+  november with the new cuopt version" and "No nights". v1 = A9 frozen on one GB10. Checkpoint C1 on Fri 2026-10-23
+  (development closes on cuOpt 26.08); v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt
+  26.10, or on 26.08 if 26.10 is not released by Fri 11-06. Targets: on about 32 unseen hard instances × 2 seeds at
+  300 s — SCIP's weak set at minimum a significant gain, target mean P −40 % with ≥ 70 % of the weak set improved
+  (stretch −55 %); cuOpt's weak set at minimum a significant gain, target mean P −25 % with ≥ 60 % improved (stretch
+  −40 %); mean d ≥ −0.05 against each solver alone. Under Mittelmann's MIPfeas protocol (233 feasible MIPLIB
+  2017 benchmark instances, 600 s) — at minimum A9's geometric mean no worse than our own cuOpt-26.10-alone run on the
+  same GB10; target −25 % mean integral on the instances hard for cuOpt and −10 % geometric mean; stretch 0.0274 (SCIP
+  concurrent 11, published). The 233 overlap the development instances; that result is reported with and without them.

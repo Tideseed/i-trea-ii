@@ -1,4 +1,4 @@
-# Feasibility-jump local search — the repair operator (spec, 2026-10-05)
+# Feasibility-jump local search — the repair operator (spec, 2026-10-05; updated 2026-10-10 to the built code)
 
 One algorithm, three implementations that must agree in semantics (not bit-for-bit):
 `ls_fj_cpu.py` (Numba, one core — the CPU reference and arm A4's repair), `ls_fj_gpu.py` (CuPy `RawKernel`, one thread
@@ -57,15 +57,17 @@ are done.
 the one above).** A lane still searching after h steps stops with **status 4 (`ST_HORIZON`)** and keeps its current,
 projected x (as a stalled lane does). The rule is checked after done / budget / stall, so a lane that would stop at
 step s ≤ h stops exactly as without the horizon: a horizon-h call is a prefix of the unbounded call (same x, status,
-steps and moves for every lane with s ≤ h; tested on the CPU with the cutoff armed — the GPU twin of the test is
-written, marker `gpu`, and has NOT run yet). h = 0 = projection and the stop rules only.
+steps and moves for every lane with s ≤ h; tested with the cutoff armed on the CPU and, marker `gpu`, on the GPU —
+passed 2026-10-07 before the repair clock's Stage 1, [[Development log]]). h = 0 = projection and the stop rules only.
 - CPU (`ls_fj_cpu`): one scalar `max_lane_steps` in the Numba kernel (2^62 without a horizon).
 - GPU (`ls_fj_gpu`): host side only, no kernel change. An active block runs exactly `iters` steps per launch, so after
   every launch all active lanes have the same step count; the host truncates the next launch to min(iters, h − steps
   so far), stops relaunching at h and gives the still-active lanes status 4 on the host (STI is not rewritten).
 - Call deadline `cap_s` (a backstop). GPU: split over the chunks (chunk c of C: t0 + cap·(c+1)/C); when it passes the
   host stops relaunching and the active lanes get status 4 at the equal step count reached (H_eff); a chunk reached
-  after its deadline is still projected (prep, init and a launch of 0 steps — the stop rules only). CPU: a Numba call
+  after its deadline is still projected (prep, init and a launch of 0 steps — the stop rules only). With a deadline a
+  launch aims at clamp(cap / 8, 5 ms, `launch_ms`) instead of `launch_ms`, so the overshoot past a deadline is bounded
+  likewise (every call starts at no more than 8 steps per block and grows at most 4× per launch). CPU: a Numba call
   cannot be interrupted, so the rows are processed in slices and the rows NOT STARTED at the deadline are only
   projected (horizon 0). The two differ in what is cut (the chunk in progress vs the rows not started); documented,
   and the CPU is not a timed arm of the repair clock.
@@ -77,6 +79,24 @@ written, marker `gpu`, and has NOT run yet). h = 0 = projection and the stop rul
   since the call started, recorded whatever the arguments (one clock read per launch); CPU `{kind: "sequential",
   seconds, H, cap_s, cap_hit, cut_rows}`.
 
+**Pace (A9's GPU back-off, 2026-10-09, D-018; `run(pace=f)`, optional — without it the call is exactly the one above).**
+`f` is a callable that may sleep and returns the seconds it slept; the engine passes it in the back-off's active and
+forced modes only ([[I-TREA II algorithm]], "GPU back-off in A9"). It is called only where the call itself has nothing
+queued on the GPU (the engine's `f` still synchronises before it sleeps), and before the stop poll, so a stop that
+arrives during a sleep is seen at once.
+- GPU (`ls_fj_gpu`, host side only, no kernel change): before every chunk and between two launches (after the horizon
+  and deadline tests; the step counter's read has synchronised).
+- CPU (`ls_fj_cpu`, wired for CPU tests of the engine): before every slice; with `pace` the rows are processed in
+  slices, as with a stop poll.
+- **Busy time.** Every time the call measures for itself has the sleeps subtracted: the deadline `cap_s` (it cuts at
+  busy ≈ cap, not wall ≈ cap), the profile's `t` / `end` and `seconds`, and the counter `seconds`; the counters then add
+  `paused_s` and `wall_s` (= `seconds` + `paused_s`), the GPU profile `paused_s`. The repair clock therefore sees the
+  same call times at every duty.
+- Lane state lives on the device and every random number is seeded per (seed, row, call), so without a horizon or a
+  deadline pacing changes WHEN rows are repaired, not what they become.
+`repair.LocalSearch.run` passes `horizon`, `cap_s` and `pace` to the feasibility jump only; any of them with another
+`repair.method` is a `ValueError`.
+
 ## Invariants (tested)
 Integer genes stay integral and inside bounds; `act` equals `A x` after the call (to 1e-9 relative); a feasible input
 with the cutoff inactive is returned unchanged; on toy knapsack / set cover / mixed models from random starts most
@@ -84,7 +104,9 @@ children reach feasibility within the step budget; GPU and CPU reach feasibility
 within noise).
 
 ## Counters returned
-`moves, local_minima, steps, finished_feasible, finished_stall, finished_budget, seconds` (+ `chunk` and peak memory
-on the GPU; + `finished_horizon` and `cap_hits` when a horizon or a deadline is given). Status codes per lane: 1
+`moves, local_minima, steps, finished_feasible, finished_stall, finished_budget, interrupted, seconds` (`interrupted` =
+lanes a run-level stop left unfinished, also counted in `finished_budget`; + `chunk`, `peak_bytes`, `launches` and
+`max_launch_s` — the longest launch — on the GPU, `act_drift` and `state_bytes` on the CPU; + `finished_horizon` and
+`cap_hits` when a horizon or a deadline is given; + `paused_s` and `wall_s` with `pace`). Status codes per lane: 1
 feasible, 2 stall, 3 budget, 4 horizon (cut by the horizon or the deadline), 0 interrupted by a run-level stop. The
 engine adds them to the generation record.

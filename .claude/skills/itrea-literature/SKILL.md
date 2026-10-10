@@ -22,7 +22,8 @@ Acceptable: publisher open access (state the licence, e.g. CC BY 4.0), arXiv, in
 author or lab pages, technical reports, official documentation, source code at a pinned commit, or an Internet Archive
 capture of one of these. Search with Unpaywall, OpenAlex, Semantic Scholar, CORE and the authors' pages.
 **Never send Berk's e-mail address (or anyone's) to an outside service** without his explicit ask — Unpaywall's API
-asks for an `email=` parameter: use a placeholder (incident of 2026-10-05/06 in `vault/60-incidents/`).
+asks for an `email=` parameter (Crossref and OpenAlex ask for a contact too): send none or a project placeholder
+(incident of 2026-10-05/06 in `vault/60-incidents/`, rule restated 2026-10-06).
 **Never** shadow libraries, ResearchGate or Academia.edu uploads, or copies of unclear provenance (mark a doubtful
 mirror as such, as sweep C did).
 

@@ -1,0 +1,1 @@
+{"instance": "data/miplib/inst/sing44.mps.gz", "set": "smoke", "name": "sing44", "arm": "A3", "seed": 9, "budget": 30.0, "config": "configs/itrea2-dev-rc-3way.yaml", "overrides": {"repair.continuous": "lp_decode"}, "stratum": "miplib_opt", "split": "dev", "block": "sing44__s9__ld1smoke", "variant": "ld1smoke"}

@@ -1,4 +1,5 @@
-% I-TREA II -- paper source (skeleton). Working title; no results yet.
+% I-TREA II -- paper source (skeleton). Working title; no confirmatory results yet (status 2026-10-10: screening and
+% development runs exist; the v1 targets are vault D-019; this draft is rewritten for v1, issue #12).
 % Build: latexmk -pdf main.tex   (bibliography: refs.bib, legally readable works only;
 % paywalled works are named only in Appendix~\ref{app:paywalled}, without bibliography entries).
 \documentclass[11pt]{article}
@@ -24,7 +25,7 @@
 Research Assistant; AgentRA is mainly Claude Opus 5.5, working through Claude Code), under the author's direction;
 see the AI assistance statement (Section~\ref{sec:ai}). Every number in a final version will be produced by the code,
 configurations and job definitions in the project repository.}}
-\date{Draft --- design and build stage, no results (6 October 2026)}
+\date{Draft --- development stage, no confirmatory results (10 October 2026)}
 
 \begin{document}
 \maketitle
@@ -36,7 +37,8 @@ evolutionary algorithm that runs on a GPU, coupled with an exact MIP solver so t
 directions while they run, finds good solutions sooner than either method alone. The population keeps a capped share
 of infeasible solutions whose objective is better than the best feasible one, an idea carried over from the
 interactive three-rank evolutionary algorithm I-TREA~\citep{orbay2011itrea}. The hypotheses, arms, instance-pool rules,
-metrics and analysis were fixed before any experiment. This draft describes the design; it contains no results.
+metrics and analysis were fixed before any experiment. This draft describes the design; it contains no confirmatory
+results.
 \end{abstract}
 
 \input{sections/introduction}

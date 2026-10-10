@@ -14,13 +14,13 @@ the only place the mapping lives.
     itrea cuopt-run …          python -m itrea.solvers.cuopt_run   cuOpt process (control arm)
     itrea pair …               one run (smoke tests; the pool runs job files)
     itrea pool JOBS …          a job file under every D-002 / D-003 control
-    itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0
+    itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0 | backoff1
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
     itrea check PATHS …        the independent exact check of stored incumbents
     itrea build-runs …         run directories -> datasets/runs.parquet, incumbents_checked.parquet
-    itrea prereg …             the pre-registered analysis (D-002 v3)
+    itrea prereg …             the pre-registered analysis (D-002 v3.1)
     itrea lineage ROOT …       the descriptive Rank 0 lineage metric
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict
@@ -44,13 +44,13 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pair": ("itrea.experiments.pair", (), "one run: launch, barrier, stop, exit codes, run.json"),
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
-                  "backoff0)"),
+                  "backoff0, backoff1)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
     "check": ("itrea.analysis.check_solutions", (), "independent exact check of stored incumbents"),
     "build-runs": ("itrea.analysis.build_runs", (), "run directories -> datasets/*.parquet"),
-    "prereg": ("itrea.analysis.prereg", (), "the pre-registered analysis (D-002 v3)"),
+    "prereg": ("itrea.analysis.prereg", (), "the pre-registered analysis (D-002 v3.1)"),
     "lineage": ("itrea.analysis.lineage", (), "descriptive Rank 0 lineage metric"),
     "reproduce": ("itrea.analysis.reproduce", (), "re-derive datasets/ and paper/generated/ and compare"),
     "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off (D-018): stage-0 / stage-1 rules, verdict"),

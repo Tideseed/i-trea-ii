@@ -13,6 +13,15 @@ One note per experiment: `vault/30-results/<id> <short title>.md` (e.g. `E1 EA a
 in `vault/30-results/Experiment index.md`. A number that is not in a result note does not go into the README,
 AGENTS.md, the paper or a message to Berk.
 
+**Development tests (D-010 §3)** are recorded differently: one section in `vault/30-results/Development log.md` (title
+with times, arms × instances × seeds and the verdict; pool id, commit, runs completed / expected, void, runs with
+`compiled_on_clock`, both LLM servers' state; the numbers; the report that produced them) plus a "Result" section in
+the test's decision record with the verdict by its own rules (e.g. *adopted*, *not adopted*, *inconclusive*,
+*proceed*) and any stated deviation from the letter of a rule. The numbers come from the test's report, which applies
+the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_report.py`, `itrea backoff-report --stage
+0|1`; commit it before the pool ends, as for D-017 and D-018), run single-threaded after `itrea build-runs`.
+Development results are descriptive; they are never quoted as confirmatory.
+
 ## Template
 ```markdown
 # <id> <title> (<date>, window <W…>)
@@ -34,7 +43,8 @@ point estimates; "not significant" is never written as "equal" — give the inte
 
 ## Integrity
 - Checker coverage: incumbents stored / checked / passed / failed, per arm (failed ones listed by run).
-- Crashes and voided blocks per arm (cause: GPU health, thermal, memory gate), reruns per arm.
+- Crashes and voided blocks per arm (cause: GPU health, thermal, memory gate, kernel compiled on the clock), reruns per
+  arm; runs whose summary says `compiled_on_clock = true`.
 - Post accounting for exchange arms: posted / superseded-untried / tried-accepted / tried-rejected / pending-at-T.
 - Runs whose recorded backend did not match the arm (dropped).
 
