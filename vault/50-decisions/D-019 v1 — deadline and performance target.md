@@ -1,6 +1,6 @@
-# D-019 v1 — deadline and performance target (2026-10-10, DRAFT — proposed by AgentRA, pending Berk)
+# D-019 v1 — deadline and performance target (2026-10-10, Berk; proposal by AgentRA)
 
-**Status:** draft. Berk (2026-10-10): "So let's put a target (both as deadline and performance) to our little project
+**Status:** decided by Berk 2026-10-10 12:2x (addendum below: his answers change the deadline, the cuOpt version and the night rule; the proposal follows as first written). Berk (2026-10-10): "So let's put a target (both as deadline and performance) to our little project
 for v1." This record is the proposal; it becomes decided with his answer (dated addendum), and its performance targets
 enter prereg-v2 verbatim before any confirmatory run.
 
@@ -49,3 +49,21 @@ the external result is reported with and without them.
   (D-009 needs Berk's yes)**.
 - No downloads (the 233 instances are on disk: `data/miplib/benchmark-v2.test` minus its 7 infeasible ones).
 - If a target is missed, v1 still ships on 11-13 with the honest numbers and a v1.1 scope.
+
+## Addendum — Berk's decision (2026-10-10 12:2x)
+Asked (deadline; night windows), Berk: **"we shall have a checkpoint in the next 2 weeks and end in november with the new
+cuopt version"** and **"No nights"**. So:
+- **Checkpoint C1 — Fri 2026-10-23.** Development on cuOpt 26.08 closes: D-018 stage 1 decided; #26 decided; lp_decode in
+  A9 (core layout); MIPfeas harness built and **calibrated** — cuOpt-26.08 alone on a ~30-instance sample of the 233 vs the
+  published GB10 row (0.0393; validates our clock and metric); an interim A9 result on the 17 development + class-probe
+  instances × 2 seeds vs SCIP alone and cuOpt alone, reported in D-013 terms; go / no-go for the final phase.
+- **v1 — end of November (aim Fri 2026-11-27, hard end Mon 11-30), on the new cuOpt (26.10).** When 26.10 is released:
+  separate venv, API check, re-baseline A6 on the 17 instances, then freeze, prereg-v2 (targets above, the external ones
+  re-anchored below) and the runs. **Contingency, stated now:** if 26.10 is not released by Fri 11-06, the v1 runs proceed
+  on 26.08 so v1 still lands in November, and 26.10 follows as an addendum (to be confirmed with Berk at that point).
+- **No night windows** (00:00–07:00): daytime windows only, with the fan governor's rests; the MIPfeas runs (≈ 78 h of
+  run time for {cuOpt alone, A9} × 233 × 600 s) need ≈ 8–10 long daytime windows — the LLM servers are off inside them.
+- **External targets re-anchored to our own same-version run** (the published MIPfeas rows are cuOpt 26.08): minimum —
+  A9's geo-mean ≤ our cuOpt-26.10-alone geo-mean on the same GB10; target — mean PI −25 % on the hard part (our
+  cuOpt-alone PI ≥ 0.1 or no solution) and geo-mean −10 %; stretch — geo-mean ≤ 0.0274 (SCIPConc-11, published). The
+  confirmatory targets (part A) stand as proposed.

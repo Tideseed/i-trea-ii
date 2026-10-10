@@ -1,4 +1,10 @@
-# Roadmap (living; updated 2026-10-06 evening)
+# Roadmap (living; updated 2026-10-10)
+
+**v1 target ([[D-019 v1 — deadline and performance target]], Berk 2026-10-10):** checkpoint C1 **Fri 2026-10-23**
+(development frozen on cuOpt 26.08, MIPfeas harness calibrated, interim A9 result); **v1 end of November** (aim Fri
+11-27) on cuOpt 26.10; no night windows. Targets: lift SCIP's weak set (min: significant; target −40 % mean P) and cuOpt's
+weak set (min: significant; target −25 %) on unseen hard instances, never worse than either solver on average; under
+Mittelmann's MIPfeas protocol at least cuOpt-alone's geo-mean on the same GB10 (target −25 % on the hard part).
 
 **Aim refined (Berk, 2026-10-07, [[D-013 Aim — lift each solver's weakest cases]]):** "help both SCIP, cuOpt (and
 Highs if possible) in some of the hardest problems where they are the weakest. Our performance metric is improvement
