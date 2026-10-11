@@ -67,7 +67,9 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   block (set × instance × seed × budget: a void run of one set never voids another set's runs of the same instance,
   e.g. the MIPfeas calibration's) gets `block_void`.
 
-Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`;
+Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`; the
+same job run again in another set keeps its directory, and the tables qualify the later id as `<run_id>#<set>`
+(`qualify_reused_ids`, issue #33);
 the stem may itself contain "__", so the id is parsed from the right). Keys read, all optional (`.get`):
 `run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, t0_epoch, attempt, window_id, williams_pos,
 git_rev | git_revision, prereg_tag, gpu_health {verdict, median_sm_mhz, foreign_share, gpu_run},
@@ -127,8 +129,9 @@ INC_COLUMNS = {
 
 # --------------------------------------------------------------------------------------------- run directories
 def parse_run_id(run_id: str) -> dict:
-    """`<stem>__<arm>__s<seed>__<budget>s__<cfg>` parsed from the right ({} if it does not have that shape)."""
-    parts = str(run_id).split("__")
+    """`<stem>__<arm>__s<seed>__<budget>s__<cfg>` parsed from the right ({} if it does not have that shape); a reuse
+    qualifier `#<set>` (`qualify_reused_ids`) is ignored."""
+    parts = str(run_id).split(REUSE_SEP)[0].split("__")
     if len(parts) < 5 or not parts[-3].startswith("s") or not parts[-2].endswith("s"):
         return {}
     try:
@@ -816,15 +819,41 @@ def reference_datasets(runs: list[Run]) -> dict[str, str]:
     return {n: ("miplib" if m else "") for n, m in mip.items()}
 
 
+REUSE_SEP = "#"   # `<run_id>#<set>`: a job's id reused by a later run in another set ("@" and "~" are taken by arm labels)
+
+
+def qualify_reused_ids(runs: list[Run], log=print) -> list[Run]:
+    """A run id names a JOB (`<stem>__<arm>__s<seed>__<budget>s__<cfg>`), and the directory adds the set: the same job
+    run again in another set has the same id (the D-018 stage-1 A6 reruns of the dev / classprobe A6 jobs, issue #33).
+    The earliest of them (run.json `created_epoch`, then the set name) keeps the bare id, so every table built before
+    keeps its ids; each later one becomes `<run_id>#<set>` in the tables (`run_id_base` keeps the bare id; the
+    directory is unchanged). The same id twice in ONE set is still an error (a rerun there must replace the old run)."""
+    by: dict[str, list[Run]] = {}
+    for r in runs:
+        by.setdefault(r.run_id, []).append(r)
+    for rid, rs in sorted(by.items()):
+        if len(rs) < 2:
+            continue
+        sets = [r.set for r in rs]
+        if len(set(sets)) != len(sets):
+            raise ValueError(f"duplicate run id {rid!r} inside one set {sorted(sets)} (a rerun must get its own "
+                             f"directory and run_id)")
+        def created(r: Run) -> float:
+            f = _fl(r.run_json.get("created_epoch"))
+            return f if math.isfinite(f) else math.inf
+        rs.sort(key=lambda r: (created(r), r.set))
+        for r in rs[1:]:
+            r.run_id = f"{rid}{REUSE_SEP}{r.set}"
+        log(f"run id {rid} reused in {len(rs)} sets: {rs[0].set} keeps it; "
+            f"{', '.join(r.run_id for r in rs[1:])}")
+    return sorted(runs, key=lambda r: r.run_id)
+
+
 def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLike = DATASETS, recheck: bool = False,
           workers: int = 1, write: bool = True, log=print, solu_path: str | os.PathLike = SOLU_PATH,
           verify_instances: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     raw_root, out_dir = Path(raw_root), Path(out_dir)
-    runs = sorted((load_run(p, raw_root) for p in discover(raw_root)), key=lambda r: r.run_id)
-    ids = [r.run_id for r in runs]
-    if len(set(ids)) != len(ids):
-        dup = sorted({i for i in ids if ids.count(i) > 1})
-        raise ValueError(f"duplicate run ids (a rerun must get its own directory and run_id): {dup[:5]}")
+    runs = qualify_reused_ids([load_run(p, raw_root) for p in discover(raw_root)], log)
     inc_path = out_dir / "incumbents_checked.parquet"
     cached = pd.read_parquet(inc_path) if inc_path.exists() else None    # under --recheck: only to log changes
     inc = check_runs(runs, cached, recheck, workers, log, verify_instances=verify_instances)
@@ -912,7 +941,8 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         s, ref = sense.get(name, 1), refs[name]
         st = {"solver": steps_of[a0.run_id].get(SOLVER_ROLE, []), "ea": steps_of[a5.run_id].get(EA_ROLE, [])}
         port = M.merge_steps(*st.values(), sense=s)
-        row = dict(run_id=f"{name}__{UNCOUPLED[2]}__s{seed}__{budget:g}s__computed", set=a0.set, instance=name,
+        rid = f"{name}__{UNCOUPLED[2]}__s{seed}__{budget:g}s__computed"
+        row = dict(run_id=rid, run_id_base=rid, set=a0.set, instance=name,
                    instance_path=a0.instance or "", arm=UNCOUPLED[2], seed=seed, budget=budget,
                    config_hash=a5.config_hash, synthetic=True, run_dir="",
                    attempt=max(_int(a0.run_json.get("attempt"), 0), _int(a5.run_json.get("attempt"), 0)))
@@ -974,7 +1004,7 @@ def _identity(run: Run) -> dict:
     ss = rc.get("solver_settings") if isinstance(rc.get("solver_settings"), dict) else None
     job = rj.get("job") if isinstance(rj.get("job"), dict) else {}
     emph = (ss or {}).get("emphasis") or job.get("emphasis") or ""
-    return dict(run_id=run.run_id, set=run.set, instance=run.name, instance_path=run.instance or "", arm=run.arm,
+    return dict(run_id=run.run_id, run_id_base=run.run_id.split(REUSE_SEP)[0], set=run.set, instance=run.name, instance_path=run.instance or "", arm=run.arm,
                 base_arm=str(rj.get("base_arm") or run.arm), seed=run.seed, budget=run.budget,
                 config_hash=run.config_hash, base_hash=str(rc.get("base_hash") or ""),
                 config_overrides=json.dumps(rc.get("overrides") or {}, sort_keys=True, default=str),
@@ -1100,7 +1130,7 @@ def _role_cols() -> dict:
 
 RUN_COLUMNS = {
     # identity
-    "run_id": "str", "set": "str", "instance": "str", "instance_path": "str", "arm": "str", "base_arm": "str",
+    "run_id": "str", "run_id_base": "str", "set": "str", "instance": "str", "instance_path": "str", "arm": "str", "base_arm": "str",
     "seed": "int", "budget": "float", "config_hash": "str", "base_hash": "str", "config_overrides": "str",
     "emphasis": "str", "solver_settings": "str", "parent_git_revs": "str", "synthetic": "bool", "status": "str",
     "void_cause": "str", "split": "str", "stratum": "str", "attempt": "int",

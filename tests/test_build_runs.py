@@ -410,3 +410,30 @@ def test_block_void_stays_inside_its_set(tmp_path):
     df, _ = B.build(raw, out, log=lambda *a: None)
     v = df.set_index("arm")["block_void"]
     assert bool(v["A6"]) and bool(v["A2"]) and not bool(v["A6m"])
+
+
+def test_a_job_rerun_in_another_set_gets_a_qualified_id(tmp_path):
+    """The same job run again in another set has the same run id (issue #33; the D-018 stage-1 A6 reruns): the earliest
+    keeps the bare id, the later one becomes `<run_id>#<set>` with `run_id_base` = the bare id, and each keeps its
+    own incumbents. The same id twice inside one set is still refused."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    make_run(raw, p, mps, "A6", 0, 10, {"cuopt": [(1.0, X_85, "self")]}, set_name="later",
+             run_json_extra={"created_epoch": 200.0})
+    make_run(raw, p, mps, "A6", 0, 10, {"cuopt": [(2.0, X_70, "self")]}, set_name="early",
+             run_json_extra={"created_epoch": 100.0})
+    df, inc = B.build(raw, out, log=lambda *a: None)
+    bare = "mixed__A6__s0__10s__cfg000000000"
+    assert sorted(df["run_id"]) == [bare, bare + "#later"]
+    assert set(df["run_id_base"]) == {bare}
+    r = df.set_index("run_id")
+    assert r.loc[bare, "set"] == "early" and r.loc[bare + "#later", "set"] == "later"
+    assert sorted(inc[inc["run_id"] == bare]["t"]) == [2.0]
+    assert sorted(inc[inc["run_id"] == bare + "#later"]["t"]) == [1.0]
+    assert B.parse_run_id(bare + "#later")["config_hash"] == "cfg000000000"
+    runs = [B.load_run(d, raw) for d in B.discover(raw)]
+    for r_ in runs:
+        r_.set = "same"
+    with pytest.raises(ValueError, match="inside one set"):
+        B.qualify_reused_ids(runs, log=lambda *a: None)
