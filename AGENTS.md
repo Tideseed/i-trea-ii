@@ -12,7 +12,7 @@ deferred (D-010 §5), so the hard pool is not frozen (#1). The algorithm is deve
 since 2026-10-07, `datasets/classprobe_set.csv`), both permanently excluded from the test set; every development
 result is descriptive and lives in `vault/30-results/Development log.md`. Development defaults: **A3** (SCIP ↔ EA) =
 `configs/itrea2-dev-rc-ld.yaml` (lp_decode adopted, D-017); **A9** (SCIP ↔ EA ← cuOpt, D-015) and its matched control A3x =
-`configs/itrea2-dev-rc-3way.yaml`, with the GPU back-off (D-018) past stage 0 (PROCEED) and stage 1 owed. Built and
+`configs/itrea2-dev-rc-3way.yaml`, with the GPU back-off (D-018) **not adopted** after stage 1 (2026-10-11: outcome rules held, mechanism M1/M3/M5 failed; next candidate phase Y only). Built and
 not adopted: Rank 1 by cuOpt's clearing rule (D-016). A9 pilot (seed 0, 7 instances, descriptive): vs SCIP alone 7
 better / 0 worse, mean d +0.68 [+0.42, +0.90]; vs cuOpt alone 3 / 4, −0.07 [−0.42, +0.25]. Tests on 2026-10-09: CPU
 suite 816 passed, the GPU tests of the new code 40 passed. **v1 target (D-019, Berk 2026-10-10):** checkpoint C1 on
@@ -79,6 +79,8 @@ unseen hard instances and an external run under Mittelmann's MIPfeas protocol. T
 | unseen hard instances: A9 vs cuOpt alone on W_cuOpt | mean d > 0, 95 % CI > 0 | mean P −25 %, ≥ 60 % of W_cuOpt improved | −40 % |
 | guard, all instances | mean d ≥ −0.05 against each solver alone | | |
 | MIPfeas protocol (233 instances, 600 s) | A9's geo-mean ≤ our own cuOpt-26.10-alone geo-mean on the same GB10 | mean PI −25 % on the hard part (our cuOpt-alone PI ≥ 0.1 or no solution) and geo-mean −10 % | geo-mean ≤ 0.0274 (SCIPConc-11, published) |
+
+**External benchmark = our own standard D-021 (ITX-1), accepted by Berk 2026-10-11:** equal footprint F = A9's layout for every GPU arm (A6F = cuOpt alone on F), no whole-box run, call clock deciding with claims on both clocks, 600 s, independent hard / weak sets (GAMS's cuOpt-GB10 row, our screening), decisions on the unseen instances (215 after M3's "does not fit F" list), an ε-floored guard + solutions found as the minimum, the shift-0.001 geo-mean reported, not decisive. D-019's literal readings are reported beside.
 
 The external targets are anchored to our own same-version cuOpt run because Mittelmann publishes only cuOpt 26.08 and
 only aggregates (cuOpt-26.08 on GB10: 0.0393). Milestones (GitHub): **C1 checkpoint (2026-10-23)** — #23 (D-018 stage
