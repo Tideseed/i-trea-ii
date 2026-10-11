@@ -210,6 +210,56 @@ def test_lane_must_fit(toy, tmp_path):
         pair.job_budget(job(toy, "A3"), o)
 
 
+def test_existing_run_hashes_are_pinned():
+    """Adding an arm must not move any existing run id (run directories, the Experiment index and D-018's records
+    name these hashes)."""
+    o = pair.PairOptions()
+
+    def h(arm, config=None, variant=None):
+        j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm=arm, seed=0, budget=120, config=config)
+        if variant:
+            j["variant"] = variant
+        return pair.run_hash(j, o)
+    assert h("A6") == h("A6", "configs/itrea2-default.yaml") == "6e35f122f659"
+    assert h("A2") == "125d69c76695" and h("A0") == "27f3171fac78"
+    assert h("A9", "configs/itrea2-dev-rc-3way-bo1.yaml", "bo1") == "f67354be775d"
+    assert h("A9", "configs/itrea2-dev-rc-3way-bo1s.yaml", "bo1s") == "62bf82b236f6"
+    assert h("A3x", "configs/itrea2-dev-rc-3way.yaml") == "1d12ad490dd0"
+
+
+def test_a6m_identity_settings_and_lane(toy, tmp_path):
+    """A6m (D-020): cuOpt as GAMS ran it — 24 threads and zero MIP gaps whatever the lane, every core of the whole-box
+    lane, its own run hash (encoding both), refused on any other lane; the whole-box lane refuses every other arm."""
+    o = opts_for(tmp_path, use_systemd=True, pin=True, lane=pair.FULL_LANE, cuopt_mem_gb=24.0, gpu_mem_gb=36.0)
+    j = job(toy, "A6m", seed=0, budget=600)
+    ss = pair.solver_settings(j, o, pair.effective_config(j, o)[0])
+    assert ss == dict(arm="A6m", emphasis=None, gpu_mem_gb=36.0, cuopt_threads=24, mip_gap_zero=True)
+    a6 = dict(j, arm="A6")
+    assert "mip_gap_zero" not in pair.solver_settings(a6, o, pair.effective_config(a6, o)[0])
+    assert pair.run_hash(j, o) != pair.run_hash(a6, o)
+    assert pair.run_hash(j, o) != pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, gpu_mem_gb=12.0))
+    assert pair.run_hash(j, o) == pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, gpu_mem_gb=36.0,
+                                                            cuopt_threads=24))
+    cfg, _ = pair.effective_config(j, o)
+    rd = tmp_path / "traces" / "raw" / "pytest" / pair.run_id_for(j, o)
+    (c,) = pair.plan(j, o, rd, "SPEC", cfg)
+    assert c.cores == list(range(20)) and c.mem_gb == 24.0 and c.gpu_gb == 36.0
+    assert c.argv[c.argv.index("--cpu-threads") + 1] == "24" and "--mip-gap-zero" in c.argv
+    assert c.argv[c.argv.index("--gpu-mem-gb") + 1] == "36.0" and "--send" not in c.argv
+    assert c.cmd[c.cmd.index("taskset") + 2] == ",".join(map(str, range(20)))
+    b = pair.job_budget(j, o)
+    assert (b.host_caps_gb, b.gpu_caps_gb, b.cuda_procs) == (24.0, 36.0, 1)
+    assert b.need_gb == pytest.approx(24 + 36 + 1 + gates.RESERVE_GB) == 81.0       # D-020's 81 GB (file mailbox)
+    with pytest.raises(pair.RunError, match="whole-box lane"):
+        pair.job_budget(j, opts_for(tmp_path, gpu_mem_gb=36.0))                     # the GPU lane g0
+    with pytest.raises(pair.RunError, match="runs only A6m"):
+        pair.job_budget(job(toy, "A6"), o)
+    with pytest.raises(pair.RunError, match="fixed by the arm"):
+        pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, cuopt_threads=3))
+    assert not pair.GPU_LANE.fits(pair.ARMS["A6m"]) and pair.FULL_LANE.fits(pair.ARMS["A6m"])
+    assert not pair.FULL_LANE.fits(pair.ARMS["A2"]) and pair.GPU_LANE.fits(pair.ARMS["A6"])
+
+
 # ------------------------------------------------------------------------------------------- fake processes
 def test_fake_pair_completes_and_merges(toy, fake, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_BASE_SOLVER2", "90")      # minimisation: solver2 is better from the start
