@@ -587,3 +587,37 @@ directions (a refuted premise), deviation proposed in D-018. Verdict by the lett
 Stage 0 complete (2026-10-09 19:16, comp21 block): comp21's cuOpt-inside P stays above cuOpt alone at every duty
 (0.69 / 0.60 / 0.62 / 0.59 at 1 / ½ / ¼ / ⅛ vs 0.52) → the floor goes to ⅛ by the rule's shortfall; D_Y = ½. Verdict
 PROCEED; bo1 / bo1s written (D-018 "Stage 0 complete").
+
+## A9 GPU back-off — D-018 stage 1 (2026-10-11 09:40–13:40) — A9@bo1 vs A9@bo1s + same-day A6, 14 × seeds 0–1 — NOT ADOPTED
+Pools 20261011-094039-3927304 (seed 0) and 20261011-112456-173723 (seed 1): 82 completed, 2 failed (ca seed 1, A6 and
+A9@bo1: cuOpt's 12-GB RMM limit, "Memory allocation failed" at 78 s / 83 s; kept as D-002 §6 keeps crashes), 0 void,
+0 compile on the clock. `itrea backoff-report --stage 1 --failed keep` (main after 2a18819; `_band` fixed to read the
+control `A9@bo1s`, see the decision record).
+
+| instance | P A6 | P bo1s (ctrl) | P bo1 | d bo1 vs ctrl | band |
+|---|---|---|---|---|---|
+| chromaticindex1024-7 | 0.083 | 0.545 | 0.091 | +0.834 | 0.05 |
+| neos-3656078-kumeu | 0.095 | 0.116 | 0.090 | +0.227 | 0.40 |
+| comp21-2idx | 0.507 | 0.575 | 0.557 | +0.032 | 0.08 |
+| neos-4763324-toguru | 0.574 | 0.598 | 0.616 | −0.030 | 0.06 |
+| item_placement_9903 | 0.643 | 0.308 | 0.319 | −0.037 | 0.26 |
+| ca__Scenario400_reserves_1 | 0.671 | 0.394 | 0.296 | +0.249 | 0.05 |
+| neos-3024952-loue | 0.749 | 0.539 | 0.492 | +0.087 | 0.10 |
+| neos-2657525-crna | 0.771 | 0.394 | 0.439 | −0.103 | 0.87 |
+| neos-960392 | 0.637 | 0.057 | 0.058 | −0.004 | 0.21 |
+| glass4 | 0.339 | 0.237 | 0.224 | +0.054 | 0.22 |
+| sing44 | 0.755 | 0.434 | 0.384 | +0.116 | 0.10 |
+| neos-3004026-krka | 0.005 | 0.003 | 0.006 | −0.498 | 0.71 |
+| fhnw-binpack4-48 | 0.006 | 0.012 | 0.009 | +0.214 | 0.26 |
+| radiationm18-12-05 | 0.011 | 0.013 | 0.013 | +0.026 | 0.38 |
+
+- Outcome rules all hold: T (chromaticindex d +0.834, P 0.091), G, ladder, floor, mean over 11 non-floor +0.130.
+- Mechanism fails: M1 (toguru phase-Y exit 0.56 / 0.80 s after cuOpt's first incumbent, rule 0.5 s), M3 (EA leads not
+  protected: item_placement 196 vs 289 and 143 vs 292, loue s1, crna s1), M5 (LS cap hits per call up on ca).
+- bo1 vs bo1s: 9 better / 5 worse, mean d +0.083 [−0.054, +0.232].
+- vs cuOpt alone (A6, 3 A725 cores): bo1s 8 / 6, +0.135 [−0.109, +0.362]; bo1 8 / 6, +0.195 [+0.016, +0.383]; cuOpt's
+  weak set here (8): P 0.663 → 0.412 (bo1s, −38 %) / 0.395 (bo1, −40 %), d +0.360 [+0.150, +0.571] / +0.384 [+0.172,
+  +0.593]. vs SCIP alone (A0 of dev / classprobe): 14 / 0 for both, d +0.600 [+0.452, +0.753] / +0.649 [+0.502,
+  +0.798]. Weak sets selected on the compared control runs (descriptive).
+- crna is bimodal: control 0.698 / 0.090, bo1 0.144 / 0.734 by seed — the EA either leads early or not at all.
+- Next candidate: phase Y only (no ladder), its own record.

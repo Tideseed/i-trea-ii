@@ -643,3 +643,14 @@ def test_build_runs_backoff_columns(tmp_path):
     assert set(cols) <= set(BRN.RUN_COLUMNS)
     plain = make_run(tmp_path, "x", "toy", "A3", 0, 0.1)
     assert BRN.backoff_stats(BRN.load_run(Path(plain["run_dir"]))) == {}
+
+
+def test_stage1_band_uses_the_control_spread():
+    """D-018: band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference of the control or of A6); the control is
+    CTRL1 (A9@bo1s), not A9@bo0 (bug found 2026-10-11: the band read bo0, which stage 1 never runs)."""
+    from itrea.analysis import backoff as B
+    R = {("x", B.CTRL1, 0): {"pt": 0.698}, ("x", B.CTRL1, 1): {"pt": 0.090},
+         ("x", B.A6, 0): {"pt": 0.758}, ("x", B.A6, 1): {"pt": 0.783}}
+    assert abs(B._band(R, "x") - B.bounded(0.698, 0.090)) < 1e-12
+    R2 = {("y", B.A6, 0): {"pt": 0.5}, ("y", B.A6, 1): {"pt": 0.5}}
+    assert B._band(R2, "y") == B.BAND_MIN

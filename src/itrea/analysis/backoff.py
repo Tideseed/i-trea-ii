@@ -617,8 +617,11 @@ def _d(R, inst, arm, ctrl, col="pt") -> tuple[float, float, float]:
 
 
 def _band(R, inst) -> float:
+    """band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference of the CONTROL or of A6) (D-018). The control
+    is CTRL1 since 2026-10-09; until 2026-10-11 this read BO0, which stage 1 never runs, so every band fell back to A6's
+    spread (or 0.05) — fixed before the stage-1 verdict was recorded (journal 2026-10-11)."""
     vals = []
-    for arm in (BO0, A6):
+    for arm in (CTRL1, A6):
         p = _pmeans(R, inst, arm)
         if 0 in p and 1 in p:
             vals.append(bounded(p[0], p[1]))
@@ -1083,8 +1086,10 @@ def print_stage0(res: dict, out=sys.stdout) -> None:
 
 def print_stage1(res: dict, out=sys.stdout) -> None:
     p = lambda *a: print(*a, file=out)  # noqa: E731
-    p(f"Stage 1 — A9@bo1 (active) vs A9@bo0 (shadow), set {res['set']}")
-    p("instance                       P bo0   P bo1   d       band   d bo0|A6  d bo1|A6")
+    p(f"Stage 1 — {BO1} (active) vs {CTRL1} (shadow control), set {res['set']}")
+    for n in res.get("kept_failed", []):
+        p(f"   kept as failed (D-002 §6: kept, truncated at the crash): {n}")
+    p("instance                       P ctrl  P bo1   d       band   d ctrl|A6 d bo1|A6")
     for i, e in res["effects"].items():
         p(f"{i:<30} {_fmt(e['p_bo0']):<7} {_fmt(e['p_bo1']):<7} {_fmt(e['d']):<7} {_fmt(e['band'], 2):<6} "
           f"{_fmt(e['d_bo0_vs_A6']):<9} {_fmt(e['d_bo1_vs_A6'])}")
@@ -1159,6 +1164,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--incumbents", default=str(DATASETS / "incumbents_checked.parquet"))
     ap.add_argument("--root", default=str(ROOT), help="root of the run_dir paths in the run table")
     ap.add_argument("--json", default=None, help="also write the result as JSON here")
+    ap.add_argument("--failed", choices=("exclude", "keep"), default="exclude",
+                    help="stage 1: failed runs are excluded (default: the verdict needs every run completed) or kept "
+                         "as D-002 §6 keeps crashes — truncated at the crash, as build-runs already scores them "
+                         "(stated deviation of 2026-10-11: cuOpt's RMM limit hit on ca seed 1)")
     ap.add_argument("--steps-gate", action="store_true",
                     help="stage 0: let the lane-steps limb gate the sanity check (the rule as first written, before "
                          "the D-018 deviation of 2026-10-09)")
@@ -1175,7 +1184,14 @@ def main(argv: list[str] | None = None) -> int:
         res = stage0(runs, inc, a.set_ or "backoff0", Path(a.root), steps_gate=a.steps_gate)
         print_stage0(res)
     else:
+        kept = []
+        if a.failed == "keep":
+            sel = (runs["set"] == (a.set_ or "backoff1")) & (runs["status"] == "failed")
+            kept = sorted(runs.loc[sel, "run_id"].astype(str))
+            runs = runs.copy()
+            runs.loc[sel, "status"] = "completed"
         res = stage1(runs, inc, a.set_ or "backoff1", Path(a.root), stage0_set=a.stage0_set)
+        res["kept_failed"] = kept
         print_stage1(res)
     if a.json:
         Path(a.json).write_text(json.dumps(_jsonable(res), indent=1, default=str))

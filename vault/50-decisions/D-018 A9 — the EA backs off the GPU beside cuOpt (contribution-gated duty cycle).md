@@ -1,6 +1,6 @@
 # D-018 A9 — the EA backs off the GPU beside cuOpt by a contribution-gated duty cycle (2026-10-09, AgentRA on Berk's word)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's "let's get to work"
+**Status:** stage 1 complete 2026-10-11 — **NOT ADOPTED** (mechanism M1, M3, M5 fail; every outcome rule holds; see "Stage 1 result"). Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's "let's get to work"
 (2026-10-08) and "Go ahead for another round" (2026-10-09); open to a superseding decision on evidence. Issues #23 → #26.
 Development only (D-010). Full design, evidence and alternatives: [[2026-10-08 A9 GPU back-off design (workflow)]] (three
 designs, two adversarial judges); this record fixes what is built and the tests before anything runs.
@@ -120,3 +120,42 @@ the run without the governor), and with bo1's values its would-be timeline is bo
 comparison is unchanged. Jobs: `jobs/dev-backoff1-s0.jsonl`, `-s1.jsonl` (42 runs each, one window per seed).
 Known risk carried into stage 1: with the floor at ⅛ the design's risk 3 (a late lead delayed by 1/D_min, glass4) is
 live; glass4 is a binding guard. The ⅛ chromaticindex anomaly concerns forced duty from t0 — under bo1 phase Y runs at ½.
+
+## Stage 1 result (2026-10-11 09:40–13:40) — verdict NOT ADOPTED (mechanism M1, M3, M5 fail; every outcome rule holds)
+Pools 20261011-094039-3927304 (seed 0, 42/42) and 20261011-112456-173723 (seed 1, 40 completed + 2 failed), one lease
+(the two seeds ran as two pools in one daytime window; no block split), 0 void, 0 compile on the clock; analysis
+`itrea backoff-report --stage 1` on main 2a18819 + the fixes below.
+- **Two failed runs (stated deviation, the third of D-018):** ca seed 1, A6 and A9@bo1 — cuOpt hit its 12-GB RMM limit
+  (peaks 12.64 GB; A9@bo1s seed 1 and every seed-0 ca run peaked at 7.68 GB) and stopped with "Memory allocation failed"
+  at 78 s / 83 s; SCIP and the EA ran to 120 s. Read as D-002 §6 reads crashes (kept, truncated at the crash:
+  `--failed keep`); with them excluded the report is INCOMPLETE (2 missing runs) but every failing criterion below is
+  unchanged. The cap is the 12-GB partner limit D-021 R29 raises to 24 GB.
+- **Analysis bug found and fixed before the verdict was recorded:** `_band` read the seed spread of `A9@bo0` — the old
+  control, which stage 1 never runs — instead of the control `A9@bo1s` (switched 2026-10-09 before stage 1), so every
+  band fell back to A6's spread or 0.05. The rule as written ("the larger seed-0 vs seed-1 bounded difference of bo0
+  [= the control] or of A6") is now what the code does (test added). Effect: crna's band 0.05 → 0.87 (the control's
+  seeds: 0.698 / 0.090), so G holds; before the fix G also failed on crna (d −0.103).
+- **Outcome (all hold):** T — chromaticindex d **+0.834**, P 0.545 → **0.091** (A6 alone 0.083): the back-off gives cuOpt
+  its first incumbent back. G — every binding guard within its band (item_placement −0.037 / 0.26, ca +0.249,
+  loue +0.087, crna −0.103 / 0.87, glass4 +0.054, sing44 +0.116), neos-960392 ΔP −0.000, guard mean +0.052, every guard
+  still beats A6. Ladder targets hold (mean d +0.076). Floor holds (|ΔP| ≤ 0.003). Mean over the 11 non-floor instances
+  **+0.130**.
+- **Mechanism (fails):** M1 — phase Y left 0.56 s / 0.80 s after cuOpt's first incumbent on toguru (rule 0.5 s; every
+  other instance within). M3 — the EA's leads are not protected: item_placement 196 vs 289 leads (seed 0) and 143 vs 292
+  (seed 1) with level-0 share 0.58 / 0.71, loue seed 1 2 vs 10, crna seed 1 0 vs 7. M5 — local-search cap hits per call
+  higher under bo1 on ca (0.77 vs 0.61) and item_placement. M2 and M4 hold.
+- **All arms vs the solvers alone** (descriptive, development instances, A6 on 3 A725 cores — D-021's footprint
+  objection applies; failed runs kept):
+  - vs cuOpt alone (same-day A6): A9@bo1s 8 better / 6 worse, mean d +0.135 [−0.109, +0.362]; A9@bo1 8 / 6, **+0.195
+    [+0.016, +0.383]**. On cuOpt's weak set here (8 instances with A6 P ≥ 0.5): bo1s 6 / 2, mean P 0.663 → 0.412 (−38 %),
+    d +0.360 [+0.150, +0.571]; bo1 6 / 2, 0.663 → **0.395 (−40 %)**, d +0.384 [+0.172, +0.593].
+  - vs SCIP alone (A0 of `dev` / `classprobe`, earlier days, same seeds): bo1s 14 / 0, d +0.600 [+0.452, +0.753]; bo1
+    14 / 0, +0.649 [+0.502, +0.798]; SCIP's weak set (12): P 0.862 → 0.331 (bo1s) / 0.280 (bo1).
+  - bo1 vs bo1s: 9 / 5, mean d +0.083 [−0.054, +0.232].
+  - Weak sets here are selected on the same control runs they are compared with (D-021's selection bias applies).
+- **Decision:** bo1 is **not adopted**; A9's development default stays `configs/itrea2-dev-rc-3way.yaml` (whose
+  behaviour = bo1s, shadow bookkeeping only). The mechanism reading: phase Y (yield until cuOpt's first incumbent) does
+  what T needs; the patience ladder afterwards steps down while the EA still leads (M3). **Next candidate (not decided
+  here; its own record, test fixed first):** phase Y only — yield until cuOpt's first incumbent, then full duty, no
+  ladder — against the same control; and M1's exit latency (peek period). Seeds 3–4 are not owed: no outcome rule sits
+  inside its band.
