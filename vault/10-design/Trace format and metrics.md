@@ -360,7 +360,8 @@ time unless `--recheck`.
   Rank 1's spread (D-016) has no column: `tools/d016_report.py` reads `final_r1_*`, `rank1_cleared` and
   `compiled_on_clock` from the EA summaries and the last `frontier` event's `max_dist` from the events;
   `crashed`, `crashed_roles`, `crash_t`, `exit_codes`; `gpu_arm`, `gpu_health`,
-  `gpu_median_sm_mhz`, `gpu_foreign_share`, `gpu_void`, `block_void` (every run of a voided block);
+  `gpu_median_sm_mhz`, `gpu_foreign_share`, `gpu_void`, `block_void` (every run of a voided block: set × instance ×
+  seed × budget, so a void in one set never voids another set's runs);
 - resources and covariates: `<role>_startup_s`, `startup_s`, `exchange_s`, `exchange_bytes`, `solver_nodes_per_s`,
   `solver_lp_iter_per_s`, `solver_status`, `solver_exit_reason`, `solved_optimal`, `backend`, `backend_mismatch`;
 - frontier and exchange window: `frontier_size`, `frontier_hv`, `frontier_mean_pairwise`, `frontier_max_dist`,

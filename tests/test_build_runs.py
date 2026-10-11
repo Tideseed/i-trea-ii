@@ -395,3 +395,18 @@ def test_gams_integral_on_the_call_and_the_launch_clock(tmp_path):
     assert np.isnan(r.loc["A6", "startup_offset_s"]) and np.isnan(r.loc["A6", "pt_gams_launch"])
     assert bool(r.loc["A6m", "gpu_arm"]) and r.loc["A6m", "t_first"] == 2.0 and bool(r.loc["A6m", "t_first_event"])
     assert {"pt_gams", "pt_gams_launch", "startup_offset_s"} <= set(B.RUN_COLUMNS)
+
+
+def test_block_void_stays_inside_its_set(tmp_path):
+    """A void run voids its block = set × instance × seed × budget: the same instance, seed and budget in another set
+    (the MIPfeas calibration beside a development set, say) keeps its runs (review 2026-10-11)."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    make_run(raw, p, mps, "A6", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="setx",
+             gpu_health={"verdict": "void", "median_sm_mhz": 800.0, "foreign_share": 0.0})
+    make_run(raw, p, mps, "A2", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="setx")
+    make_run(raw, p, mps, "A6m", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="sety")
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    v = df.set_index("arm")["block_void"]
+    assert bool(v["A6"]) and bool(v["A2"]) and not bool(v["A6m"])

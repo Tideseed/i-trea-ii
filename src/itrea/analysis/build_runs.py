@@ -64,7 +64,8 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   after SCIP proved optimality) is not a crash.
 - **GPU-health voiding:** a GPU run whose `run.json["gpu_health"]` verdict is "void" (median busy SM clock < 2,000 MHz
   or foreign GPU processes in > 2 % of samples; `itrea.experiments.gpu_health`) sets `gpu_void`, and every run of its
-  block (instance × seed × budget) gets `block_void`.
+  block (set × instance × seed × budget: a void run of one set never voids another set's runs of the same instance,
+  e.g. the MIPfeas calibration's) gets `block_void`.
 
 Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`;
 the stem may itself contain "__", so the id is parsed from the right). Keys read, all optional (`.get`):
@@ -938,7 +939,8 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
     if len(df):
         void = df["gpu_void"].fillna(False).astype(bool) | (df.get("status", pd.Series("", index=df.index))
                                                              .fillna("") == "void")
-        df["block_void"] = void.groupby([df["instance"], df["seed"], df["budget"]]).transform("any").astype(bool)
+        df["block_void"] = void.groupby([df["set"], df["instance"], df["seed"], df["budget"]]) \
+            .transform("any").astype(bool)
     df = _normalise(df, RUN_COLUMNS).sort_values("run_id", kind="mergesort").reset_index(drop=True)
     if write:
         out_dir.mkdir(parents=True, exist_ok=True)
