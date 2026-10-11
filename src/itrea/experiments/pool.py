@@ -13,13 +13,17 @@ time, so the partner footprint is identical for cuOpt and the EA. Solver-only ar
 the same lane (serial, the default) or on `--cpu-lanes N` fixed CPU lanes when the E0 calibration found the
 interference small (`configs/e0-calibration.yaml`: `cpu_arms_concurrent: true`). The screening layout has NINE
 single-core X925 lanes and no GPU lane: 9 x 9 GiB + the 20 GB reserve = 101 GB fits the ~108 GB MemAvailable with both
-model servers stopped; ten lanes (110 GB) never could.
+model servers stopped; ten lanes (110 GB) never could. The **full** layout (D-020) is one lane `full` holding all 20
+cores and the GPU, for arm A6m (cuOpt as GAMS ran it for MIPfeas) only: any other arm is refused under it and A6m under
+any other layout; it implies the serving check (both local model servers stopped, `--allow-serving` refused) and D-020's
+memory settings for A6m (`--cuopt-mem-gb 24 --gpu-mem-gb 36`: 24 + 36 + 1 CUDA + 20 reserve = 81 GB with the file
+mailbox). The runner's own threads (RUNNER_CORES) share that lane's cores: a small load, recorded in run.json.
 
 Gates before EVERY run, re-evaluated together in one loop until a single pass clears them all (a long thermal or memory
 wait never releases a run on a stale lease or serving check): the box-window lease (`i-trea-ii (Claude Code)`), the
-local model servers stopped for test and screening jobs, fan-governor's rest flag (D-009), the thermal start gate
-(< 80 °C GPU arms, < 88 °C CPU-only arms, D-008), and D-003's memory formula
-over the run plus every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the
+local model servers stopped for test and screening jobs and on the whole-box lane, fan-governor's rest flag (D-009),
+the thermal start gate (< 80 °C GPU arms, < 88 °C CPU-only arms, D-008), and D-003's memory formula over the run plus
+every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the
 admitted runs already use is credited back, since MemAvailable no longer contains it). Admission is atomic. A memory
 wait that times out voids and requeues its block while other runs are in flight, and halts only when nothing is. A live
 watchdog stops the run set below 18 GB free (halt) or at ≥ 92 °C (pause: the blocks in flight are voided and rerun once
@@ -38,6 +42,7 @@ Adapted in part from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/po
     python -m itrea.experiments.pool jobs/screen1.jsonl --layout screen
     python -m itrea.experiments.pool jobs/e2.jsonl --mailbox redis --deadline 07:15
     python -m itrea.experiments.pool jobs/x.jsonl --dry-run
+    python -m itrea.experiments.pool jobs/mipfeas-cal-26.08.jsonl --layout full --cuopt-mem-gb 24 --gpu-mem-gb 36
 """
 from __future__ import annotations
 
@@ -81,6 +86,9 @@ PAIR_CPU_LANES = (pair.Lane("c1", (7, 8)), pair.Lane("c2", (9, 15)), pair.Lane("
                   pair.Lane("c4", (18, 19)))
 # nine, not ten: D-003's gate (Σ 9 GiB caps + 20 GB reserve) must fit MemAvailable (~108 GB, both servers stopped)
 SCREEN_LANES = tuple(pair.Lane(f"x{c}", (c,)) for c in (5, 6, 7, 8, 9, 15, 16, 17, 18))
+FULL_ARMS = tuple(a for a, spec in pair.ARMS.items() if spec.lane == "full")     # ("A6m",): the whole-box lane's arms
+A6M_MEM_GB = dict(cuopt_mem_gb=24.0, gpu_mem_gb=36.0)    # D-020: A6m's host MemoryMax and RMM limit (GAMS's max RSS
+                                                         # <= 16 GB on the sample, 49 GB at most over the 233)
 # harness settings a run may not change from PairOptions() defaults, per split (D-002 §1.2 / §1.8, D-003)
 REGISTERED_HARNESS = {
     "test": ("gpu_mem_gb", "pin", "solver_mem_gb", "ea_mem_gb", "cuopt_mem_gb", "cuopt_threads", "use_systemd"),
@@ -309,6 +317,32 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
     return out
 
 
+def check_layout(jobs: list[dict], layout: str) -> None:
+    """The whole-box lane and its arms go together (D-020): `--layout full` runs FULL_ARMS only, and those arms run only
+    under it. Raises PoolError."""
+    full = sorted({pair.arm_label(j) for j in jobs if pair.arm_spec(j).lane == "full"})
+    other = sorted({pair.arm_label(j) for j in jobs if pair.arm_spec(j).lane != "full"})
+    if layout == "full" and other:
+        raise PoolError(f"--layout full (all 20 cores, one run at a time) runs only {', '.join(FULL_ARMS)} (D-020); "
+                        f"the job file also has {other}")
+    if layout != "full" and full:
+        raise PoolError(f"{full} run only under --layout full (D-020: cuOpt as GAMS ran it, on all 20 cores), not "
+                        f"--layout {layout}")
+
+
+def check_a6m_memory(jobs: list[dict], po: pair.PairOptions) -> None:
+    """A6m runs with D-020's host MemoryMax and RMM limit (A6M_MEM_GB). The RMM limit is in the run hash; MemoryMax is
+    not, so without this check a run under a smaller cap would carry the calibration's run id. Raises GateError."""
+    a6m = [j for j in jobs if pair.arm_spec(j).lane == "full"]
+    if not a6m:
+        return
+    rmm = {pair.effective_config(j, po)[0].gpu_mem_gb for j in a6m}
+    if po.cuopt_mem_gb != A6M_MEM_GB["cuopt_mem_gb"] or rmm != {A6M_MEM_GB["gpu_mem_gb"]}:
+        raise gates.GateError(f"A6m runs with D-020's memory settings: --cuopt-mem-gb {A6M_MEM_GB['cuopt_mem_gb']:g} "
+                              f"--gpu-mem-gb {A6M_MEM_GB['gpu_mem_gb']:g} (got host MemoryMax {po.cuopt_mem_gb:g} GB, "
+                              f"RMM limit {sorted(rmm)} GB)")
+
+
 def check_registered_harness(jobs: list[dict], po: pair.PairOptions) -> None:
     """Test and screening jobs run with the registered harness settings only (PairOptions() defaults): the CLI's
     --gpu-mem-gb (the EA pool and, with population.size_rule: memory, P; cuOpt's RMM limit in A2), --no-pin,
@@ -348,7 +382,8 @@ def e0_concurrent(root: Path | None = None) -> bool | None:
 class PoolOptions:
     who: str = WHO
     require_lease: bool = True             # False only for toy smoke tests (every job split == "smoke")
-    layout: str = "pair"                   # "pair" (GPU lane + CPU lanes) | "screen" (nine single X925 lanes)
+    layout: str = "pair"                   # "pair" (GPU lane + CPU lanes) | "screen" (nine single X925 lanes) |
+                                           # "full" (one lane, all 20 cores and the GPU: A6m only, D-020)
     cpu_lanes: int = 0                     # pair: CPU lanes beside the GPU lane (0 = serial); screen: lanes used
     deadline: datetime | None = None       # no NEW block whose estimate ends after this
     allow_unfrozen: bool = False
@@ -445,12 +480,18 @@ class Pool:
                                 f"the 20 GB reserve is what MemAvailable (~108 GB, both model servers stopped) holds "
                                 f"(D-002 §1.2, D-003)")
             return list(SCREEN_LANES[:n])
+        if o.layout == "full":
+            if int(o.cpu_lanes):
+                raise PoolError("--layout full is one lane holding every core: --cpu-lanes must be 0")
+            return [pair.FULL_LANE]
         raise PoolError(f"unknown layout {o.layout!r}")
 
     def _accepts(self, lane: pair.Lane, run: Run) -> bool:
         arm = pair.arm_spec(run.job)
         if not lane.fits(arm):
             return False
+        if lane.whole_box:      # the whole box: its own arms only (fits() already pairs them, D-020)
+            return arm.lane == "full"
         if lane.gpu:            # the GPU lane takes partner arms, and solver-only arms when there is no CPU lane
             return arm.lane == "partner" or len(self.lanes) == 1
         return arm.lane == "solo"
@@ -482,17 +523,20 @@ class Pool:
         po = o.pair_opts
         names, roots = make_jobs.candidate_names(), make_jobs.data_roots()
         smoke_only = all(j.get("split") == "smoke" and make_jobs.is_toy(j, names, roots) for j in self.jobs)
-        quiet = any(j.get("split") in QUIET_SPLITS for j in self.jobs)
+        check_layout(self.jobs, o.layout)
+        full = o.layout == "full"                  # D-020: the box to itself, no foreign GPU process
+        quiet = any(j.get("split") in QUIET_SPLITS for j in self.jobs) or full
         if not o.require_lease and not smoke_only:
             raise gates.GateError("--no-lease is for toy smoke tests only (every job split == 'smoke' on a toy "
                                   "instance outside data/)")
         if o.rerun_failed and any(j.get("split") in CONFIRM_SPLITS for j in self.jobs):
             raise gates.GateError("--rerun-failed is not allowed with test jobs (a crash is kept, D-002 §6)")
         if o.allow_serving and quiet:
-            raise gates.GateError("--allow-serving is not allowed with test or screening jobs (D-002 §1.2, D-003: both "
-                                  "local model servers stopped)")
+            raise gates.GateError("--allow-serving is not allowed with test or screening jobs or --layout full "
+                                  "(D-002 §1.2, D-003, D-020: both local model servers stopped)")
         self.freeze = check_frozen(self.jobs, o.allow_unfrozen, o.root)
         check_registered_harness(self.jobs, po)
+        check_a6m_memory(self.jobs, po)
         if o.layout == "pair" and o.cpu_lanes > 0 and not smoke_only and e0_concurrent(o.root) is not True:
             raise gates.GateError(f"--cpu-lanes {o.cpu_lanes} needs the E0 calibration flag "
                                   f"({E0_FLAG}: cpu_arms_concurrent: true); run serially (--cpu-lanes 0)")
@@ -792,7 +836,7 @@ class Pool:
             try:
                 if o.require_lease:
                     gates.check_lease(o.who)
-                if r.job.get("split") in QUIET_SPLITS:
+                if r.job.get("split") in QUIET_SPLITS or lane.whole_box:
                     gates.check_serving_stopped()
             except gates.GateError as e:
                 return ("halt", str(e))
@@ -1035,7 +1079,9 @@ def main(argv=None) -> int:
     ap.add_argument("jobs", type=Path)
     ap.add_argument("--who", default=WHO, help=f"must be {WHO!r}: the run set runs only under this project's lease")
     ap.add_argument("--no-lease", action="store_true", help="toy smoke tests only (every job split == smoke)")
-    ap.add_argument("--layout", choices=["pair", "screen"], default="pair")
+    ap.add_argument("--layout", choices=["pair", "screen", "full"], default="pair",
+                    help="pair: GPU lane g0 (+ --cpu-lanes); screen: nine X925 lanes; full: one lane with all 20 cores "
+                         "and the GPU, arm A6m only (D-020; needs --cuopt-mem-gb 24 --gpu-mem-gb 36)")
     ap.add_argument("--cpu-lanes", type=int, default=0)
     ap.add_argument("--mailbox", choices=["file", "redis"], default="file")
     ap.add_argument("--deadline", help="HH:MM or ISO time: no new block that would end after it")

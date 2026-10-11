@@ -27,7 +27,7 @@ for a in ("--instance", "--seed", "--budget", "--run-dir", "--mailbox", "--sol-o
           "--role-name", "--config", "--cpu-threads", "--inject-band", "--inject-k", "--emphasis", "--run-id",
           "--gpu-mem-gb"):
     ap.add_argument(a)
-for f in ("--recv", "--send", "--inert", "--no-barrier"):
+for f in ("--recv", "--send", "--inert", "--no-barrier", "--mip-gap-zero"):
     ap.add_argument(f, action="store_true")
 a = ap.parse_args()
 role = a.role_name or os.environ.get("ITREA_ROLE", "solver")
@@ -309,6 +309,62 @@ def test_screen_layout_rejects_partner_arms(env):
     tmp_path, fake, insts = env
     p = pool.Pool(_jobs(insts[:1], ["A2"]), popts(tmp_path, fake, layout="screen", cpu_lanes=2))
     assert p.run() == 2
+
+
+def _full(tmp_path, fake, rmm=36.0, host=24.0, **kw) -> pool.PoolOptions:
+    o = popts(tmp_path, fake, layout="full", **kw)
+    o.pair_opts.cuopt_mem_gb, o.pair_opts.gpu_mem_gb = host, rmm
+    return o
+
+
+def test_full_layout_runs_a6m_on_every_core(env, monkeypatch):
+    """--layout full (D-020): one lane with all 20 cores; A6m pinned to all of them with 24 threads and zero gaps, the
+    memory record at D-020's 81 GB; the serving check is part of the layout (stubbed here)."""
+    tmp_path, fake, insts = env
+    seen = []
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: seen.append(1))
+    p = pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake))
+    assert p.run() == 0 and p.counts["completed"] == 1 and seen        # preflight and the per-run gate
+    (r,) = _records(tmp_path)
+    assert r["lane"]["name"] == "full" and r["lane"]["whole_box"] and "runner_cores" in r
+    (pr,) = r["processes"]
+    assert pr["cores"] == list(range(20)) and pr["memory_max_gb"] == 24.0 and pr["gpu_limit_gb"] == 36.0
+    assert "--mip-gap-zero" in pr["cmd"] and pr["cmd"][pr["cmd"].index("--cpu-threads") + 1] == "24"
+    assert r["memory_budget"]["need_gb"] == 81.0
+
+
+def test_full_layout_refusals(env, monkeypatch):
+    tmp_path, fake, insts = env
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert pool.Pool(_jobs(insts[:1], ["A6"]), _full(tmp_path, fake)).run() == 2          # another arm on the box
+    o = popts(tmp_path, fake)
+    o.pair_opts.cuopt_mem_gb, o.pair_opts.gpu_mem_gb = 24.0, 36.0
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), o).run() == 2                             # A6m on the pair layout
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, allow_serving=True)).run() == 2
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, rmm=12.0)).run() == 2   # D-020's memory only
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, host=12.0)).run() == 2
+    with pytest.raises(pool.PoolError, match="only under --layout full"):
+        pool.check_layout(_jobs(insts[:1], ["A6m"]), "pair")
+    with pytest.raises(pool.PoolError, match="runs only A6m"):
+        pool.check_layout(_jobs(insts[:1], ["A6m", "A6"]), "full")
+    with pytest.raises(pool.PoolError, match="cpu-lanes"):
+        pool.Pool([], _full(tmp_path, fake, cpu_lanes=1))._lanes()
+
+    def up(*a, **k):
+        raise gates.GateError("ornith-vllm is active")
+    monkeypatch.setattr(gates, "check_serving_stopped", up)                              # servers up: refused
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake)).run() == 2
+    assert not (tmp_path / "traces" / "raw").exists()
+
+
+def test_full_layout_dry_run_prints_the_need(env, capsys, monkeypatch):
+    tmp_path, fake, insts = env
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert pool.Pool(_jobs(insts, ["A6m"]), _full(tmp_path, fake, dry_run=True)).run() == 0
+    out = capsys.readouterr().out
+    assert "2 blocks, 2 runs" in out and "full(x925=(5, 6, 7, 8, 9, 15, 16, 17, 18, 19)" in out
+    assert "need up to 81.0 GB" in out and "preflight: passes" in out
+    assert not (tmp_path / "traces").exists()
 
 
 def _fake_run_pair(tmp_path, script):
