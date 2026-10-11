@@ -77,3 +77,14 @@ reach 600 s) + ≈ 1 min per run + rests: one daytime window. Seed 0, one run pe
   cost more than every later gain. A9 on MIPfeas should release cuOpt as soon as it is ready (#30, prereg-v2).
 - GAMS's data also gives per-instance P for SCIP 10.0.1, HiGHS 1.15.1, ReXi and SCIPConc on the Intel machine — usable
   to describe where cuOpt is weak on the 233 (D-013's weak set for the external run) without running them.
+
+## Addendum before any calibration run (2026-10-11 11:0x) — the scale statement corrected, the rule unchanged
+The builder (branch `dev-mipfeas`) re-computed the scale on the 30-instance sample itself instead of the 233: GAMS's own
+GB10 26.04 vs GB10 26.08 gives **R = 1.136 [0.909, 1.466]** (per-instance SD of the log ratio 0.68, not 0.51), and B200
+26.08 vs GB10 26.08 gives R = 0.92 [0.845, 1.007]; both would PASS the rule (feasible 28 and 27 vs 27). So on this sample
+the interval is about ×/÷ 1.28, not 1.2, and **the rule cannot tell cuOpt versions or GPUs apart that differ by 8–14 %**.
+What a PASS means is therefore "our harness reproduces GAMS's cuOpt-GB10 run within the spread of GAMS's own runs" — an
+error of roughly 30 % or more would show. The pass rule (0.870 ≤ R ≤ 1.150, feasible ±1) stays as fixed; the reading is
+this one. Other builder notes recorded: none of the 233 is a maximisation problem; `primalintegral.csv` has no GB10 26.04
+column (scored from its traces by the port); the port matches GAMS's function on all 3,495 traces of the archive
+(≤ 2.2e-16) and `primalintegral.csv` on the 233 GB10 26.08 traces.
