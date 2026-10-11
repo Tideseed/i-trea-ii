@@ -372,3 +372,26 @@ def test_prereg_ignores_smoke_runs_and_flags_ambiguity(tmp_path):
     twin = runs[(runs["instance"] == "i01") & (runs["arm"] == "A2")].assign(run_id="twin")
     with pytest.raises(PR.PreregError, match="several non-void runs"):
         PR.run(pd.concat([runs, twin], ignore_index=True), pool, hashes, git_check=False)
+
+
+def test_gams_integral_on_the_call_and_the_launch_clock(tmp_path):
+    """D-020: pt_gams is GAMS's integral on the call clock (times since t0), pt_gams_launch on the launch clock (every
+    time + startup_offset_s = t0_epoch − the first launch_epoch), both with T = the budget; NaN without the epochs."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    rj = dict(t0_epoch=1000.0, processes=[dict(role="solver", exit_code=0, launch_epoch=996.0),
+                                          dict(role="other", exit_code=0, launch_epoch=997.0)])
+    make_run(raw, p, mps, "A6m", 0, 10, {"solver": [(2.0, X_85, "self"), (6.0, X_70, "self")]}, run_json_extra=rj)
+    make_run(raw, p, mps, "A6", 0, 10, {"solver": [(2.0, X_85, "self"), (6.0, X_70, "self")]})
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    r = df.set_index("arm")
+    g = round(1.5 / 8.5, 6)                                 # reference 7.0 (best of study), GAMS's rounding
+    assert r.loc["A6m", "pt_gams"] == pytest.approx((2 * 2 + 4 * g) / 10, abs=1e-12)
+    assert r.loc["A6m", "startup_offset_s"] == 4.0
+    assert r.loc["A6m", "pt_gams_launch"] == pytest.approx((6 * 2 + 4 * g) / 10, abs=1e-12)   # 7.0 at 10 s = T: out
+    assert r.loc["A6m", "pt_mf"] == pytest.approx((2 * 2 + 4 * (1.5 / 8.5)) / 10)            # unchanged beside it
+    assert r.loc["A6", "pt_gams"] == r.loc["A6m", "pt_gams"]
+    assert np.isnan(r.loc["A6", "startup_offset_s"]) and np.isnan(r.loc["A6", "pt_gams_launch"])
+    assert bool(r.loc["A6m", "gpu_arm"]) and r.loc["A6m", "t_first"] == 2.0 and bool(r.loc["A6m", "t_first_event"])
+    assert {"pt_gams", "pt_gams_launch", "startup_offset_s"} <= set(B.RUN_COLUMNS)

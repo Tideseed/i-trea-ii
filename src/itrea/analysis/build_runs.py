@@ -28,6 +28,12 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   information only).
 - **Clock rule:** `n_inc_bad_t` / `pre_t0` count stored incumbents stamped before t0 (t < 0) or before the trace
   clock started (t NaN); prereg refuses such runs.
+- **MIPfeas, GAMS's integral exactly** (D-020, `metrics.gams_integral`), both with T = the run's budget: `pt_gams` on
+  the CALL clock (incumbent times since t0, as every metric here); `pt_gams_launch` on the LAUNCH clock, every
+  incumbent time plus `startup_offset_s` = run.json `t0_epoch` − min(`processes[*].launch_epoch`) (parse, CUDA context
+  and warm-up counted; an incumbent later than T − offset falls outside), NaN when the record lacks either epoch (and
+  for synthetic rows). The portfolio's first checked incumbent on the call clock is `t_first` (`t_first_event` false =
+  none by T). `pt_mf` (D-002 §4) is unchanged beside them.
 - **Post accounting** (D-002 integrity): every EA post up to T is tried-accepted, tried-rejected, superseded-untried (a
   newer post replaced it — the mailbox keeps only the latest) or pending-at-T, from the EA's `post` events and the
   solver's `verdict` events. Tried-accepted = `accepted` (the SCIP adapter's meaning: SCIP's own feasibility check
@@ -62,9 +68,9 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
 
 Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`;
 the stem may itself contain "__", so the id is parsed from the right). Keys read, all optional (`.get`):
-`run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, attempt, window_id, williams_pos,
+`run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, t0_epoch, attempt, window_id, williams_pos,
 git_rev | git_revision, prereg_tag, gpu_health {verdict, median_sm_mhz, foreign_share, gpu_run},
-processes [{role, exit_code | returncode}] or {role: {...}} or exit_codes {role: code};
+processes [{role, exit_code | returncode, launch_epoch}] or {role: {...}} or exit_codes {role: code};
 `<role>.summary.json`: instance, arm, seed, budget, config_hash, sense, t0, exit_reason, status, backend, solver,
 startup_s (number or {step: seconds}) | startup {step: seconds}, exchange_s, exchange_bytes (top level or counters);
 `<role>.events.jsonl` kinds: incumbent, bound, post, verdict, frontier, callback.
@@ -868,6 +874,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         row = _identity(run)
         row.update(_ref_cols(ref, s, study_best.get(run.name), run.name in conflict))
         row.update(_metric_cols(port, steps, ref, s, T, dual, study_best.get(run.name), set(run.summaries)))
+        row.update(launch_clock_cols(run, port, ref, s, T))
         rs_ = refs_screen[run.name]
         ps = M.primal_integral(port, rs_.value, s, T)
         share = M.sign_crossing_share(port, rs_.value, s, T)
@@ -1006,6 +1013,28 @@ def _metric_cols(port, steps: dict, ref: R.Reference, s: int, T: float, dual, bo
     return out
 
 
+def startup_offset(run: Run) -> float:
+    """Seconds from the first process's launch to t0 (D-020's launch clock): run.json `t0_epoch` − the smallest
+    `processes[*].launch_epoch`; NaN when either is missing."""
+    rj = run.run_json
+    procs = rj.get("processes")
+    if isinstance(procs, dict):
+        procs = list(procs.values())
+    le = [_fl(p.get("launch_epoch")) for p in procs or [] if isinstance(p, dict)]
+    le = [x for x in le if not math.isnan(x)]
+    t0e = _fl(rj.get("t0_epoch"))
+    return math.nan if (math.isnan(t0e) or not le) else t0e - min(le)
+
+
+def launch_clock_cols(run: Run, port, ref: R.Reference, s: int, T: float) -> dict:
+    """`startup_offset_s` and GAMS's integral on the launch clock (`pt_gams_launch`, module docstring)."""
+    off = startup_offset(run)
+    if math.isnan(off):
+        return dict(startup_offset_s=off, pt_gams_launch=math.nan)
+    return dict(startup_offset_s=off, pt_gams_launch=M.gams_integral([(t + off, v) for t, v in port], ref.value, s,
+                                                                      T).value)
+
+
 def _integrity_cols(run: Run, inc: pd.DataFrame) -> dict:
     g = inc[inc["run_id"] == run.run_id] if len(inc) else inc
     n_ev = {r: sum(1 for e in run.events.get(r, []) if e.get("kind") == "incumbent") for r in run.events}
@@ -1082,6 +1111,7 @@ RUN_COLUMNS = {
     "ref_zero_screen": "bool", "sign_crossing_screen": "bool", "sign_crossing_screen_any": "bool",
     "sign_crossing_screen_share": "float", "ref_zero": "bool", "sign_crossing": "bool", "sign_crossing_any": "bool",
     "sign_crossing_share": "float", "pt_mf": "float",
+    "pt_gams": "float", "pt_gams_launch": "float", "startup_offset_s": "float",   # D-020: call / launch clock
     "beats_ref": "bool", "beats_ref_t": "float", "t_first": "float", "t_first_event": "bool", "t_gap5": "float",
     "t_gap5_event": "bool", "t_gap1": "float", "t_gap1_event": "bool", "final_gap": "float", "best_obj": "float",
     "n_steps": "int", "pdi": "float",
