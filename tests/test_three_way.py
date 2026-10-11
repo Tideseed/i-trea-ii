@@ -511,7 +511,8 @@ def test_a3x_is_a9_without_cuopt(toy_mps, tmp_path):
         (b3.host_caps_gb, b3.gpu_caps_gb, b3.cuda_procs, b3.need_gb)
     ax = pair.ARMS["A3x"]
     assert ax.n_x925 == 2 and not ax.needs_a725 and lane.fits(ax) and ax.gpu and ax.lane == "partner"
-    assert pair.ARM_ORDER[-2:] == ("A9", "A3x") and pair.ARM_ORDER.index("A3") < pair.ARM_ORDER.index("A9")
+    before_a6m = pair.ARM_ORDER[:pair.ARM_ORDER.index("A6m")]       # A6m (D-020) was appended after A3x
+    assert before_a6m[-2:] == ("A9", "A3x") and pair.ARM_ORDER.index("A3") < pair.ARM_ORDER.index("A9")
     assert "A3x" in B.GPU_ARMS and "A3x" in B.EA_GPU_ARMS and "A3x" not in B.CUOPT_X_ARMS
 
 

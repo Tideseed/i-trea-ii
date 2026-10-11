@@ -23,8 +23,8 @@ Gates before EVERY run, re-evaluated together in one loop until a single pass cl
 wait never releases a run on a stale lease or serving check): the box-window lease (`i-trea-ii (Claude Code)`), the
 local model servers stopped for test and screening jobs and on the whole-box lane, fan-governor's rest flag (D-009),
 the thermal start gate (< 80 °C GPU arms, < 88 °C CPU-only arms, D-008), and D-003's memory formula over the run plus
-every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the
-admitted runs already use is credited back, since MemAvailable no longer contains it). Admission is atomic. A memory
+every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the admitted runs already
+use is credited back, since MemAvailable no longer contains it). Admission is atomic. A memory
 wait that times out voids and requeues its block while other runs are in flight, and halts only when nothing is. A live
 watchdog stops the run set below 18 GB free (halt) or at ≥ 92 °C (pause: the blocks in flight are voided and rerun once
 the box is below 80 °C). A GPU-health void (stuck-low clock, foreign GPU work, too few samples) voids the block and
@@ -333,7 +333,7 @@ def check_layout(jobs: list[dict], layout: str) -> None:
 def check_a6m_memory(jobs: list[dict], po: pair.PairOptions) -> None:
     """A6m runs with D-020's host MemoryMax and RMM limit (A6M_MEM_GB). The RMM limit is in the run hash; MemoryMax is
     not, so without this check a run under a smaller cap would carry the calibration's run id. Raises GateError."""
-    a6m = [j for j in jobs if pair.arm_spec(j).lane == "full"]
+    a6m = [j for j in jobs if j.get("arm") == "A6m"]
     if not a6m:
         return
     rmm = {pair.effective_config(j, po)[0].gpu_mem_gb for j in a6m}

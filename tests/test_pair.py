@@ -257,6 +257,7 @@ def test_a6m_identity_settings_and_lane(toy, tmp_path):
     with pytest.raises(pair.RunError, match="fixed by the arm"):
         pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, cuopt_threads=3))
     assert not pair.GPU_LANE.fits(pair.ARMS["A6m"]) and pair.FULL_LANE.fits(pair.ARMS["A6m"])
+    assert pair.ARM_ORDER[-1] == "A6m"                     # appended: the canonical order of the other arms is unchanged
     assert not pair.FULL_LANE.fits(pair.ARMS["A2"]) and pair.GPU_LANE.fits(pair.ARMS["A6"])
 
 

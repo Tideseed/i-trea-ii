@@ -532,8 +532,9 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
         raise RunError(f"arm {arm.name} runs only on the whole-box lane (pool --layout full, D-020), not on lane "
                        f"{lane.name}")
     if lane.whole_box and arm.lane != "full":
-        raise RunError(f"the whole-box lane {lane.name} runs only A6m (D-020; a full-box A9 needs its own decision), "
-                       f"not {arm.name}")
+        full = ", ".join(a for a, sp in ARMS.items() if sp.lane == "full")
+        raise RunError(f"the whole-box lane {lane.name} runs only {full} (D-020; a full-box A9 needs its own arm and "
+                       f"decision), not {arm.name}")
     if not lane.fits(arm):
         raise RunError(f"lane {lane.name} (x925={lane.x925}, a725={lane.a725}, gpu={lane.gpu}) cannot run {arm.name}")
     label = arm_label(job)
