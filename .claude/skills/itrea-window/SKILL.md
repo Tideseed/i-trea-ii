@@ -42,10 +42,10 @@ Berk usually does not coordinate the sessions — the lease does.
    |---|---|---|---|---|---|
    | M1 smoke | `itx-m1.jsonl` (itx-m1): fhnw-binpack4-48, glass4, radiationm18-12-05 × {A9, A6F, A2F} ext + A6F with the thread variables kept, 120 s | 12 | 97 (A9 ext; A2F 78, A6F 69) | ≈ 0.3 (≤ 0.43) | — (first: `pytest -m gpu` with cold caches, step 5) |
    | M2 soak at F | `itx-m2.jsonl` (itx-m2): comp21-2idx, neos-4763324-toguru × {A9, A6F} ext, 600 s, AB / BA | 4 | 97 | 0.67 | `--pause-c 90`; start the first from fan AUTO |
-   | M3 memory probe | `itx-m3.jsonl` (itx-m3): R29's 8 × A6F at cuOpt RMM 40 / host 40 | 8 | **101** | 1.0–1.35 | — |
+   | M3 memory probe | `itx-m3.jsonl` (itx-m3): R29's 8 × A6F at cuOpt RMM 40 / host 40; a cap hit is recorded (`void_info.cuopt_memory`), not voided | 8 | **101** | 1.0–1.35 | — |
    | M4 calibration | `itx-m4.jsonl` (mipfeas): D-020's 30 × A6F ext, 600 s | 30 | 69 | 3.95–5.0 | then `itrea mipfeas-report --arm A6F` |
    | M5 A9 preview | `itx-m5.jsonl` (itx-m5): the 15 dev / class-probe instances in the 233 × A9 ext, 600 s | 15 | 97 | ≈ 2.0–2.5 | optional |
-   | R13 + R14 test | `itx-r13.jsonl` (itx-r13): 17 × seeds 0–1 × {A9, A9 ext, A6F ext}, 120 s | 102 | 97 (A9 without a harness: 73) | ≈ 3.2–3.4 | its decision record first |
+   | R13 + R14 test | `itx-r13.jsonl` (itx-r13): 17 × seeds 0–1 × {A9 ext with R13 + R14 off, A9 ext, A6F ext}, 120 s | 102 | 97 | ≈ 3.2–3.4 | its decision record first |
 
    Run hours exclude the ~8 s per run of harness overhead and the governor's rests; window hours ≈ run hours / 0.55 +
    0.5 per window (D-021's budget). M4's stop rule: any thermal or cap void, or any run with a steady-state p95 above
@@ -77,19 +77,26 @@ Berk usually does not coordinate the sessions — the lease does.
 
 ## During
 - The runner applies the gates on every run: memory budget (Σ MemoryMax + Σ CuPy pool limits + 1 GB per CUDA process +
-  cuOpt RMM limit + Redis 2 GB + 20 GB reserve ≤ MemAvailable), thermal start < 80 °C for GPU arms and < 88 °C for
-  CPU-only arms (D-008), pause ≥ 92 °C (`--pause-c`, never higher; M2: 90) / resume < 80 °C, fan-governor's rest flag
-  (D-009), and for GPU runs the governor itself (D-021 R24: `~/.local/state/thermal/fan-state` younger than 30 s and
-  `cap=0`; it waits while the cap is on and halts after 120 s without a live governor; `--no-governor` only on a host
-  without it), watchdog floor 18 GB, one GPU arm at a time, one runner (`/tmp/itrea-runner.lock`). Every process runs
-  in a named scope `itrea-run-<run-hash>-<role>-<epoch>.scope` (`systemctl --user list-units 'itrea-run-*'`).
-- D-021's void causes (`run.json` `void_cause`, every one found in `void_checks`): `gpu_cap` (busy SM median below
-  `--cap-floor-mhz` 2,300, or the governor's 2,200-MHz clock cap during the run) — the block is rerun once, after the
-  fan reads AUTO; `compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth after t0) and `cuopt_memory`
-  (harness: cuOpt's RMM allocation error or a kill at its cap) — rerun once; `thermal_watch` (thermal-watch stopped
-  units at ≥ 98 °C) — rerun as a thermal void. A further void of the same cause skips the block (`skipped`, reason =
-  the cause); `counts.requeues` in `logs/pool-status.json` counts the reruns by cause. R26: close the window after 2
-  thermal or cap voids (the pool does not do it for you).
+  cuOpt RMM limit + Redis 2 GB + 20 GB reserve ≤ MemAvailable), thermal start < 80 °C for GPU arms and < 86 °C for
+  CPU-only arms (D-008, D-021 R24; 88 until 2026-10-11), pause ≥ 92 °C (`--pause-c`, never higher; M2: 90) / resume
+  < 80 °C, fan-governor's rest flag (D-009; a governor dead for 120 s while it holds the pool halts it), and for GPU runs
+  the governor itself (D-021 R24: `~/.local/state/thermal/fan-state` younger than 30 s and `cap=0`; it waits while the
+  cap is on and halts after 120 s without a live governor; `--no-governor` only on a host without it), both model
+  servers stopped for every job with a harness (checked before every run), watchdog floor 18 GB, one GPU arm at a
+  time, one runner (`/tmp/itrea-runner.lock`). Every process runs in a named scope
+  `itrea-run-<sha1(run)>-<role>-<epoch_ms>.scope` (`systemctl --user list-units 'itrea-run-*'`) that stops within 5 s
+  (cuOpt's by SIGKILL).
+- D-021's void causes (`run.json` `void_cause`, every one found in `void_checks`, the rest in `void_info`):
+  `gpu_cap` (busy SM median below `--cap-floor-mhz` 2,300, the governor's 2,200-MHz clock cap during the run, or a fan
+  state with cap=1 stamped inside the run) — the block is rerun once, after the fan reads AUTO; a low clock with the
+  governor's cap off before and after and no cap interval (an unknown lock, e.g. left by a governor restart; it needs
+  `sudo nvidia-smi -rgc`) halts the pool at once; `compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth
+  after t0), `cuopt_memory` (harness: cuOpt's cap confirmed) and `external_kill` (any arm: a SIGKILL the runner did not
+  send, at no cap) — rerun once; `thermal_watch` (thermal-watch stopped one of the run's scopes at ≥ 98 °C) — rerun as
+  a thermal void. A further void of the same cause skips the block (`skipped`, reason = the cause);
+  `counts.requeues` in `logs/pool-status.json` counts the reruns by cause. **R26:** after 2 thermal or cap voids
+  (`--max-heat-voids`; one thermal pause counts once) the pool opens no new block and ends `halted` — close the
+  window and look before another pool.
 - A block voided by a thermal pause is rerun first, at most `--max-thermal-requeues` times (default 1); one voided again
   is skipped and the pool moves on — `logs/pool-status.json` lists it under `skipped` with its run ids. Those blocks
   are owed: rerun them in a later window (the pool treats their moved-aside runs as not run).

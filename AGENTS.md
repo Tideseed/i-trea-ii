@@ -188,7 +188,7 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `src/itrea/analysis/lineage.py` | depth-1 matched Rank 0 odds ratio, Mantel–Haenszel (descriptive) | built |
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
-| `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row — paired R with a bootstrap interval on the call and launch clocks, feasible counts, strata, first-incumbent differences, GAMS's own GB10 26.04 / B200 rows, verdict PASS / FAIL / INCOMPLETE; since D-021 also `--arm A6F` (M4) with the late-clock check (median first incumbent ours − GAMS ≤ +0.3 s in strata 0 and 1) and D-021's reading INSIDE / OUTSIDE / CLOCK-FAIL; the GAMS archive's readers (`read_gams_trc`, z*, published P) and D-020's sample | built |
+| `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row — paired R with a bootstrap interval on the call and launch clocks, feasible counts, strata, first-incumbent differences, GAMS's own GB10 26.04 / B200 rows, verdict PASS / FAIL / INCOMPLETE; since D-021 also `--arm A6F` (M4) with the late-clock check (one median of first incumbent ours − GAMS over strata 0–1 ≤ +0.3 s, per stratum reported), only runs under the ext harness at F counted, and D-021's reading INSIDE / OUTSIDE / CLOCK-FAIL; the GAMS archive's readers (`read_gams_trc`, z*, published P) and D-020's sample | built |
 | `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria (M1–M5, outcome, fallbacks) applied to the run table and run directories, with a verdict (`itrea backoff-report --stage 0\|1`); the sanity rule gates on the measured duty only and reports the lane-steps ratio (D-018's second stated deviation; `--steps-gate` = the rule as first written); stage-1 control `A9@bo1s` — stage 0 read 2026-10-09 | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
 | `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b`; `tests/test_configs.py` keeps it equal to the code). **Current development defaults** (D-010; never a confirmatory configuration): **A3** — `itrea2-dev-rc-ld.yaml` (`itrea2-dev-rc-3way` + `repair.continuous: lp_decode`, hash `f030e23909ad`, D-017); **A9 / A3x** — `itrea2-dev-rc-3way.yaml` (repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair; hash `1d12ad490dd0`; the runner adds `exchange.from_cuopt` for A9 and refuses lp_decode there); **D-018 stage 1** — `itrea2-dev-rc-3way-bo1.yaml` (back-off active with the stage-0 values: D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40; run hash `f67354be775d`) against `-bo1s.yaml` (the same values in shadow mode = the control; run hash `62bf82b236f6`). History: `-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms: shadow, forced duty ½ / ¼ / ⅛), `itrea2-adaptive.yaml`, `-adaptive-lps.yaml`, `-adaptive-lps-rc.yaml` (earlier development steps, D-010–D-012), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml` (D-002's E3) | core |
@@ -242,16 +242,20 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process but A6m's cuOpt and cuOpt under a harness
   with `cuopt_env_unset`, whose environment has the three removed (GAMS ran it so; libcuopt links libomp). Never run
   analysis with default thread counts beside timed runs.
-- **Thermal.** GPU arms start only below 80 °C (ACPI maximum), CPU-only arms below 88 °C (D-008); pause the run set at
+- **Thermal.** GPU arms start only below 80 °C (ACPI maximum), CPU-only arms below 86 °C (D-008's 10-06 addendum,
+  D-021 R24; 88 until 2026-10-11); pause the run set at
   ≥ 92 °C, resume below 80 °C. A block voided by the pause is rerun first, at most `--max-thermal-requeues` times
   (default 1): a further void skips it (pool status `skipped`) — in screening stage 2 (2026-10-06) the same 8 blocks
   were voided 8 times each before the cap existed. Each run records the hottest ACPI zone seen while it ran
   (`run.json` `acpi_during`) and the 1-min load average before and after. **D-021:** a GPU run also starts only while
   the host fan governor is alive (`~/.local/state/thermal/fan-state` < 30 s old) with its clock cap off
-  (`--no-governor` only on a host without it); `--pause-c` lowers the pause / void line (M2's soak: 90, never above
-  92); a run during which thermal-watch stopped units at ≥ 98 °C is void (`thermal_watch`, never an arm crash); every
-  run records the fan state at its start and end and its start temperature. The governor's rests stay as they are
-  (Berk, 2026-10-11).
+  (`--no-governor` only on a host without it; a governor gone 120 s halts the pool, also during its rest flag);
+  `--pause-c` lowers the pause / void line (M2's soak: 90, never above 92); a run whose scope thermal-watch stopped at
+  ≥ 98 °C is void (`thermal_watch`, never an arm crash); run scopes are named `itrea-run-<sha1(run)>-<role>-<epoch_ms>`
+  and stop within 5 s (cuOpt's by SIGKILL); every run records the fan state at its start and end and its start
+  temperature. **R26's breaker:** after 2 thermal or cap voids in a run set (`--max-heat-voids`; one thermal pause
+  counts once) no new block opens and the pool ends `halted`. Jobs with a harness need both model servers stopped
+  (`--allow-serving` refused). The governor's rests stay as they are (Berk, 2026-10-11).
 - **Deadline and lease end at the start of every run.** After its gate waits, a run whose estimate would end after
   `--deadline` or the lease end does not start: a block not yet started counts as never opened and the pool stops; a
   block partly run keeps running (a stop never splits a block).
@@ -259,8 +263,11 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   voids its whole block (all arms of that instance × seed) and halts the run set. **Cap void (D-021 R25):** a GPU run
   whose busy SM median is below 2,300 MHz (`--cap-floor-mhz`) or that overlaps a fan-governor clock cap (2,200 MHz,
   which passes the 2,000 floor) is void (`gpu_cap`): its block is rerun once, after the fan reads AUTO, then skipped
-  and listed. Under a harness a cuOpt RMM allocation error or a kill at cuOpt's cap is void too (`cuopt_memory`, rerun
-  once); a failure of SCIP or the EA stays an arm outcome.
+  and listed; a low clock with the governor's cap off before and after and no cap interval in its log (an unknown
+  lock) halts the pool at once. Under a harness cuOpt's CONFIRMED cap hit — an RMM error with the peak ≥ 0.8 × the
+  limit, or a kill with the scope's Result oom-kill or maxrss ≥ 0.95 × MemoryMax — is void too (`cuopt_memory`, rerun
+  once; M3's harness records it instead); a failure of SCIP or the EA, their caps included, stays an arm outcome; a
+  SIGKILL nobody in the harness sent, at no cap, voids any arm's run (`external_kill`, rerun once).
 - **Frozen configuration.** Test-set instances run only with the configuration whose hash equals `frozen-e2`'s, with
   `prereg-v1` an ancestor of HEAD. Tuning happens on the tuning set only, within the logged E4 budget.
 - **Every incumbent checked.** Every incumbent vector of every process is stored and checked by the independent exact

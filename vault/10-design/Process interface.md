@@ -177,11 +177,12 @@ never from literals.
   `partner`, appended after A6m in the canonical arm order (the order of every earlier arm is unchanged). The cuOpt
   process takes every core of the lane its arm's other processes do not hold (`ProcSpec.f_share`,
   `pair.cuopt_cores`); a `cuopt_threads` option that contradicts |F| (or |F| − 1) is refused. Their `solver_settings`
-  carry that thread count, so F's size is part of their run hash: a changed F is another configuration (R5; #30's
-  layout change repeats M2).
+  carry that thread count, so F's size is part of their run hash; under a harness F's cores themselves are too (the
+  footprint, below): a changed F is another configuration (R5; #30's layout change repeats M2).
 - **Harness** (the job-level field `harness`; `pair.resolve_harness`). Absent = the runner as before: no key, every
   existing run id / hash / argv / env / cores unchanged (an old-vs-new comparison of `plan()` over every committed job
-  file × every earlier arm × eight option sets, 20,432 records, was byte-identical apart from the scope's `--unit`).
+  file × every earlier arm × eight option sets, 20,432 records, is byte-identical apart from the scope's `--unit` and
+  its two properties, below).
   Present = a preset name (`"ext"`) or a dict `{"preset": "ext", <key>: value, …}` overriding the preset's keys:
   | key | ext | effect |
   |---|---|---|
@@ -190,35 +191,49 @@ never from literals.
   | `cuopt_rmm_gb` | 24 | cuOpt's RMM limit, separate from the EA's CuPy pool (the EA keeps `gpu_mem_gb`, 12 GB; R29) |
   | `cuopt_host_gb` | 24 | cuOpt's host `MemoryMax` (instead of `--cuopt-mem-gb`) |
   | `cuda_cache` | true | every process gets `CUDA_CACHE_PATH=~/.cache/itrea/cuda` and `CUDA_CACHE_MAXSIZE=4294967296` (R15) |
+  | `cuopt_memory_void` | true | a confirmed cap hit of cuOpt voids the run (`cuopt_memory`); false records it and keeps the run failed (M3) |
 
-  The resolved dict enters the run hash only when the field is present (non-EA arms: `solver_settings.harness`, whose
-  `gpu_mem_gb` is then cuOpt's RMM limit; EA arms: folded into the EA hash as `cuopt_threads` is). Refused on A6m
-  (D-020's own settings), on test and screening jobs (a prereg-v2 item; `pool.check_registered_harness`) and with
-  `--cuopt-gpu-peak-gb` (the gate counts the harness's caps). M3 uses `{"preset": "ext", "cuopt_rmm_gb": 40,
-  "cuopt_host_gb": 40}`, M1's env-only contrast `{"preset": "ext", "cuopt_env_unset": false}`.
+  The resolved dict and its **footprint** (`pair.harness_footprint`: F's sorted X925 / A725 cores for an arm on the
+  GPU lane, SCIP's `solver_mem_gb` and the EA's `ea_mem_gb` where the arm has them) enter the run hash only when the
+  field is present (non-EA arms: `solver_settings.harness` / `.footprint`, whose `gpu_mem_gb` is then cuOpt's RMM
+  limit; EA arms: folded into the EA hash as `cuopt_threads` is). Refused on A6m (D-020's own settings), on test and
+  screening jobs (a prereg-v2 item; `pool.check_registered_harness`) and with `--cuopt-gpu-peak-gb` (the gate counts
+  the harness's caps). A job with a harness is quiet (both model servers stopped, checked before every run;
+  `--allow-serving` refused). M3 uses `{"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40,
+  "cuopt_memory_void": false}`, M1's env-only contrast `{"preset": "ext", "cuopt_env_unset": false}`, R13's control
+  `{"preset": "ext", "cuopt_gap_zero": false, "cuopt_env_unset": false}` (only R13 + R14 differ from its treatment).
+  `runs.parquet` carries `run_hash` and `harness`: an EA arm's `config_hash` is the EA hash with or without a harness.
 - **Memory gate** (D-003's formula, file mailbox; Redis + 2 GB): A9 under ext 9 + 6 + 24 host + 12 + 24 GPU + 2 × 1 +
   20 = **97 GB** (99), A2F 9 + 24 + 24 + 1 + 20 = **78** (80), A6F 24 + 24 + 1 + 20 = **69** (71), M3's A6F at 40 / 40
   = **101**; A9 without a harness stays 73. `itrea pool --dry-run` prints the arithmetic per treatment.
-- **Named scopes** (R27). Every process runs in `systemd-run --user --scope --unit=itrea-run-<run-hash>-<role>-<epoch>`
-  (`pair.scope_unit`; `<run-hash>` = the run id's last field, `<epoch>` = the plan's second) instead of an anonymous
-  scope, so host tools can find the project's processes — thermal-watch's 98 °C stop pattern gains `itrea-run`
-  ([other repository], a separate edit). Never part of a hash or of argv; `run.json` records `scope_unit` per
-  process.
+- **Named scopes** (R27). Every process runs in `systemd-run --user --scope
+  --unit=itrea-run-<sha1(run directory name)[:12]>-<role>-<epoch_ms>` (`pair.scope_unit`; the run directory's name is
+  the run id, `<epoch_ms>` the plan's millisecond: unique per launch, so two lanes starting in the same second never
+  ask systemd for one name — the first version used the configuration hash and the second, and collided) instead of an
+  anonymous scope, so host tools can find the project's processes — thermal-watch's 98 °C stop pattern gains
+  `itrea-run` ([other repository], a separate edit). Every scope gets `-p TimeoutStopSec=5s` (a `systemctl stop`
+  kills within 5 s, not systemd's 90), cuOpt's also `-p KillSignal=SIGKILL` (it has no interrupt API and keeps the
+  GPU busy after SIGTERM). Never part of a hash or of argv; `run.json` records `scope_unit` per process.
 - **Void causes** (`pair.void_checks`, after every run; each found cause is recorded in `void_checks`, the first in
-  this order voids a run that is not void already; the pool requeues the block):
+  this order voids a run that is not void already; what decides nothing is recorded in `void_info`; the pool requeues
+  the block):
   | cause | when | pool |
   |---|---|---|
-  | `thermal_watch` | thermal-watch's `HOT <n>C stopped:` line (≥ 98 °C) between the first launch and the end (after an external stop of a process the runner waits up to 30 s for the line) — never an arm crash (R27) | as the thermal pause (`--max-thermal-requeues`) |
-  | `gpu_cap` | a GPU run whose busy SM median is below `--cap-floor-mhz` (2,300), whose timed window overlaps a fan-governor clock-cap interval (its log: `clock cap … on` → `clock cap off` or a governor restart), or whose fan state read `cap=1` at the start or end (R25). The 2,000-MHz stuck-clock fault stays a GPU-health void that halts | rerun once, only after the fan reads AUTO |
-  | `cuopt_memory` | harness only: cuOpt's RMM allocation error (error status 6 "Memory allocation failed", or an RMM out-of-memory exception, warm-up included) or a SIGKILL the runner did not send (the scope's OOM kill at `MemoryMax`) (R29). A failure of SCIP or the EA stays an arm outcome | rerun once |
+  | `thermal_watch` | thermal-watch's `HOT <n>C stopped:` line (≥ 98 °C) whose stopped list names one of this run's scope units, stamped between the first launch and the last exit + 30 s (after an external stop of a process the runner waits for the line until then) — never an arm crash (R27). Other HOT lines (`stopped: none`, other units) are recorded in `void_info.thermal_watch_lines` | as the thermal pause (`--max-thermal-requeues`) |
+  | `gpu_cap` | a GPU run whose busy SM median is below `--cap-floor-mhz` (2,300), whose timed window overlaps a fan-governor clock-cap interval (its log: `clock cap … on` → `clock cap off` or a governor restart), or whose fan state reads `cap=1` with its own timestamp inside the timed window (else recorded only) (R25). The 2,000-MHz stuck-clock fault stays a GPU-health void that halts | rerun once, only after the fan reads AUTO; an **unknown lock** (low clock, `cap=0` before and after, no cap interval: e.g. left by a governor restart) halts at once |
+  | `cuopt_memory` | harness with `cuopt_memory_void`: cuOpt's cap CONFIRMED — an RMM allocation error (error status 6 "Memory allocation failed", or an RMM out-of-memory exception, warm-up included) whose peak reached 0.8 × the limit, or a SIGKILL the runner did not send with the scope's `Result=oom-kill` or maxrss ≥ 0.95 × `MemoryMax` (R29). An RMM error below that is recorded (`void_info.rmm_error_below_cap`) and the run fails; with `cuopt_memory_void: false` (M3) the cap hit is recorded (`void_info.cuopt_memory`) and the run stays failed. A failure of SCIP or the EA, their caps included (`void_info.cap_kills`), stays an arm outcome | rerun once |
+  | `external_kill` | any arm, harness or not: a SIGKILL of any process that the runner did not send, at no cap (as above) and not explained by a thermal-watch line (memwatch, the global OOM killer, someone's `kill -9`) | rerun once |
   | `compiled_on_clock` | harness with `cuda_cache`: an entry of the CUDA cache with mtime ≥ `t0_epoch` (the `index` file ignored), or the EA's CuPy cache grown after t0 — the same terms for both GPU codes (R15). Without a harness CuPy's `compiled_on_clock` is recorded only, as before | rerun once |
 
   A rerun block runs first and whole; a further void of the same cause skips it (pool status `skipped`, reason = the
-  cause, its run ids) and the pool moves on; reruns are counted by cause (`counts.requeues`).
+  cause, its run ids) and the pool moves on; reruns are counted by cause (`counts.requeues`). **R26's breaker:** after
+  `--max-heat-voids` (2) thermal or cap voids in a run set — one thermal pause counts once however many blocks it
+  voided — no new block opens (open blocks finish) and the pool ends `halted` with the reason.
 - **Gates in the pool** (R24, M2): a GPU run starts only while fan-governor is alive (`~/.local/state/thermal/fan-state`
-  younger than 30 s) with `cap=0` (`--no-governor` for a host without it; a governor gone for 120 s halts); `--pause-c`
-  lowers the watchdog's pause / void line (M2: 90; never above 92). The rest flag (D-009) and the 80 °C start gate
-  are unchanged.
+  younger than 30 s) with `cap=0` (`--no-governor` for a host without it; a governor gone for 120 s halts — also while
+  its rest flag holds the pool, since only the governor removes the flag); `--pause-c` lowers the watchdog's pause /
+  void line (M2: 90; never above 92). The rest flag (D-009) and the 80 °C GPU start gate are unchanged; the CPU-only
+  start gate is 86 °C (was 88; D-008's 10-06 addendum, D-021 R24).
 - **Explicit order.** A block whose every job carries `position` (a permutation of 0 … k − 1) runs in that order
   instead of its Williams row — M2's AB / BA, since both of its blocks hash to the same row.
 - **Jobs.** `itrea make-jobs itx-m1 … itx-m5, itx-r13` → `jobs/itx-*.jsonl` (sets `itx-m1`, `itx-m2`, `itx-m3`,

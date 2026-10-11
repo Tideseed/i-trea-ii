@@ -43,8 +43,9 @@ set.
 2026-10-11, later: ITX-1's phase 1 ([[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the
 Spark's thermal envelope]]): the arms A6F and A2F, the job keys `harness` and `position`, and in `run.json`
 `config.harness`, `processes[*].scope_unit`, `acpi_start_c`, `fan_state_start` / `fan_state_end`, `cuda_cache`,
-`compiled_on_clock_cuda`, `void_checks` and the void causes `thermal_watch`, `gpu_cap`, `cuopt_memory` and
-`compiled_on_clock`; `itrea mipfeas-report`'s late-clock check and D-021 reading.
+`compiled_on_clock_cuda`, `void_checks`, `void_info` and the void causes `thermal_watch`, `gpu_cap`, `cuopt_memory`,
+`external_kill` and `compiled_on_clock`; `runs.parquet`'s `run_hash` and `harness`; `itrea mipfeas-report`'s
+late-clock check, calibration-settings check and D-021 reading (revised after the review of the same day).
 
 ## Clock
 All times are seconds since the shared start `t0`, read from `time.monotonic()` (CLOCK_MONOTONIC is system-wide on
@@ -285,8 +286,9 @@ Identity: `run_id`, `arm` (with `~<ablation>`), `base_arm`, `ablation`, `arm_doc
 Williams row, or the job's own `position` when every job of the block carries one, D-021 M2),
 `window`, `stratum`, `split`; `config` {`path`, `overrides`, `base_hash` (the file alone — the freeze check compares
 it with `frozen-e2`), `ea_hash` (the effective configuration), `run_hash`, `solver_settings` (arms without an EA; with a
-harness it carries `harness` and `gpu_mem_gb` = cuOpt's RMM limit), `harness` (the job's resolved harness, D-021: the
-five keys `cuopt_gap_zero`, `cuopt_env_unset`, `cuopt_rmm_gb`, `cuopt_host_gb`, `cuda_cache`; null without one)};
+harness it carries `harness`, `footprint` — F's cores for an arm on the GPU lane, SCIP's / the EA's host caps — and
+`gpu_mem_gb` = cuOpt's RMM limit), `harness` (the job's resolved harness, D-021: the six keys `cuopt_gap_zero`,
+`cuopt_env_unset`, `cuopt_rmm_gb`, `cuopt_host_gb`, `cuda_cache`, `cuopt_memory_void`; null without one)};
 `problem` (shape, `load_s`); `mailbox` {kind, spec}; `lane` (with `whole_box`), `systemd`, `pinned`; `memory_budget`
 (the D-003 gate terms and `need_gb`); `env` (versions, hardware, git state: `itrea.experiments.record_env`); `t0`,
 `t0_epoch` (at the barrier's release).
@@ -294,7 +296,8 @@ Processes: one record per process — `role`, `kind`, `backend`, `cmd`, `cores`,
 pool or RMM limit), `env` (what the runner set; under a harness with `cuda_cache` also `CUDA_CACHE_PATH` and
 `CUDA_CACHE_MAXSIZE`), `env_unset` (what it removed from the inherited environment: the three thread variables for
 A6m's cuOpt and for every cuOpt process under a harness with `cuopt_env_unset`, else empty), `scope_unit` (the systemd
-scope's name `itrea-run-<run-hash>-<role>-<epoch>`, D-021 R27; null without systemd), `pid`, `launch_epoch` (the
+scope's name `itrea-run-<sha1(run directory name)[:12]>-<role>-<epoch_ms>`, unique per launch, D-021 R27; null
+without systemd), `pid`, `launch_epoch` (the
 launch clock's origin, D-020),
 `startup_s`, `exit_code`, `killed`, `exit_t`, `cpu_user_s`, `cpu_sys_s`, `maxrss_mb`; `exit_codes` {role: code} —
 **every one is checked** (optopt X1 logged "ok" for dead SCIP processes). `runner_cores`: the runner's own affinity (the GPU-health sampler and
@@ -309,13 +312,20 @@ without the file), `gpu_health` (per-second samples summarised: median busy SM c
 `reasons`), `cupy_cache` (`compiled_on_clock`), `cuda_cache` (harness with `cuda_cache` only, else null: `dir`,
 `t0_epoch`, `n_on_clock`, `entries_on_clock` — the first 50 entry files of the project's CUDA JIT cache with mtime ≥
 `t0_epoch`, the `index` file ignored — and `compiled_on_clock`), `compiled_on_clock_cuda` (= `cuda_cache.
-compiled_on_clock`), `void_checks` {cause: reason} (every D-021 cause found, whether or not it decided the status).
+compiled_on_clock`), `void_checks` {cause: reason} (every D-021 cause found, whether or not it decided the status),
+`void_info` (what was seen and decides nothing: `thermal_watch_lines` — HOT lines naming none of the run's scopes —,
+`fan_cap_outside_window`, `rmm_error_below_cap`, `cap_kills` — {role: reason} of processes killed at their own host
+cap, arm outcomes —, `cuopt_memory` under `cuopt_memory_void: false`, and `gpu_cap` {`median_sm_mhz`, `floor_mhz`,
+`overlaps`, `fan_cap_start`, `fan_cap_end`, `unknown_lock`} for GPU runs).
 Outcome: `status` (`completed` = every process exited 0; `failed` = any exit code ≠ 0, a kill or a start failure —
 kept, truncated at the crash; `void` = an external cause: GPU health, thermal pause, memory floor, abort, runner error,
-and since D-021 `thermal_watch` (thermal-watch's 98 °C stop line inside the run), `gpu_cap` (busy SM median below
-2,300 MHz or a fan-governor clock cap during the run), `cuopt_memory` (harness: cuOpt's RMM allocation error or a kill
-at its cap; a failure of SCIP or the EA stays `failed`) and `compiled_on_clock` (harness: a CUDA-cache entry or CuPy
-cache growth after t0) — the whole block is rerun), `void_cause`, `reasons`, `stop`, `wall_s`, `exchange` (verdict counts; Redis stream
+and since D-021 `thermal_watch` (thermal-watch's 98 °C stop line naming one of the run's scopes), `gpu_cap` (busy SM
+median below 2,300 MHz, a fan-governor clock cap during the run, or a fan state with cap=1 stamped inside the timed
+window), `cuopt_memory` (harness: cuOpt's cap confirmed — RMM error with the peak ≥ 0.8 × the limit, or a kill with
+the scope's Result oom-kill or maxrss ≥ 0.95 × MemoryMax; a failure of SCIP or the EA stays `failed`),
+`external_kill` (any arm: a SIGKILL of any process the runner did not send, at no cap and not by thermal-watch) and
+`compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth after t0) — the whole block is rerun),
+`void_cause`, `reasons`, `stop`, `wall_s`, `exchange` (verdict counts; Redis stream
 lengths), and the merged trajectories as reported by the processes: `portfolio` (best of all processes at every
 moment, `[t, obj, role, source]`) and `solver` (what the solver itself held). The analysis rebuilds both from checked
 incumbents.
@@ -333,7 +343,9 @@ time unless `--recheck`.
 **`datasets/runs.parquet`** — one row per run (fixed columns and dtypes, so a rebuild is identical by content):
 - identity: `run_id`, `set`, `instance`, `instance_path`, `arm`, `base_arm`, `seed`, `budget`, `config_hash`,
   `base_hash`, `config_overrides`, `synthetic`, `status`, `void_cause`, `split`, `stratum`, `attempt`, `block`,
-  `window_id`, `williams_pos`, `git_rev`, `prereg_tag`, `run_dir`;
+  `window_id`, `williams_pos`, `git_rev`, `prereg_tag`, `run_dir`; since D-021 `run_hash` (the run id's last field —
+  for an EA arm `config_hash` is the EA configuration's alone, the same with and without a harness) and `harness` (the
+  resolved harness as JSON, "" without one); prereg compares `run_hash` for a run that carries a harness;
 - reference: `sense`, `ref`, `ref_kind`, `ref_frozen`, `ref_zero_instance`, `ref_bos`, `sense_conflict`;
 - portfolio (primary) and sensitivity: `pt` (P(T) of the portfolio, checked incumbents only), `pt300`, `pt_bos`
   (against the best checked value of the whole study — D-002's sensitivity analysis), **`ref_screen`, `pt_screen`** (P
@@ -440,11 +452,12 @@ maximises: no MPS file has an OBJSENSE section). Acceptance (2026-10-11): on GAM
 and that they equal `primalintegral.csv`). Aggregation: shifted geometric mean, s = 0.001; "feasible found" = P < 2.
 `pt_gams_launch` is the same integral on the launch clock (every step time + `startup_offset_s`, T unchanged).
 The calibration report (`itrea mipfeas-report`; D-020 for A6m, D-021's M4 for A6F) also gives the **late-clock check**:
-per stratum of D-020's sample, the median of ours − GAMS's first-incumbent time (call clock; GAMS's first `I` record)
-over the instances where both found one; it passes when the median of each of strata 0 and 1 is at most +0.3 s
-(one-sided; the other strata are thread-sensitive and only reported; the pooled median of strata 0–1 beside). For A6F
-the verdict reads by D-021: CLOCK-FAIL (the reading stops) before INSIDE / OUTSIDE the band 0.870 ≤ R ≤ 1.150 with
-feasible ±1; A6m keeps D-020's PASS / FAIL.
+the median of ours − GAMS's first-incumbent time (call clock; GAMS's first `I` record) over the instances of strata
+0–1 of D-020's sample where both found one; it passes when that one median exists and is at most +0.3 s (one-sided;
+the median of every stratum is reported beside, strata 2–5 being thread-sensitive). For A6F the verdict reads by
+D-021: CLOCK-FAIL (the reading stops) before INSIDE / OUTSIDE the band 0.870 ≤ R ≤ 1.150 with feasible ±1, and only
+runs under the ext harness exactly with cuOpt's thread count |F| (and F's cores) count — any other is listed under
+missing with the reason; the configuration hash of the chosen runs is printed. A6m keeps D-020's PASS / FAIL.
 
 **Time to target**: first time γ ≤ 5 %, γ ≤ 1 %, and time to first feasible; censored at T (Type I). Analysed per
 instance on seed medians.
