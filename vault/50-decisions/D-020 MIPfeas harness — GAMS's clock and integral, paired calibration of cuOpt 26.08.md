@@ -1,6 +1,6 @@
 # D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt 26.08 (2026-10-11, AgentRA on Berk's word)
 
-**Status:** decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) for the C1 calibration (D-019, issue #29), before any
+**Status:** narrowed by [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] (2026-10-11: the A6m whole-box calibration → A6F at A9's footprint; what of D-020 stays is listed there). Originally decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) for the C1 calibration (D-019, issue #29), before any
 calibration run; open to a superseding decision on evidence. The clock and the metric for the v1 runs are fixed in
 prereg-v2, not here. Berk (2026-10-11 10:0x), asked whether to download GAMS's published MIPfeas results (38.5 MB): **"Yes,
 download it"**.

@@ -73,3 +73,8 @@ cuopt version"** and **"No nights"**. So:
 start at the solver call (model generation and reading excluded). D-020 records both clocks and calibrates on the call
 clock; the v1 clock is fixed in prereg-v2. The ±15 % calibration tolerance stands, now applied to a paired per-instance
 comparison with GAMS's own GB10 cuOpt-26.08 run (Berk allowed the download of GAMS's per-instance results, 10-11).
+
+## Pointer (2026-10-11) — our own external standard proposed
+[[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] (on Berk's
+"come up with our own standards", 10-11) proposes new readings of this record's external rows and of part A for
+prereg-v2 (its "Open for Berk", 1). Until Berk answers, this record's literal readings decide.
