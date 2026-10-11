@@ -1,25 +1,66 @@
-"""GAMS's MIPfeas archive (vault D-020): the trace reader, the published per-instance integrals and reference values,
-and D-020's calibration sample. GAMS's integral itself is ported in `itrea.analysis.metrics.gams_integral`.
+"""`itrea mipfeas-report`: the paired calibration of the MIPfeas harness against GAMS's published cuOpt 26.08 run on a
+GB10 (vault D-020), by the rules D-020 fixed before any calibration run — R, the feasible counts and the verdict.
+Development only (D-010); the clock and the metric of the v1 runs are fixed in prereg-v2, not here.
 
-The archive `data/mipfeas/gams-2026-09-16/` (Berk's yes, 2026-10-11; gitignored like all of data/) holds GAMS's
-scoring script `create_primalintegral.py`, `optimal_objective.csv` (their z*), `primalintegral.csv` (their integral
-per instance and solver; column `cuopt-gb10` = cuOpt 26.08 on the GB10) and a trace per instance, machine and solver,
-`trc_files/<name>_<machine>_<solver>.trc`. The port scored on `read_gams_trc` + `metrics.best_steps` equals their
-`calculate_primal_integral` on every one of the archive's 3,495 traces (2026-10-11; the GB10 26.08 ones are a test).
+Inputs: `datasets/runs.parquet` (`itrea build-runs`: `pt_gams` on the call clock, `pt_gams_launch` on the launch
+clock, `startup_offset_s`, `t_first` / `t_first_event` — the portfolio's first checked incumbent on the call clock —
+and `ref`) and GAMS's archive `data/mipfeas/gams-2026-09-16/` (Berk's yes, 2026-10-11; gitignored like all of data/):
+`primalintegral.csv` (their per-instance integral; column `cuopt-gb10` = cuOpt 26.08 on the GB10),
+`optimal_objective.csv` (their z*) and the traces `trc_files/<name>_<machine>_<solver>.trc`.
+
+Runs: the arm (A6m) and set (mipfeas), seed 0, budget 600, status completed, not synthetic, not block-void; a rerun
+keeps the highest attempt. An instance of the sample without such a run is listed as missing together with whatever
+runs it has (failed, void, another budget …) — never dropped silently; the verdict needs all 30.
+
+Statistics (D-020 § Calibration):
+- per instance P_ours on both clocks and P_GAMS (`primalintegral.csv`, `cuopt-gb10`);
+- R = exp(mean_i log((P_ours,i + 0.001)/(P_GAMS,i + 0.001))), the ratio of the two shifted geometric means on the
+  sample, with a 95 % percentile bootstrap interval over instances (`stats.bootstrap_mean` on the log ratios: 10,000
+  resamples, seed `stats.BOOT_SEED`); on the call clock (the pass rule) and the launch clock (reported);
+- both shifted geometric means (s = 0.001), the feasible counts (P < 2), R per stratum (D-020's six strata);
+- first incumbent: ours (call clock; launch clock = + `startup_offset_s`) minus the first `I` record of GAMS's GB10
+  26.08 trace — median and quartiles over the instances where both found one;
+- GAMS's own GB10 cuOpt 26.04 and B200 cuOpt 26.08 traces against GB10 26.08 on the sample, scored with the port
+  (`metrics.gams_integral`, their z*): the size of a version or machine difference, for scale;
+- the reference check: max |ref − z*| / max(1, |z*|) over the sample (D-020 found ≤ 1e-6 on all 233), since our
+  `pt_gams` is scored against our reference.
+Verdict: PASS iff every instance of the sample has a run, 0.870 ≤ R ≤ 1.150 on the call clock and our feasible count is
+within ±1 of GAMS's on the sample (27 for D-020's sample, computed here); FAIL otherwise; INCOMPLETE (no verdict) while
+an instance is missing.
+
+The module also reads the archive for the rest of the code: `read_gams_trc` (a trace, with their exact `read_csv`),
+`read_z`, `read_pi`, and D-020's sample (`STRATA`, re-derived by a test). The port scored on `read_gams_trc` +
+`metrics.best_steps` equals GAMS's `calculate_primal_integral` (their `create_primalintegral.py`, in the archive) on
+every one of the archive's 3,495 traces (2026-10-11; the 233 GB10 cuOpt 26.08 ones are a test).
+
+    itrea mipfeas-report [--arm A6m] [--set mipfeas] [--gams-dir data/mipfeas/gams-2026-09-16]
+                         [--runs datasets/runs.parquet] [--json out.json] [--md out.md]
 """
 from __future__ import annotations
 
+import argparse
+import json
+import math
+import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from itrea.analysis import metrics as M
-from itrea.paths import DATA
+from itrea.analysis import stats as S
+from itrea.paths import DATA, DATASETS
 
 GAMS_DIR = DATA / "mipfeas" / "gams-2026-09-16"
 GAMS_COL = "cuopt-gb10"                    # primalintegral.csv: cuOpt 26.08 on the GB10 (their published row)
 GB10_2608 = "gb10_cuopt-26-08"             # the same run's traces
+OTHER_RUNS = (("GB10 cuOpt 26.04", "gb10_cuopt-26-04"), ("B200 cuOpt 26.08", "b200_cuopt-26-08"))
 TRC_COLUMNS = ["lineNum", "seriesID", "node", "seconds", "bestFound", "bestBound"]
+ARM, SET, SEED, BUDGET = "A6m", "mipfeas", 0, 600.0
+SHIFT = M.MIPFEAS_SHIFT
+R_LO, R_HI = 0.870, 1.150                  # D-019's ±15 %, paired (D-020)
+FEASIBLE_TOL = 1                           # our feasible count within ±1 of GAMS's
+PASS, FAIL, INCOMPLETE = "PASS", "FAIL", "INCOMPLETE"
 # D-020's sample: the 233 sorted by GAMS's GB10 26.08 P (stable sort), numpy array_split into six strata, five per
 # stratum by numpy default_rng(20261011).choice(stratum, 5, replace=False), each pick sorted (tests re-derive it)
 SAMPLE_SEED = 20261011
@@ -88,3 +129,219 @@ def read_z(gams_dir: str | Path = GAMS_DIR) -> dict[str, float]:
 def read_pi(gams_dir: str | Path = GAMS_DIR) -> pd.DataFrame:
     """GAMS's per-instance integrals (`primalintegral.csv`), indexed by instance name."""
     return pd.read_csv(Path(gams_dir) / "primalintegral.csv").set_index("mps_name")
+
+
+# -------------------------------------------------------------------------------------------------- statistics
+def log_ratios(p_ours, p_ref, shift: float = SHIFT) -> np.ndarray:
+    return np.log((np.asarray(p_ours, dtype=float) + shift) / (np.asarray(p_ref, dtype=float) + shift))
+
+
+def ratio(p_ours, p_ref, shift: float = SHIFT, boot: bool = True) -> dict:
+    """R = exp(mean log ratio) with its 95 % percentile bootstrap interval (resampling instances)."""
+    lr = log_ratios(p_ours, p_ref, shift)
+    lr = lr[np.isfinite(lr)]
+    if lr.size == 0:
+        return dict(n=0, R=math.nan, lo=math.nan, hi=math.nan, sd_log=math.nan)
+    out = dict(n=int(lr.size), R=float(np.exp(lr.mean())), sd_log=float(lr.std(ddof=1)) if lr.size > 1 else math.nan)
+    if boot:
+        b = S.bootstrap_mean(lr)
+        out.update(lo=float(np.exp(b["lo"])), hi=float(np.exp(b["hi"])), n_boot=b["n_boot"], boot_seed=b["seed"])
+    return out
+
+
+def _quartiles(xs) -> dict:
+    x = np.asarray([v for v in xs if v is not None and math.isfinite(v)], dtype=float)
+    if x.size == 0:
+        return dict(n=0, median=math.nan, q25=math.nan, q75=math.nan)
+    q25, med, q75 = np.percentile(x, [25, 50, 75])
+    return dict(n=int(x.size), median=float(med), q25=float(q25), q75=float(q75))
+
+
+def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int = SEED,
+                budget: float = BUDGET) -> tuple[dict[str, pd.Series], dict[str, list[str]]]:
+    """The calibration's run per instance (module docstring) and, per instance, a description of every other run of
+    the arm in the set that was not taken (status, seed, budget, void)."""
+    r = runs[(runs["arm"].astype(str) == arm) & (runs["set"].astype(str) == set_)]
+    if "synthetic" in r.columns:
+        r = r[~r["synthetic"].astype(bool)]
+    void = r["block_void"].astype(bool) if "block_void" in r.columns else pd.Series(False, index=r.index)
+    ok = (r["status"].astype(str) == "completed") & ~void & (r["seed"].astype(int) == int(seed)) & \
+        np.isclose(r["budget"].astype(float), float(budget))
+    att = r["attempt"] if "attempt" in r.columns else pd.Series(0, index=r.index)
+    good = r[ok].assign(_att=att[ok]).sort_values(["instance", "_att", "run_id"], kind="mergesort")
+    chosen = {str(n): g.iloc[-1] for n, g in good.groupby("instance", sort=True)}
+    others: dict[str, list[str]] = {}
+    for idx, row in r[~ok].iterrows():
+        why = (f"{row['run_id']}: status {row.get('status') or '?'}, seed {row['seed']}, budget {row['budget']:g}"
+               + (", block void" if void.loc[idx] else ""))
+        others.setdefault(str(row["instance"]), []).append(why)
+    return chosen, others
+
+
+def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, set_: str = SET, seed: int = SEED,
+           budget: float = BUDGET, strata=STRATA) -> dict:
+    """The calibration's numbers and verdict (module docstring)."""
+    gams_dir = Path(gams_dir)
+    sample = [n for s in strata for n in s]
+    pi, z = read_pi(gams_dir), read_z(gams_dir)
+    absent = [n for n in sample if n not in pi.index or n not in z]
+    if absent:
+        raise ValueError(f"{gams_dir}: no published P or z* for {absent}")
+    chosen, others = select_runs(runs, arm, set_, seed, budget)
+    rows, missing = [], []
+    for k, s in enumerate(strata):
+        for n in s:
+            gtrc = read_gams_trc(trc_path(gams_dir, n))
+            row = dict(stratum=k, instance=n, p_gams=float(pi.loc[n, GAMS_COL]), z=z[n],
+                       t_first_gams=trc_first_incumbent(gtrc))
+            r = chosen.get(n)
+            pc = float(r["pt_gams"]) if r is not None and "pt_gams" in r else math.nan
+            if r is None or not math.isfinite(pc):
+                why = "; ".join(others.get(n, [])) or "no run" if r is None else \
+                    f"{r['run_id']}: no pt_gams (no reference, or a run table built before D-020)"
+                missing.append(dict(instance=n, stratum=k, why=why))
+                rows.append(dict(row, run_id=None, p_call=math.nan, p_launch=math.nan, t_first=math.nan,
+                                 startup_offset_s=math.nan, ref=math.nan, ref_rel_diff=math.nan))
+                continue
+            off = float(r.get("startup_offset_s", math.nan))
+            t_first = float(r["t_first"]) if bool(r.get("t_first_event", False)) else math.nan
+            ref = float(r.get("ref", math.nan))
+            rows.append(dict(row, run_id=str(r["run_id"]), p_call=pc, p_launch=float(r.get("pt_gams_launch", math.nan)),
+                             t_first=t_first, startup_offset_s=off, ref=ref,
+                             ref_rel_diff=abs(ref - z[n]) / max(1.0, abs(z[n])) if math.isfinite(ref) else math.nan))
+    df = pd.DataFrame(rows)
+    have = df[df["run_id"].notna()]
+    feas = lambda p: int((np.asarray(p, dtype=float) < M.MIPFEAS_NONE).sum())      # noqa: E731
+    out: dict = dict(arm=arm, set=set_, seed=seed, budget=budget, gams_dir=str(gams_dir), n_sample=len(sample),
+                     n_runs=int(len(have)), missing=missing, instances=df.to_dict("records"))
+    out["call"] = ratio(have["p_call"], have["p_gams"])
+    out["launch"] = ratio(have["p_launch"], have["p_gams"])
+    out["sgm"] = dict(ours_call=M.shifted_geomean(have["p_call"], shift=SHIFT),
+                      ours_launch=M.shifted_geomean(have["p_launch"], shift=SHIFT),
+                      gams_on_runs=M.shifted_geomean(have["p_gams"], shift=SHIFT),
+                      gams_sample=M.shifted_geomean(df["p_gams"], shift=SHIFT))
+    out["feasible"] = dict(ours=feas(have["p_call"]), gams_on_runs=feas(have["p_gams"]),
+                           gams_sample=feas(df["p_gams"]))
+    out["strata"] = [dict(stratum=k, **ratio(g["p_call"], g["p_gams"], boot=False),
+                          launch_R=ratio(g["p_launch"], g["p_gams"], boot=False)["R"])
+                     for k, g in have.groupby("stratum", sort=True)]
+    both = have[have["t_first"].notna() & have["t_first_gams"].notna()]
+    out["first_incumbent"] = dict(
+        call=_quartiles(both["t_first"] - both["t_first_gams"]),
+        launch=_quartiles(both["t_first"] + both["startup_offset_s"] - both["t_first_gams"]),
+        only_ours=int((have["t_first"].notna() & have["t_first_gams"].isna()).sum()),
+        only_gams=int((have["t_first"].isna() & have["t_first_gams"].notna()).sum()),
+        startup_offset_s=_quartiles(have["startup_offset_s"]))
+    others_rows = {}
+    for label, run in OTHER_RUNS:
+        p = [trc_integral(trc_path(gams_dir, n, run), z[n]).value for n in df["instance"]]
+        others_rows[run] = dict(label=label, **ratio(p, df["p_gams"]), feasible=feas(p),
+                                sgm=M.shifted_geomean(p, shift=SHIFT))
+    out["gams_rows"] = others_rows
+    out["ref_rel_diff_max"] = float(have["ref_rel_diff"].max()) if len(have) else math.nan
+    out["rule"] = dict(R_lo=R_LO, R_hi=R_HI, feasible_tol=FEASIBLE_TOL, clock="call")
+    if missing:
+        out["verdict"], out["verdict_reason"] = INCOMPLETE, f"{len(missing)} of {len(sample)} instances have no run"
+    else:
+        R = out["call"]["R"]
+        r_ok = R_LO <= R <= R_HI
+        f_ok = abs(out["feasible"]["ours"] - out["feasible"]["gams_sample"]) <= FEASIBLE_TOL
+        out["verdict"] = PASS if (r_ok and f_ok) else FAIL
+        out["verdict_reason"] = (f"R {R:.3f} {'within' if r_ok else 'outside'} [{R_LO:.3f}, {R_HI:.3f}]; feasible "
+                                 f"{out['feasible']['ours']} vs GAMS {out['feasible']['gams_sample']} "
+                                 f"({'within' if f_ok else 'outside'} ±{FEASIBLE_TOL})")
+    return out
+
+
+# ----------------------------------------------------------------------------------------------------- output
+def _f(x, nd=4) -> str:
+    return "—" if x is None or (isinstance(x, float) and not math.isfinite(x)) else f"{x:.{nd}f}"
+
+
+def markdown(res: dict) -> str:
+    c, la, sg, fe = res["call"], res["launch"], res["sgm"], res["feasible"]
+    lines = [f"<!-- generated by itrea.analysis.mipfeas from datasets/runs.parquet and {res['gams_dir']} -->",
+             f"MIPfeas calibration (D-020): {res['arm']} in set {res['set']}, seed {res['seed']}, "
+             f"{res['budget']:g} s, {res['n_runs']} of {res['n_sample']} instances",
+             "",
+             "| stratum | instance | P ours (call) | P ours (launch) | P GAMS | log ratio (call) | first inc. ours | "
+             "first inc. GAMS |",
+             "|---|---|---|---|---|---|---|---|"]
+    for r in res["instances"]:
+        lr = log_ratios([r["p_call"]], [r["p_gams"]])[0]
+        lines.append(f"| {r['stratum']} | {r['instance']} | {_f(r['p_call'])} | {_f(r['p_launch'])} | "
+                     f"{_f(r['p_gams'])} | {_f(float(lr), 3)} | {_f(r['t_first'], 3)} | {_f(r['t_first_gams'], 3)} |")
+    lines += ["",
+              f"R (call clock) = {_f(c['R'], 3)} [{_f(c.get('lo'), 3)}, {_f(c.get('hi'), 3)}] over {c['n']} "
+              f"instances; R (launch clock) = {_f(la['R'], 3)} [{_f(la.get('lo'), 3)}, {_f(la.get('hi'), 3)}].",
+              f"Shifted geometric means (s = 0.001): ours {_f(sg['ours_call'])} (call) / {_f(sg['ours_launch'])} "
+              f"(launch); GAMS {_f(sg['gams_on_runs'])} on the same instances, {_f(sg['gams_sample'])} on the "
+              f"whole sample.",
+              f"Feasible (P < 2): ours {fe['ours']}, GAMS {fe['gams_on_runs']} on the same instances, "
+              f"{fe['gams_sample']} on the whole sample.",
+              "R per stratum (call / launch): " + "; ".join(f"{s['stratum']}: {_f(s['R'], 3)} / {_f(s['launch_R'], 3)}"
+                                                           f" (n {s['n']})" for s in res["strata"]) + "."]
+    fi = res["first_incumbent"]
+    lines.append(f"First incumbent, ours − GAMS (s): call clock median {_f(fi['call']['median'], 3)} "
+                 f"[{_f(fi['call']['q25'], 3)}, {_f(fi['call']['q75'], 3)}], launch clock median "
+                 f"{_f(fi['launch']['median'], 3)} [{_f(fi['launch']['q25'], 3)}, {_f(fi['launch']['q75'], 3)}] "
+                 f"over {fi['call']['n']} instances (only ours {fi['only_ours']}, only GAMS {fi['only_gams']}); "
+                 f"start-up offset median {_f(fi['startup_offset_s']['median'], 3)} s.")
+    for run, g in res["gams_rows"].items():
+        lines.append(f"GAMS {g['label']} vs GB10 26.08 on the sample (port): R {_f(g['R'], 3)} "
+                     f"[{_f(g.get('lo'), 3)}, {_f(g.get('hi'), 3)}], feasible {g['feasible']}, "
+                     f"geo-mean {_f(g['sgm'])}.")
+    lines.append(f"Reference check: max |ref − z*| / max(1, |z*|) = {res['ref_rel_diff_max']:.2e}.")
+    if res["missing"]:
+        lines.append("")
+        lines.append("Missing (no completed seed-0 run at the budget): " +
+                     "; ".join(f"{m['instance']} ({m['why']})" for m in res["missing"]) + ".")
+    lines += ["", f"**Verdict: {res['verdict']}** — {res['verdict_reason']} (pass: {R_LO:.3f} ≤ R ≤ {R_HI:.3f} on the "
+              f"call clock and feasible within ±{FEASIBLE_TOL}, all {res['n_sample']} instances run)."]
+    return "\n".join(lines) + "\n"
+
+
+def _jsonable(o):
+    if isinstance(o, dict):
+        return {str(k): _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_jsonable(v) for v in o]
+    if isinstance(o, (np.floating, float)):
+        return None if not math.isfinite(float(o)) else float(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    return o
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="itrea mipfeas-report", description="MIPfeas harness: the paired calibration of "
+                                 "D-020 against GAMS's published cuOpt 26.08 GB10 run (R, feasible counts, verdict)")
+    ap.add_argument("--arm", default=ARM, help=f"arm label in the run table ({ARM})")
+    ap.add_argument("--set", dest="set_", metavar="SET", default=SET, help=f"run set ({SET})")
+    ap.add_argument("--seed", type=int, default=SEED, help=f"D-020: one run per instance, seed {SEED}")
+    ap.add_argument("--budget", type=float, default=BUDGET, help=f"seconds ({BUDGET:g}, MIPfeas's limit)")
+    ap.add_argument("--gams-dir", default=str(GAMS_DIR), help="GAMS's unpacked archive (D-020)")
+    ap.add_argument("--runs", default=str(DATASETS / "runs.parquet"))
+    ap.add_argument("--json", default=None, help="also write the result as JSON here")
+    ap.add_argument("--md", default=None, help="also write the markdown here")
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:
+        return 2 if e.code else 0
+    for p, what in ((a.runs, "run `itrea build-runs` first"), (a.gams_dir, "GAMS's archive, D-020")):
+        if not Path(p).exists():
+            print(f"{p} does not exist ({what})", file=sys.stderr)
+            return 2
+    res = report(pd.read_parquet(a.runs), a.gams_dir, a.arm, a.set_, a.seed, a.budget)
+    md = markdown(res)
+    print(md)
+    if a.json:
+        Path(a.json).write_text(json.dumps(_jsonable(res), indent=1, sort_keys=True) + "\n")
+    if a.md:
+        Path(a.md).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.md).write_text(md)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

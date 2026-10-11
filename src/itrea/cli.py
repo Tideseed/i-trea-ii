@@ -25,6 +25,7 @@ the only place the mapping lives.
     itrea lineage ROOT …       the descriptive Rank 0 lineage metric
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict
+    itrea mipfeas-report …     MIPfeas harness (D-020): A6m's paired calibration against GAMS's GB10 cuOpt row
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)
@@ -55,6 +56,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "lineage": ("itrea.analysis.lineage", (), "descriptive Rank 0 lineage metric"),
     "reproduce": ("itrea.analysis.reproduce", (), "re-derive datasets/ and paper/generated/ and compare"),
     "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off (D-018): stage-0 / stage-1 rules, verdict"),
+    "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas harness (D-020): A6m vs GAMS's cuOpt GB10 row, verdict"),
     "exchange": ("itrea.experiments.exchange_ctl", (), "the itrea-redis container: up | down | status | flush RUN_ID"),
     "bench-ls": ("path:tools/bench_ls.py", (), "local-search benchmark"),
     "env": ("itrea.experiments.record_env", (), "environment record (versions, hardware, git state)"),
