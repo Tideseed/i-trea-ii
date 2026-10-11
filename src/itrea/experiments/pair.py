@@ -1651,7 +1651,7 @@ def main(argv=None) -> int:
             if not toy:
                 pool.check_frozen([job], allow_unfrozen=True)      # a candidate / screening job needs prereg-v1
                 gates.check_lease(pool.WHO)
-                if job.get("split") in pool.QUIET_SPLITS:
+                if pool.is_quiet(job):
                     gates.check_serving_stopped()
                 gates.wait_cool(log=lambda m: print(m, file=sys.stderr))
             rec = run_pair(job, opts)

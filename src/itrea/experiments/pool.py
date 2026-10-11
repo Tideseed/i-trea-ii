@@ -24,7 +24,8 @@ let the memory gate admit A6m below D-020's 81 GB).
 Gates before EVERY run, re-evaluated together in one loop until a single pass clears them all (a long thermal or memory
 wait never releases a run on a stale lease or serving check): the box-window lease (`i-trea-ii (Claude Code)`), the
 local model servers stopped for test and screening jobs and on the whole-box lane, fan-governor's rest flag (D-009),
-the thermal start gate (< 80 °C GPU arms, < 88 °C CPU-only arms, D-008), and D-003's memory formula over the run plus
+the thermal start gate (< 80 °C GPU arms, < 86 °C CPU-only arms, D-008, D-021 R24; 88 until 2026-10-11), and D-003's
+memory formula over the run plus
 every run already ADMITTED (lanes still waiting at the gate never count; the anonymous memory the admitted runs already
 use is credited back, since MemAvailable no longer contains it). Admission is atomic. A memory wait that times out
 voids and requeues its block while other runs are in flight, and halts only when nothing is. A live watchdog stops the
@@ -45,7 +46,12 @@ non-toy jobs need it unless `--allow-unfrozen`. Only toy instances (outside data
 smoke exemptions.
 
 ITX-1 (D-021, 2026-10-11): a GPU run also starts only while fan-governor is alive (its state file younger than 30 s)
-with its clock cap off (R24; `--no-governor` for a host without it; a governor gone for `governor_timeout_s` halts);
+with its clock cap off (R24; `--no-governor` for a host without it; a governor gone for `governor_timeout_s` halts, also
+while its rest flag holds the pool — only the governor removes it); jobs with a harness are quiet like test and
+screening jobs (both model servers stopped, checked before every run; `--allow-serving` refused); R26's breaker: after
+`--max-heat-voids` (2) thermal or cap voids — one thermal pause counts once — no new block opens and the pool ends
+`halted`; a cap void with the governor's cap off before and after and no cap interval in its log (an unknown clock
+lock) halts at once; `external_kill` (a SIGKILL nobody in the harness sent) is rerun once like the causes below;
 `--pause-c` lowers the watchdog's pause / void line (M2's soak: 90; never above 92); the runner's new void causes
 (pair.void_checks: `gpu_cap` below `--cap-floor-mhz` 2,300 or on a governor clock cap, `compiled_on_clock` and
 `cuopt_memory` under a harness) void the block, which is rerun once, first and whole (a cap-voided block only after
@@ -101,6 +107,12 @@ FROZEN_CONFIG = "configs/frozen-e2.yaml"
 E0_FLAG = "configs/e0-calibration.yaml"
 CONFIRM_SPLITS = ("test",)
 QUIET_SPLITS = ("test", "screen")         # both local model servers must be stopped (D-002 §1, D-003)
+
+
+def is_quiet(job: dict) -> bool:
+    """Both local model servers must be stopped for this job: test and screening jobs (D-002 §1, D-003) and every job
+    with a D-021 harness (R26: ITX windows run with both servers off)."""
+    return job.get("split") in QUIET_SPLITS or job.get("harness") is not None
 JOB_FIELDS = ("instance", "set", "name", "arm", "seed", "budget", "config", "overrides", "stratum", "split", "block")
 
 # GPU lane + CPU lanes for pair runs; X925 = 5–9, 15–19; A725 = 1–4, 10–14 (core 0: Redis)
@@ -110,7 +122,8 @@ PAIR_CPU_LANES = (pair.Lane("c1", (7, 8)), pair.Lane("c2", (9, 15)), pair.Lane("
 # nine, not ten: D-003's gate (Σ 9 GiB caps + 20 GB reserve) must fit MemAvailable (~108 GB, both servers stopped)
 SCREEN_LANES = tuple(pair.Lane(f"x{c}", (c,)) for c in (5, 6, 7, 8, 9, 15, 16, 17, 18))
 FULL_ARMS = tuple(a for a, spec in pair.ARMS.items() if spec.lane == "full")     # ("A6m",): the whole-box lane's arms
-REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory")   # D-021 voids rerun once (thermal_watch: thermal)
+REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory", "external_kill")   # rerun once (thermal_watch:
+                                                                                      # as a thermal void)
 A6M_MEM_GB = dict(cuopt_mem_gb=24.0, gpu_mem_gb=36.0)    # D-020: A6m's host MemoryMax and RMM limit (GAMS's max RSS
                                                          # <= 16 GB on the sample, 49 GB at most over the 233)
 # harness settings a run may not change from PairOptions() defaults, per split (D-002 §1.2 / §1.8, D-003)
@@ -474,8 +487,9 @@ class PoolOptions:
     max_open_blocks: int | None = None     # default: number of lanes
     max_blocks: int | None = None          # stop after opening this many blocks (tests, trial windows)
     max_thermal_requeues: int = 1          # a block voided by the thermal pause is rerun at most this often (2026-10-11)
-    max_cause_requeues: int = 1            # D-021: a block voided by gpu_cap / compiled_on_clock / cuopt_memory is
-                                           # rerun once (per cause), then skipped and listed
+    max_cause_requeues: int = 1            # D-021: a block voided by gpu_cap / compiled_on_clock / cuopt_memory /
+                                           # external_kill is rerun once (per cause), then skipped and listed
+    max_heat_voids: int = 2                # D-021 R26: after this many thermal / cap voids no new block (0 = off)
     pause_c: float = gates.THERMAL_PAUSE_C  # the watchdog's pause / void line (D-021 M2: 90 for the soak); <= 92
     governor: bool = True                  # D-021 R24: GPU runs start only with the fan governor alive and its cap off
                                            # (False: tests, or a host without the governor)
@@ -501,6 +515,9 @@ class Pool:
         self.abort_kind: str | None = None
         self.abort_text: str = ""
         self.halt_reason: str | None = None
+        self.breaker: str | None = None    # D-021 R26: set after max_heat_voids thermal / cap voids (no new block)
+        self.heat_voids: set = set()       # the thermal / cap voids counted for it
+        self.thermal_episode = 0           # watchdog thermal pauses so far (one pause = one void for R26)
         self.skipped: list[dict] = []      # blocks given up (thermal requeue cap): set, block, reason, run ids
         self.stopping: str | None = None
         self.inflight: dict[str, Inflight] = {}
@@ -526,7 +543,8 @@ class Pool:
     def write_status(self, state: str) -> None:
         d = dict(state=state, pid=os.getpid(), window=self.window, updated=datetime.now().astimezone().isoformat(),
                  jobs=len(self.jobs), blocks=len(self.blocks), opened=self.opened, counts=self.counts,
-                 stopping=self.stopping, halt=self.halt_reason, abort=self.abort_text if self.abort.is_set() else None,
+                 stopping=self.stopping, halt=self.halt_reason or self.breaker,
+                 abort=self.abort_text if self.abort.is_set() else None,
                  skipped=self.skipped,
                  lanes=[dataclasses.asdict(l) for l in self.lanes],
                  running=[dict(lane=k, run=e.run.run_dir.name if e.run.run_dir else None, block=e.run.block.id,
@@ -599,14 +617,15 @@ class Pool:
         smoke_only = all(j.get("split") == "smoke" and make_jobs.is_toy(j, names, roots) for j in self.jobs)
         check_layout(self.jobs, o.layout)
         full = o.layout == "full"                  # D-020: the box to itself, no foreign GPU process
-        quiet = any(j.get("split") in QUIET_SPLITS for j in self.jobs) or full
+        quiet = any(is_quiet(j) for j in self.jobs) or full
         if not o.require_lease and not smoke_only:
             raise gates.GateError("--no-lease is for toy smoke tests only (every job split == 'smoke' on a toy "
                                   "instance outside data/)")
         if o.rerun_failed and any(j.get("split") in CONFIRM_SPLITS for j in self.jobs):
             raise gates.GateError("--rerun-failed is not allowed with test jobs (a crash is kept, D-002 §6)")
         if o.allow_serving and quiet:
-            raise gates.GateError("--allow-serving is not allowed with test or screening jobs or --layout full "
+            raise gates.GateError("--allow-serving is not allowed with test or screening jobs, jobs with a D-021 "
+                                  "harness or --layout full "
                                   "(D-002 §1.2, D-003, D-020: both local model servers stopped)")
         self.freeze = check_frozen(self.jobs, o.allow_unfrozen, o.root)
         check_registered_harness(self.jobs, po)
@@ -920,7 +939,22 @@ class Pool:
                 self._halt(reason)
             elif kind == "thermal" and not self.abort.is_set():
                 self.abort_kind, self.abort_text = "thermal", reason
+                self.thermal_episode += 1
                 self.abort.set()
+            self.cv.notify_all()
+
+    def _heat_void(self, key: tuple, cause: str) -> None:
+        """Under self.cv. D-021 R26: a window closes after `max_heat_voids` thermal or cap voids. One thermal pause
+        episode is one void however many blocks it voided; each gpu_cap or thermal_watch run void is one. At the limit
+        no new block opens (blocks already open finish: a stop never splits a block) and the pool ends `halted`."""
+        self.heat_voids.add(key)
+        n = self.o.max_heat_voids
+        if n and len(self.heat_voids) >= n and self.breaker is None:
+            kinds = sorted({k[0] for k in self.heat_voids})
+            self.breaker = (f"R26: {len(self.heat_voids)} thermal / cap voids in this run set ({', '.join(kinds)}; last "
+                            f"{cause}): no new block; the window closes")
+            self.stopping = self.stopping or self.breaker
+            self.log(f"BREAKER: {self.breaker}")
             self.cv.notify_all()
 
     def _run_use_gb(self, run: Run) -> float:
@@ -951,7 +985,7 @@ class Pool:
         memory wait that times out while other runs are in flight voids and requeues the block (D-002 §6: the memory
         gate is an external cause); with nothing admitted it halts."""
         o = self.o
-        t_end = m_end = g_end = g_kind = None
+        t_end = m_end = g_end = g_kind = r_end = None
         last_log = [0.0]
 
         def wait_log(msg: str) -> None:            # at most one line a minute per lane
@@ -965,15 +999,26 @@ class Pool:
             try:
                 if o.require_lease:
                     gates.check_lease(o.who)
-                if r.job.get("split") in QUIET_SPLITS or lane.whole_box:
+                if is_quiet(r.job) or lane.whole_box:
                     gates.check_serving_stopped()
             except gates.GateError as e:
                 return ("halt", str(e))
             now = time.monotonic()
             if gates.rest_due():                   # D-009: honour fan-governor's rest — no new run until it clears
+                if o.governor:                     # only the governor removes the flag: is it still running?
+                    st = gates.fan_state()
+                    if st is None or (st.get("age_s") or 0.0) >= gates.GOVERNOR_MAX_AGE_S:
+                        r_end = r_end or now + o.governor_timeout_s
+                        if now > r_end:
+                            return ("halt", f"rest flag present but the fan governor is not running (state "
+                                            f"{'missing' if st is None else str(st.get('age_s')) + ' s old'}; "
+                                            f"waited {o.governor_timeout_s:.0f} s)")
+                    else:
+                        r_end = None
                 wait_log("fan-governor rest flag: starting nothing until the box has rested")
                 self.abort.wait(min(o.thermal_poll_s, 10.0))
                 continue
+            r_end = None
             t = gates.acpi_max_c()
             start_c = o.thermal_start_c if _arm_uses_gpu(r.job) else o.thermal_start_c_cpu
             if t is not None and t >= start_c:
@@ -1043,6 +1088,8 @@ class Pool:
                     r.block.state, r.block.void_reason = "voiding", f"abort before start: {self.abort_text}"
                     r.block.requeue = self.abort_kind == "thermal"
                     r.block.requeue_cause = "thermal" if r.block.requeue else None
+                    if r.block.requeue:
+                        self._heat_void(("pause", self.thermal_episode), "thermal")
             return "not-run"
         late = self._too_late(r)
         if late:
@@ -1073,12 +1120,22 @@ class Pool:
                 elif cause == "runner_error":          # a launcher / environment failure: halt for a look
                     self._halt(f"runner error in {rec['run_id']}: {'; '.join(rec['reasons'])[:300]}")
                     r.block.requeue = False
+                elif cause == "gpu_cap" and ((rec.get("void_info") or {}).get("gpu_cap") or {}).get("unknown_lock"):
+                    # a low clock with the governor reading cap=0 at the start and the end and no cap interval in its
+                    # log: a lock the governor does not know about (left by a restart) and will not release
+                    self._halt(f"unknown GPU clock lock in {rec['run_id']}: {rec['void_checks'].get('gpu_cap')} with "
+                               f"the governor's cap off before and after and no cap interval (`nvidia-smi -rgc` "
+                               f"needs root; look before resuming)")
+                    r.block.requeue = False
                 elif self.abort_kind == "thermal" or cause == "thermal_watch":    # 98 °C stop: as the thermal pause
                     r.block.requeue, r.block.requeue_cause = True, "thermal"
+                    self._heat_void(("pause", self.thermal_episode) if self.abort_kind == "thermal"
+                                    else ("thermal_watch", rec["run_id"], time.time()), cause or "thermal")
                 elif cause in REQUEUE_CAUSES:          # D-021: requeued once, then skipped and listed
                     r.block.requeue, r.block.requeue_cause = True, cause
                     if cause == "gpu_cap":
                         r.block.wait_auto = True
+                        self._heat_void(("gpu_cap", rec["run_id"], time.time()), cause)
                 if r.block.state != "voiding":
                     r.block.state = "voiding"
                     r.block.void_reason = f"{cause}: {'; '.join(rec['reasons'])[:300]}"
@@ -1241,12 +1298,13 @@ class Pool:
                 self.watchdog.stop()
             if self.sampler is not None:
                 self.sampler.stop()
-        state = "halted" if self.halt_reason else ("stopped" if self.stopping else "done")
+        halted = self.halt_reason or self.breaker
+        state = "halted" if halted else ("stopped" if self.stopping else "done")
         self.write_status(state)
         self.log(f"pool {self.window} {state}: {json.dumps(self.counts)}"
-                 + (f"; {self.halt_reason}" if self.halt_reason else "")
-                 + (f"; {self.stopping}" if self.stopping and not self.halt_reason else ""))
-        return 3 if self.halt_reason else 0
+                 + (f"; {halted}" if halted else "")
+                 + (f"; {self.stopping}" if self.stopping and not halted else ""))
+        return 3 if halted else 0
 
     def _resources_record(self) -> None:
         """Once per pool session: what the run set was allotted and what else ran (kept OUT of traces/raw)."""
@@ -1320,6 +1378,9 @@ def main(argv=None) -> int:
                     help="a GPU run whose busy SM median is below this, or that overlaps a fan-governor clock cap, is "
                          "a cap void (gpu_cap: the block is rerun once after the fan is back on AUTO; D-021 R25); "
                          "the 2,000-MHz stuck-clock halt is separate")
+    ap.add_argument("--max-heat-voids", type=int, default=2,
+                    help="D-021 R26: after this many thermal or cap voids (one thermal pause = one) open no new block "
+                         "and end the pool `halted` (0 = off)")
     ap.add_argument("--no-governor", action="store_true",
                     help="do not require the fan governor (alive, cap off) before GPU runs: hosts without it only")
     ap.add_argument("--dry-run", action="store_true")
@@ -1345,7 +1406,8 @@ def main(argv=None) -> int:
                        deadline=_deadline(a.deadline), allow_unfrozen=a.allow_unfrozen, allow_serving=a.allow_serving,
                        rerun_failed=a.rerun_failed, order_seed=a.order_seed, logs_dir=a.logs_dir,
                        max_blocks=a.max_blocks, max_thermal_requeues=a.max_thermal_requeues, dry_run=a.dry_run,
-                       pause_c=a.pause_c, governor=not a.no_governor, pair_opts=po)
+                       pause_c=a.pause_c, governor=not a.no_governor, max_heat_voids=a.max_heat_voids,
+                       pair_opts=po)
     po.tolerate_serving_gpu = bool(a.allow_serving)
     prev = pair.install_term_handlers()        # SIGTERM / SIGHUP -> the KeyboardInterrupt cleanup (halt, stop runs)
     if not a.no_pin:
