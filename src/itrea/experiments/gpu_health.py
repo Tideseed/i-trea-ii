@@ -32,6 +32,9 @@ from typing import Callable
 GPU_QUERY = ["nvidia-smi", "--query-gpu=clocks.sm,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]
 APPS_QUERY = ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"]
 CLOCK_FLOOR_MHZ = 2000.0
+CAP_FLOOR_MHZ = 2300.0        # D-021 R25: a GPU run whose busy SM median is below this is a cap void (`gpu_cap`: the
+                              # fan governor's 2,200-MHz lock passes the 2,000-MHz floor; healthy runs 2,392–2,405 MHz).
+                              # Not a halt: the stuck-low-clock fault keeps CLOCK_FLOOR_MHZ
 FOREIGN_MAX_SHARE = 0.02
 BUSY_UTIL = 30.0
 COVERAGE_MIN = 0.5            # a GPU run needs at least half of the expected samples over its timed window ...

@@ -296,3 +296,74 @@ def test_serving_processes_tolerated_only_when_asked(tmp_path):
     s = loose.summary(gpu_run=True)
     assert s["verdict"] == "ok" and s["tolerated_pids"] == [111] and s["foreign_pids"] == []
     assert not serving(222)
+
+
+# ------------------------------------------------------------------------------------- fan governor, thermal-watch
+GOV_LOG = """2026-10-04T21:50:00+02:00 fan -> max (zone max 80C, gpu 30W)
+2026-10-04T21:56:06+02:00 clock cap 2200 MHz on (zone max 93C at max fan, gpu 10W)
+2026-10-04T22:00:24+02:00 clock cap off (fan back on auto)
+2026-10-05T17:25:08+02:00 clock cap 2200 MHz on (zone max 90C at max fan, gpu 28W)
+2026-10-05T17:27:00+02:00 start: override=max zone max 88C gpu 20W
+2026-10-06T02:52:46+02:00 clock cap 2200 MHz on (zone max 88C at max fan, gpu 4W)
+"""
+
+
+def _ep(iso: str) -> float:
+    return datetime.fromisoformat(iso).timestamp()
+
+
+def test_fan_state_parsing_age_and_the_start_gate(tmp_path):
+    """D-021 R24: fan-governor's state line parsed; a GPU run may start only with a fresh state (< 30 s) and cap=0,
+    and a cap-voided block also waits for the fan on AUTO."""
+    line = "2026-10-11T13:30:19+02:00 state=max for=479s zone=48 gpu=16W rest=no cap=0"
+    d = gates.parse_fan_state(line)
+    assert (d["state"], d["for_s"], d["zone_c"], d["gpu_w"], d["rest"], d["cap"]) == ("max", 479.0, 48.0, 16.0, False, 0)
+    assert d["epoch"] == _ep("2026-10-11T13:30:19+02:00")
+    p = tmp_path / "fan-state"
+    assert gates.fan_state(p) is None and "no state file" in gates.governor_block(None)
+    p.write_text(line + "\n")
+    st = gates.fan_state(p, now=p.stat().st_mtime + 5)
+    assert st["raw"] == line and st["age_s"] == 5.0 and gates.governor_block(st) is None
+    assert "AUTO" in gates.governor_block(st, need_auto=True)
+    assert "old" in gates.governor_block(gates.fan_state(p, now=p.stat().st_mtime + 31))
+    p.write_text(line.replace("cap=0", "cap=1"))
+    assert "clock cap on" in gates.governor_block(gates.fan_state(p, now=p.stat().st_mtime))
+    p.write_text(line.replace("state=max", "state=auto"))
+    assert gates.governor_block(gates.fan_state(p, now=p.stat().st_mtime), need_auto=True) is None
+
+
+def test_cap_intervals_and_overlaps(tmp_path):
+    """The governor's clock-cap intervals from its log; a restart line closes an open one; the last one still open."""
+    log = tmp_path / "fan-governor.log"
+    log.write_text(GOV_LOG)
+    iv = gates.cap_intervals(log)
+    assert iv == [(_ep("2026-10-04T21:56:06+02:00"), _ep("2026-10-04T22:00:24+02:00")),
+                  (_ep("2026-10-05T17:25:08+02:00"), _ep("2026-10-05T17:27:00+02:00")),
+                  (_ep("2026-10-06T02:52:46+02:00"), None)]
+    t = _ep("2026-10-04T21:58:00+02:00")
+    assert len(gates.cap_overlaps(t - 600, t - 300, log)) == 0                   # before the cap
+    assert len(gates.cap_overlaps(t - 300, t, log)) == 1                         # the cap came on in the run
+    assert gates.cap_overlaps(_ep("2026-10-07T10:00:00+02:00"), _ep("2026-10-07T10:10:00+02:00"), log)[0]["off"] is None
+    assert gates.cap_intervals(tmp_path / "missing.log") == []
+
+
+def test_thermal_watch_stop_lines_across_midnight(tmp_path):
+    """D-021 R27: thermal-watch's `HOT <n>C stopped:` lines inside a window, read from every daily log it touches."""
+    (tmp_path / "2026-10-11.log").write_text("2026-10-11T23:59:30+02:00 acpi_max=97C gpu=70,80,2400\n"
+                                             "2026-10-11T23:59:40+02:00 HOT 98C stopped: itrea-run-ab-cuopt-1.scope\n")
+    (tmp_path / "2026-10-12.log").write_text("2026-10-12T00:00:10+02:00 HOT 99C stopped: none\n")
+    a, b = _ep("2026-10-11T23:59:00+02:00"), _ep("2026-10-12T00:01:00+02:00")
+    got = gates.thermal_watch_stops(a, b, tmp_path)
+    assert len(got) == 2 and "itrea-run-ab-cuopt-1.scope" in got[0]
+    assert gates.thermal_watch_stops(a, _ep("2026-10-11T23:59:35+02:00"), tmp_path) == []
+    assert gates.THERMAL_DIR / "fan-state" == gates.FAN_STATE and gates.REST_FLAG == gates.THERMAL_DIR / "rest"
+
+
+def test_thermal_watch_hot_line_parsing():
+    """thermal-watch's stop line names the units it stopped (`.scope` dropped); `stopped: none` names none."""
+    d = gates.parse_hot_line("2026-10-11T23:59:40+02:00 HOT 98C stopped: itrea-run-ab12-cuopt-1791716000123.scope "
+                             "issue7.service")
+    assert d["c"] == 98.0 and d["units"] == ["itrea-run-ab12-cuopt-1791716000123", "issue7.service"]
+    assert d["epoch"] == _ep("2026-10-11T23:59:40+02:00")
+    assert gates.parse_hot_line("2026-10-11T23:59:40+02:00 HOT 99C stopped: none")["units"] == []
+    assert gates.parse_hot_line("2026-10-11T23:59:40+02:00 acpi_max=97C gpu=1")["units"] == []

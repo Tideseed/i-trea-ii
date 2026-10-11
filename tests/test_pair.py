@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -38,7 +39,8 @@ if os.environ.get("FAKE_ENV_OUT"):                      # what the process inher
     import json
     with open(os.environ["FAKE_ENV_OUT"] + "." + role, "w") as fh:
         json.dump({k: os.environ.get(k) for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-                                                  "ITREA_ROLE", "CUPY_GPU_MEMORY_LIMIT", "PYTHONUNBUFFERED")}, fh)
+                                                  "ITREA_ROLE", "CUPY_GPU_MEMORY_LIMIT", "PYTHONUNBUFFERED",
+                                                  "CUDA_CACHE_PATH", "CUDA_CACHE_MAXSIZE")}, fh)
 mb = open_mailbox(a.mailbox, role, run_id=a.run_id)
 tr = Trace(a.run_dir, role, arm=a.arm, seed=int(a.seed))
 if os.environ.get("FAKE_EXIT_EARLY_" + R):
@@ -51,6 +53,21 @@ try:
 except RuntimeError:
     sys.exit(0)                       # stopped before start: a normal end
 tr.start(t0)
+if os.environ.get("FAKE_CUDA_COMPILE_" + R):            # a CUDA JIT entry written on the clock (D-021 R15)
+    d = os.path.join(os.environ["CUDA_CACHE_PATH"], "a", "b")
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "0123abcd"), "w").write("x")
+if os.environ.get("FAKE_RMM_FAIL_" + R):                # cuOpt's RMM allocation error (D-021 R29)
+    time.sleep(0.2)
+    lim = 24 * 1024**3
+    tr.close(exit_reason="exception", error_status=6, rmm_limit_bytes=lim,
+             rmm_peak_bytes=int(float(os.environ["FAKE_RMM_FAIL_" + R]) * lim),
+             error="CuoptError: cuOpt error status 6: Memory allocation failed")
+    sys.exit(1)
+if os.environ.get("FAKE_SIGKILL_SELF_" + R):            # killed by someone the runner does not know
+    time.sleep(0.2)
+    import signal as _s
+    os.kill(os.getpid(), _s.SIGKILL)
 base = float(os.environ.get("FAKE_BASE_" + R, "100"))
 k = 0
 while time.monotonic() - t0 < float(a.budget) and not mb.stopped():
@@ -230,6 +247,43 @@ def test_existing_run_hashes_are_pinned():
     assert h("A9", "configs/itrea2-dev-rc-3way-bo1.yaml", "bo1") == "f67354be775d"
     assert h("A9", "configs/itrea2-dev-rc-3way-bo1s.yaml", "bo1s") == "62bf82b236f6"
     assert h("A3x", "configs/itrea2-dev-rc-3way.yaml") == "1d12ad490dd0"
+    assert h("A9", "configs/itrea2-dev-rc-3way.yaml") == "0f011a2094a2"       # the A9 development default
+    # A6m (D-020) under the full lane's settings
+    full = pair.PairOptions(lane=pair.FULL_LANE, gpu_mem_gb=36.0, cuopt_mem_gb=24.0)
+    a6m = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A6m", seed=0, budget=600, config=None)
+    assert pair.run_hash(a6m, full) == "2bdfb1d95b46"
+
+
+def test_d021_run_hashes_are_pinned():
+    """The new arms and the harness (D-021) get these ids; the harness — with its footprint: F's cores and the other
+    processes' host caps — enters the hash only when the job has one."""
+    o = pair.PairOptions()
+
+    def h(arm, harness=None, config=None, opts=o):
+        j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm=arm, seed=0, budget=600, config=config)
+        if harness is not None:
+            j["harness"] = harness
+        return pair.run_hash(j, opts)
+    a9 = "configs/itrea2-dev-rc-3way.yaml"
+    pinned = {("A6F", None): "21b799abb61f", ("A2F", None): "ba509eeea380", ("A6F", "ext"): "82a371305f88",
+              ("A2F", "ext"): "d4d89da16786", ("A9", "ext"): "28e5a5e9c725", ("A6", "ext"): "e54170304dad",
+              ("A2", "ext"): "9c3031af075f"}
+    got = {k: h(k[0], k[1], a9 if k[0] == "A9" else None) for k in pinned}
+    assert got == pinned, got
+    m3 = {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40, "cuopt_memory_void": False}
+    assert h("A6F", m3) == h("A6F", dict(m3, cuopt_rmm_gb=40.0, cuopt_host_gb=40.0)) == "d3aba2773933"
+    assert h("A6F", {"preset": "ext", "cuopt_env_unset": False}) == "ffae965f6746"
+    assert h("A9", {"preset": "ext", "cuopt_gap_zero": False, "cuopt_env_unset": False}, a9) == "8fb5259680b1"
+    assert h("A6F", {"preset": "ext"}) == h("A6F", "ext") != h("A6F")
+    assert h("A9", "ext", a9) != h("A9", None, a9) == "0f011a2094a2"
+    # the footprint: a re-laid F of the same size, or other SCIP / EA host caps, is another configuration (with a
+    # harness only; without one the hash stays as before)
+    relaid = pair.PairOptions(lane=pair.Lane("g0", (5, 7), (1, 2, 3), gpu=True))
+    assert h("A6F", "ext", opts=relaid) != h("A6F", "ext") and h("A9", "ext", a9, relaid) != h("A9", "ext", a9)
+    assert h("A6F", opts=relaid) == h("A6F") and h("A9", None, a9, relaid) == h("A9", None, a9)
+    caps = pair.PairOptions(solver_mem_gb=8.0, ea_mem_gb=5.0)
+    assert h("A9", "ext", a9, caps) != h("A9", "ext", a9) and h("A2F", "ext", opts=caps) != h("A2F", "ext")
+    assert h("A6F", "ext", opts=caps) == h("A6F", "ext")                    # A6F has no SCIP or EA process
 
 
 def test_a6m_identity_settings_and_lane(toy, tmp_path):
@@ -262,7 +316,8 @@ def test_a6m_identity_settings_and_lane(toy, tmp_path):
     with pytest.raises(pair.RunError, match="fixed by the arm"):
         pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, cuopt_threads=3))
     assert not pair.GPU_LANE.fits(pair.ARMS["A6m"]) and pair.FULL_LANE.fits(pair.ARMS["A6m"])
-    assert pair.ARM_ORDER[-1] == "A6m"                     # appended: the canonical order of the other arms is unchanged
+    # appended after A3x, and A6F / A2F (D-021) after it: the canonical order of the earlier arms is unchanged
+    assert pair.ARM_ORDER[pair.ARM_ORDER.index("A3x") + 1:] == ("A6m", "A6F", "A2F")
 
 
 def _launch_env_before_a6m(p, base: dict) -> dict:
@@ -546,3 +601,311 @@ def test_run_record_has_the_box_load_and_heat(toy, fake, tmp_path, monkeypatch):
     assert a["samples"] >= 2 and a["max_c"] >= 73.0 and a["period_s"] == 0.2
     assert pair.run_pair(job(toy, "A0", seed=2, budget=0.3), opts_for(tmp_path, fake))["acpi_during"] is None
     assert gates.loadavg_1m() is None or gates.loadavg_1m() >= 0
+
+
+# ================================================================================================ D-021 (ITX-1)
+def test_f_arms_take_the_gpu_lanes_cores(toy, tmp_path):
+    """A6F = cuOpt alone on all of F (the GPU lane's cores: X925 5–6 + A725 1–3), num_cpu_threads = |F|; A2F = SCIP on
+    F's first X925 core and cuOpt on the other |F| - 1 cores with |F| - 1 threads, no exchange. F comes from the lane,
+    so another lane gives another F (and another run id)."""
+    procs, o, rd = _plan(toy, tmp_path, "A6F")
+    (c,) = procs.values()
+    F = sorted(pair.GPU_LANE.x925 + pair.GPU_LANE.a725)
+    assert c.cores == F == [1, 2, 3, 5, 6] and c.argv[c.argv.index("--cpu-threads") + 1] == str(len(F))
+    assert c.mem_gb == 12.0 and c.gpu_gb == EAConfig().gpu_mem_gb and "--mip-gap-zero" not in c.argv
+    assert "--send" not in c.argv and c.env_unset == () and c.env_extra["OMP_NUM_THREADS"] == "1"
+    assert c.cmd[c.cmd.index("taskset") + 2] == "1,2,3,5,6"
+    procs, _, _ = _plan(toy, tmp_path, "A2F")
+    s, c = procs["solver"], procs["cuopt"]
+    assert s.cores == [5] and "--inert" in s.argv and c.cores == [1, 2, 3, 6]
+    assert c.argv[c.argv.index("--cpu-threads") + 1] == "4" and "--send" not in c.argv
+    wide = pair.Lane("w", (5, 6, 7), (1, 2, 3, 4), gpu=True)
+    j = job(toy, "A6F", seed=0, budget=600)
+    assert pair.run_hash(j, opts_for(tmp_path, lane=wide)) != pair.run_hash(j, opts_for(tmp_path))
+    cfg, _ = pair.effective_config(j, opts_for(tmp_path, lane=wide))
+    (cw,) = pair.plan(j, opts_for(tmp_path, lane=wide), tmp_path / "x", "S", cfg)
+    assert cw.cores == [1, 2, 3, 4, 5, 6, 7] and cw.argv[cw.argv.index("--cpu-threads") + 1] == "7"
+    with pytest.raises(pair.RunError, match="contradicts"):
+        pair.run_hash(j, opts_for(tmp_path, cuopt_threads=3))
+    assert not pair.Lane("c1", (7, 8)).fits(pair.ARMS["A6F"]) and not pair.FULL_LANE.fits(pair.ARMS["A2F"])
+    assert pair.ARMS["A6F"].lane == pair.ARMS["A2F"].lane == "partner"
+
+
+def test_harness_presets_overrides_and_refusals(toy):
+    ext = pair.resolve_harness("ext")
+    assert ext == dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0,
+                       cuda_cache=True, cuopt_memory_void=True)
+    assert pair.resolve_harness(None) is None and pair.resolve_harness({}) == ext
+    assert pair.resolve_harness({"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40})["cuopt_rmm_gb"] == 40.0
+    assert pair.resolve_harness({"cuopt_env_unset": False})["cuopt_env_unset"] is False
+    for bad, text in (("int", "unknown harness"), ({"preset": "nope"}, "unknown harness"),
+                      ({"cuopt_rmm": 40}, "unknown harness keys"), ({"cuopt_rmm_gb": 0}, "positive"),
+                      ({"cuopt_rmm_gb": True}, "positive"), ({"cuda_cache": "yes"}, "true or false"), (3, "preset")):
+        with pytest.raises(pair.RunError, match=text):
+            pair.resolve_harness(bad)
+    with pytest.raises(pair.RunError, match="D-020's own settings"):
+        pair.job_harness(job(toy, "A6m", harness="ext"))
+
+
+def test_harness_ext_plans_every_cuopt_process(toy, tmp_path):
+    """Under the ext harness (D-021 R13, R14, R15, R29): cuOpt gets gaps 0, no thread variables, its own RMM limit
+    (24 GB, separate from the EA's 12-GB pool) and host MemoryMax 24 GB; every process gets the project's CUDA JIT
+    cache. Without the harness nothing changes."""
+    base = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
+    o = opts_for(tmp_path, use_systemd=True, pin=True, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0,
+                 cuda_cache_dir=tmp_path / "cuda")
+    for arm in ("A9", "A6F", "A2F", "A6", "A2"):
+        cfgf = "configs/itrea2-dev-rc-3way.yaml" if arm == "A9" else None
+        j = job(toy, arm, seed=0, budget=600, config=cfgf, harness="ext")
+        cfg, _ = pair.effective_config(j, o)
+        procs = {p.role: p for p in pair.plan(j, o, tmp_path / "rd" / pair.run_id_for(j, o), "S", cfg)}
+        c = procs["cuopt"]
+        assert c.mem_gb == 24.0 and c.gpu_gb == 24.0 and "--mip-gap-zero" in c.argv, arm
+        assert c.argv[c.argv.index("--gpu-mem-gb") + 1] == "24.0" and "MemoryMax=24576M" in c.cmd
+        assert c.env_unset == pair.THREAD_VARS and not set(pair.THREAD_VARS) & set(pair.launch_env(c, base))
+        assert c.env_extra["CUPY_GPU_MEMORY_LIMIT"] == str(24 * 1024**3)
+        for p in procs.values():
+            assert p.env_extra["CUDA_CACHE_PATH"] == str(tmp_path / "cuda"), (arm, p.role)
+            assert p.env_extra["CUDA_CACHE_MAXSIZE"] == "4294967296"
+            if p.spec.kind != "cuopt":
+                assert p.env_unset == () and p.env_extra["OMP_NUM_THREADS"] == "1"
+        if arm == "A9":
+            ea = procs["ea"]
+            assert ea.gpu_gb == 12.0 and ea.mem_gb == 6.0 and "--send" in c.argv     # the EA keeps its own pool
+        j0 = dict(j)
+        j0.pop("harness")
+        p0 = {p.role: p for p in pair.plan(j0, o, tmp_path / "rd" / "x", "S", pair.effective_config(j0, o)[0])}
+        assert "CUDA_CACHE_PATH" not in p0["cuopt"].env_extra and p0["cuopt"].env_unset == ()
+    kept = job(toy, "A6F", seed=0, budget=120, harness={"preset": "ext", "cuopt_env_unset": False})
+    (c,) = pair.plan(kept, o, tmp_path / "x", "S", pair.effective_config(kept, o)[0])
+    assert c.env_unset == () and c.env_extra["OMP_NUM_THREADS"] == "1" and "--mip-gap-zero" in c.argv
+    with pytest.raises(pair.RunError, match="measured cuOpt peak"):
+        pair.job_budget(job(toy, "A6F", harness="ext"), opts_for(tmp_path, cuopt_gpu_peak_gb=10.5))
+
+
+def test_harness_memory_gate_follows_d003(toy, tmp_path):
+    """D-021 R29's gate arithmetic, from D-003's formula and the harness's caps (file mailbox; Redis adds 2 GB):
+    A9 ≈ 97 (99), A2F ≈ 78 (80), A6F ≈ 69 (71) GB, M3's A6F at RMM 40 / host 40 = 101 GB."""
+    o = opts_for(tmp_path, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0)
+    r = opts_for(tmp_path, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0, mailbox="redis")
+
+    def need(arm, harness, opts):
+        return pair.job_budget(job(toy, arm, seed=0, budget=600, harness=harness,
+                                   config="configs/itrea2-dev-rc-3way.yaml" if arm == "A9" else None), opts).need_gb
+    assert (need("A9", "ext", o), need("A9", "ext", r)) == (97.0, 99.0)
+    assert (need("A2F", "ext", o), need("A2F", "ext", r)) == (78.0, 80.0)
+    assert (need("A6F", "ext", o), need("A6F", "ext", r)) == (69.0, 71.0)
+    assert need("A6F", {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}, o) == 101.0
+    assert need("A9", None, o) == 9 + 6 + 12 + 12 + 12 + 2 + gates.RESERVE_GB         # unchanged without a harness
+
+
+def test_named_scopes(toy, tmp_path):
+    """D-021 R27: every process runs in a scope named itrea-run-<sha1(run directory name)[:12]>-<role>-<epoch_ms>
+    (never in argv, never in a hash), unique per launch — two jobs of one arm on different instances, or two lanes,
+    planned in the same millisecond get different names; every scope stops within 5 s, cuOpt's by SIGKILL."""
+    import hashlib
+    rid = "glass4__A9__s0__600s__28e5a5e9c725"
+    assert pair.scope_unit(rid, "cuopt", 1791716000123) == \
+        f"itrea-run-{hashlib.sha1(rid.encode()).hexdigest()[:12]}-cuopt-1791716000123"
+    o = opts_for(tmp_path, use_systemd=True, pin=True)
+    j = job(toy, "A9", seed=0, budget=600, config="configs/itrea2-dev-rc-3way.yaml")
+    rid = pair.run_id_for(j, o)
+    procs = pair.plan(j, o, tmp_path / "rd" / rid, "S", pair.effective_config(j, o)[0], epoch_ms=1791716000123)
+    for p in procs:
+        assert p.scope_unit == pair.scope_unit(rid, p.role, 1791716000123)
+        assert p.cmd[:5] == ["systemd-run", "--user", "--scope", "--quiet", f"--unit={p.scope_unit}"]
+        k = p.cmd.index("MemorySwapMax=0")
+        props = p.cmd[k + 1:p.cmd.index("taskset")]
+        assert props == (["-p", "TimeoutStopSec=5s", "-p", "KillSignal=SIGKILL"] if p.spec.kind == "cuopt"
+                         else ["-p", "TimeoutStopSec=5s"]), (p.role, props)
+        assert not any("--unit" in a or "TimeoutStopSec" in a for a in p.argv)
+    assert len({p.scope_unit for p in procs}) == 3
+    assert all(p.scope_unit is None for p in pair.plan(j, opts_for(tmp_path), tmp_path / "x", "S",
+                                                       pair.effective_config(j, o)[0]))
+    # one arm, two instances, one epoch (the screening / A0-lane case): different units
+    other = write_mps(set_cover(20, 12, seed=7), tmp_path / "other_sc.mps")
+    units = set()
+    for inst, lane in ((toy, pair.Lane("c1", (7, 8))), (other, pair.Lane("c2", (9, 15)))):
+        jj = job(inst, "A0", seed=901, budget=300)
+        oo = opts_for(tmp_path, use_systemd=True, pin=True, lane=lane)
+        (pp,) = pair.plan(jj, oo, tmp_path / "rd" / pair.run_id_for(jj, oo), "S", pair.effective_config(jj, oo)[0],
+                          epoch_ms=1791716000123)
+        units.add(pp.scope_unit)
+    assert len(units) == 2
+    (late,) = pair.plan(jj, oo, tmp_path / "rd" / pair.run_id_for(jj, oo), "S", pair.effective_config(jj, oo)[0],
+                        epoch_ms=1791716000124)
+    assert late.scope_unit not in units and len(late.scope_unit) < 255
+
+
+def test_cuda_compile_on_the_clock_voids_the_run(toy, fake, tmp_path, monkeypatch):
+    """D-021 R15: with the harness's CUDA cache, an entry written after t0 (the index file aside) voids the run
+    (`compiled_on_clock`); entries written before t0 and the index do not. Without a harness the cache is not set."""
+    cache = tmp_path / "cuda"
+    (cache / "x").mkdir(parents=True)
+    (cache / "x" / "old").write_text("warm")
+    o = opts_for(tmp_path, fake, cuda_cache_dir=cache)
+    monkeypatch.setenv("FAKE_ENV_OUT", str(tmp_path / "env"))
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.5, harness="ext"), o)
+    assert rec["status"] == "completed" and rec["compiled_on_clock_cuda"] is False, rec["reasons"]
+    seen = json.loads((tmp_path / "env.cuopt").read_text())
+    assert seen["CUDA_CACHE_PATH"] == str(cache) and seen["OMP_NUM_THREADS"] is None
+    (cache / "index").write_text("rewritten on the clock")          # ignored
+    monkeypatch.setenv("FAKE_CUDA_COMPILE_CUOPT", "1")
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=0.5, harness="ext"), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "compiled_on_clock", rec["reasons"]
+    assert rec["compiled_on_clock_cuda"] is True and rec["cuda_cache"]["entries_on_clock"] == ["a/b/0123abcd"]
+    monkeypatch.delenv("FAKE_CUDA_COMPILE_CUOPT")
+    rec = pair.run_pair(job(toy, "A6F", seed=2, budget=0.5), o)       # no harness: no cache variable, no check
+    assert rec["status"] == "completed" and rec["cuda_cache"] is None and rec["config"]["harness"] is None
+
+
+def test_cuopt_memory_needs_a_confirmed_cap(toy, fake, tmp_path, monkeypatch):
+    """D-021 R29: under the harness, cuOpt's RMM allocation error voids the run (`cuopt_memory`) only when its peak
+    reached 0.8 x the limit; below that it stays a failed run (recorded in void_info); without a harness it stays a
+    failed run; a failure of SCIP stays an arm outcome; M3's `cuopt_memory_void: false` records the cap hit and keeps
+    the run failed."""
+    o = opts_for(tmp_path, fake, cuda_cache_dir=tmp_path / "cuda")
+    monkeypatch.setenv("FAKE_RMM_FAIL_CUOPT", "0.98")
+    rec = pair.run_pair(job(toy, "A2F", seed=0, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "cuopt_memory", rec["reasons"]
+    assert "Memory allocation failed" in rec["void_checks"]["cuopt_memory"]
+    rec = pair.run_pair(job(toy, "A2F", seed=1, budget=2.0), o)
+    assert rec["status"] == "failed" and "void_cause" not in rec
+    m3 = {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40, "cuopt_memory_void": False}
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=2.0, harness=m3), o)
+    assert rec["status"] == "failed" and rec["void_checks"] == {} and "Memory" in rec["void_info"]["cuopt_memory"]
+    monkeypatch.setenv("FAKE_RMM_FAIL_CUOPT", "0.5")                      # far below the limit: not the cap
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "failed" and rec["void_checks"] == {} and rec["void_info"]["rmm_error_below_cap"]
+    monkeypatch.delenv("FAKE_RMM_FAIL_CUOPT")
+    monkeypatch.setenv("FAKE_CRASH_SOLVER", "3")
+    rec = pair.run_pair(job(toy, "A2F", seed=2, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "failed" and rec["void_checks"] == {}
+
+
+def test_cap_kill_is_confirmed_by_the_scope_or_the_peak(tmp_path):
+    """A SIGKILL the runner did not send is a cap kill only with the scope's Result oom-kill or maxrss >= 0.95 x
+    MemoryMax; a SIGKILL the runner sent, or another exit, never is."""
+    import resource
+    spec = pair.ProcSpec("cuopt", "cuopt")
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+
+    def proc(rss_gb, mem_gb=2.0, killed=None, unit="itrea-run-x-cuopt-1"):
+        p = pair.Proc(spec=spec, argv=[], cmd=[], cores=[1], mem_gb=mem_gb, gpu_gb=24.0, env_extra={},
+                      log_path=tmp_path / "x.log", scope_unit=unit, exit_code=-9, killed=killed)
+        p.rusage = type("RU", (), dict(ru_maxrss=int(rss_gb * 1048576)))()
+        return p
+    no = lambda unit: "signal"                                                      # noqa: E731
+    oom = lambda unit: "oom-kill"                                                   # noqa: E731
+    assert pair.cap_kill(proc(1.95), no) and pair.cap_kill(proc(0.1), oom)
+    assert pair.cap_kill(proc(0.1), no) is None and pair.cap_kill(proc(1.95, killed="SIGKILL"), oom) is None
+    p = proc(1.95)
+    p.exit_code = 1
+    assert pair.cap_kill(p, oom) is None and ru is not None
+
+
+def test_an_unexplained_sigkill_is_an_external_kill(toy, fake, tmp_path, monkeypatch):
+    """A SIGKILL of any process of any arm that the runner did not send, at no cap and not by thermal-watch, voids
+    the run (`external_kill`) — for SCIP as for cuOpt, with or without a harness."""
+    o = opts_for(tmp_path, fake, cuda_cache_dir=tmp_path / "cuda", thermal_watch_wait_s=0.5)
+    monkeypatch.setenv("FAKE_SIGKILL_SELF_SOLVER", "1")
+    rec = pair.run_pair(job(toy, "A2F", seed=0, budget=2.0), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "external_kill", rec["reasons"]
+    assert "solver: SIGKILL not sent by the runner" in rec["void_checks"]["external_kill"]
+    monkeypatch.delenv("FAKE_SIGKILL_SELF_SOLVER")
+    monkeypatch.setenv("FAKE_SIGKILL_SELF_CUOPT", "1")
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "external_kill" and "cuopt_memory" not in rec["void_checks"]
+
+
+def _with_units(monkeypatch):
+    """Give every planned process a scope unit name although the tests run without systemd."""
+    real = pair.plan
+
+    def plan(*a, **k):
+        procs = real(*a, **k)
+        for p in procs:
+            p.scope_unit = f"itrea-run-test-{p.role}"
+        return procs
+    monkeypatch.setattr(pair, "plan", plan)
+
+
+def test_thermal_watch_void_needs_our_scope_in_the_stop_line(toy, fake, tmp_path, monkeypatch):
+    """D-021 R27: a thermal-watch HOT line voids a run (`thermal_watch`) only when its stopped list names one of the
+    run's scopes; a line that names none (`stopped: none`, other units) is recorded, not a void. After an external
+    stop the runner waits for the line (it is written after the units are stopped); a SIGKILL explained by it is not
+    an external_kill."""
+    _with_units(monkeypatch)
+    o = opts_for(tmp_path, fake, thermal_watch_wait_s=6.0)
+    monkeypatch.setattr(gates, "thermal_watch_stops", lambda *a, **k: [
+        "2026-10-11T12:00:00+02:00 HOT 98C stopped: none", "2026-10-11T12:00:30+02:00 HOT 99C stopped: issue7.service"])
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.5), o)
+    assert rec["status"] == "completed" and rec["void_checks"] == {}
+    assert len(rec["void_info"]["thermal_watch_lines"]) == 2
+    calls = []
+
+    def later(*a, **k):                                     # the line appears a few seconds after the kill
+        calls.append(1)
+        return [] if len(calls) < 3 else ["2026-10-11T12:01:00+02:00 HOT 98C stopped: itrea-run-test-cuopt.scope "
+                                          "issue7.service"]
+    monkeypatch.setattr(gates, "thermal_watch_stops", later)
+    monkeypatch.setenv("FAKE_SIGKILL_SELF_CUOPT", "1")
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=2.0), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "thermal_watch", rec["reasons"]
+    assert "external_kill" not in rec["void_checks"] and len(calls) >= 3
+    procs = [pair.Proc(spec=pair.ProcSpec("scip", "solver"), argv=[], cmd=[], cores=[5], mem_gb=9, gpu_gb=None,
+                       env_extra={}, log_path=tmp_path / "s.log", scope_unit="itrea-run-ab-solver-1")]
+    assert pair.thermal_watch_hits(["2026-10-11T12:00:00+02:00 HOT 98C stopped: itrea-run-ab-solver-12.scope"],
+                                   procs) == ([], set())                          # a prefix is not our unit
+    assert pair.thermal_watch_hits(["2026-10-11T12:00:00+02:00 HOT 98C stopped: itrea-run-ab-solver-1.scope"],
+                                   procs)[1] == {"solver"}
+
+
+def test_governor_cap_voids_and_the_fan_states(toy, fake, tmp_path, monkeypatch):
+    """D-021 R25: a GPU run overlapping a governor clock-cap interval is a cap void (`gpu_cap`); a fan state reading
+    cap=1 voids only when its own timestamp lies inside the timed window (else it is recorded); a CPU-only run is
+    never a cap void; the start and end fan states and the start temperature are recorded."""
+    o = opts_for(tmp_path, fake, record_snapshots=True)
+    monkeypatch.setattr(gates, "cap_intervals", lambda *a, **k: [(0.0, None)])        # on since forever
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.5), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "gpu_cap", rec["reasons"]
+    assert rec["fan_state_start"]["state"] == "auto" and rec["fan_state_end"]["cap"] == 0 and "acpi_start_c" in rec
+    assert rec["void_info"]["gpu_cap"]["unknown_lock"] is False                       # an interval explains it
+    rec = pair.run_pair(job(toy, "A0", seed=0, budget=0.5), o)
+    assert rec["status"] == "completed" and rec["void_checks"] == {}
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=0.5), opts_for(tmp_path, fake, cap_floor_mhz=None))
+    assert rec["status"] == "completed"                                              # the check switched off
+    monkeypatch.setattr(gates, "cap_intervals", lambda *a, **k: [])
+    shift = {"end": 0.0}
+    n = []
+
+    def fs(*a, **k):
+        n.append(1)
+        t = time.time() + (shift["end"] if len(n) % 2 == 0 else 0.0)
+        return dict(iso="x", epoch=t, state="max", cap=1 if len(n) % 2 == 0 else 0, raw="x", age_s=1.0)
+    monkeypatch.setattr(gates, "fan_state", fs)
+    shift["end"] = 60.0                                                              # stamped after the window
+    rec = pair.run_pair(job(toy, "A6F", seed=2, budget=1.0), o)
+    assert rec["status"] == "completed" and rec["void_info"]["fan_cap_outside_window"]
+    shift["end"] = -0.5                                                              # inside the timed window
+    rec = pair.run_pair(job(toy, "A6F", seed=3, budget=1.0), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "gpu_cap" and "inside" in rec["void_checks"]["gpu_cap"]
+
+
+def test_cap_void_by_the_busy_sm_median(toy, fake, tmp_path):
+    """A GPU run whose busy SM median is below the cap floor (2,300 MHz) but above the stuck-clock floor (2,000) is a
+    cap void, not a GPU-health halt."""
+    from itrea.experiments import gpu_health
+
+    def q(cmd):
+        return "2200, 60, 95\n" if "--query-gpu" in " ".join(cmd) else ""
+    s = gpu_health.Sampler(period_s=0.05, query=q)
+    s.start()
+    try:
+        rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.6), opts_for(tmp_path, fake, gpu_health=True,
+                                                                            shared_sampler=s))
+    finally:
+        s.stop()
+    assert rec["gpu_health"]["verdict"] == "ok" and rec["status"] == "void" and rec["void_cause"] == "gpu_cap"
+    assert "2200 MHz < 2300 MHz" in rec["void_checks"]["gpu_cap"]
+    assert rec["void_info"]["gpu_cap"]["unknown_lock"] is False      # no fan state recorded (snapshots off): unknown

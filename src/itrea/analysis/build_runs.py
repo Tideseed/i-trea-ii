@@ -62,6 +62,10 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
 - **Crashes are kept and truncated** (no event after the crash exists to count); `crashed`, `crashed_roles`. A
   process the runner killed after a partner's proven outcome (`processes[*].stopped_by_runner`, e.g. cuOpt in A2 / A9
   after SCIP proved optimality) is not a crash.
+- **Run identity under a harness (D-021):** `run_hash` (the run id's last field, run.json `config.run_hash`) and
+  `harness` (the job's resolved harness as JSON, "" without one). For EA arms `config_hash` stays the EA
+  configuration's hash, so A9 with and without a harness share it; `run_hash` tells them apart (prereg compares it
+  for EA-arm runs that carry a harness).
 - **GPU-health voiding:** a GPU run whose `run.json["gpu_health"]` verdict is "void" (median busy SM clock < 2,000 MHz
   or foreign GPU processes in > 2 % of samples; `itrea.experiments.gpu_health`) sets `gpu_void`, and every run of its
   block (set × instance × seed × budget: a void run of one set never voids another set's runs of the same instance,
@@ -105,7 +109,7 @@ from itrea.trace import read_events
 
 ROLES = ("solver", "solver2", "ea", "cuopt")
 SOLVER_ROLE, EA_ROLE = "solver", "ea"
-GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x", "A6m")
+GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x", "A6m", "A6F", "A2F")
 EA_GPU_ARMS = ("A3", "A3r", "A5", "A5x0", "A5y0", "H3", "A9", "A3x")
 CUOPT_X_ARMS = ("A9",)                    # the EA reads cuOpt's channels (exchange.from_cuopt, D-015)
 EA_CPU_ARMS = ("A4",)
@@ -1009,6 +1013,9 @@ def _identity(run: Run) -> dict:
                 config_hash=run.config_hash, base_hash=str(rc.get("base_hash") or ""),
                 config_overrides=json.dumps(rc.get("overrides") or {}, sort_keys=True, default=str),
                 emphasis=str(emph), solver_settings=json.dumps(ss, sort_keys=True, default=str) if ss else "",
+                run_hash=str(rc.get("run_hash") or ""),
+                harness=(json.dumps(rc["harness"], sort_keys=True, default=str)
+                         if isinstance(rc.get("harness"), dict) else ""),
                 synthetic=False, status=str(rj.get("status") or ""), void_cause=str(rj.get("void_cause") or ""),
                 split=str(rj.get("split") or ""), stratum=str(rj.get("stratum") or ""),
                 attempt=_int(rj.get("attempt"), 0), block=str(rj.get("block") or ""),
@@ -1132,7 +1139,8 @@ RUN_COLUMNS = {
     # identity
     "run_id": "str", "run_id_base": "str", "set": "str", "instance": "str", "instance_path": "str", "arm": "str", "base_arm": "str",
     "seed": "int", "budget": "float", "config_hash": "str", "base_hash": "str", "config_overrides": "str",
-    "emphasis": "str", "solver_settings": "str", "parent_git_revs": "str", "synthetic": "bool", "status": "str",
+    "emphasis": "str", "solver_settings": "str", "run_hash": "str", "harness": "str", "parent_git_revs": "str",
+    "synthetic": "bool", "status": "str",
     "void_cause": "str", "split": "str", "stratum": "str", "attempt": "int",
     "block": "str", "window_id": "str", "williams_pos": "int", "git_rev": "str", "prereg_tag": "str", "run_dir": "str",
     # reference

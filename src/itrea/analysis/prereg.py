@@ -222,13 +222,19 @@ def check_registered(r: pd.DataFrame, pool: pd.DataFrame, hashes: dict[str, str]
         if nosolver:
             problems.append(f"no frozen solver-side settings (configs/frozen-e2-solver.json): the configuration of "
                             f"{', '.join(nosolver)} (A0*'s emphasis, A2's cuOpt limits) cannot be checked")
+        # a run with a D-021 harness is identified by its run_hash (an EA arm's config_hash is the EA configuration's
+        # alone, the same with and without a harness); prereg-v1 registered no harness, so such a run cannot match
+        if "run_hash" in r.columns and "harness" in r.columns:
+            got = r["config_hash"].where(r["harness"].fillna("").astype(str) == "", r["run_hash"])
+        else:
+            got = r["config_hash"]
         for arm, h in sorted(hashes.items()):
             if arm == "__base__":
                 continue
-            bad = r[(r["arm"] == arm) & (r["config_hash"] != h)]
+            bad = r[(r["arm"] == arm) & (got != h)]
             if len(bad):
                 problems.append(f"{len(bad)} {arm} run(s) with a configuration hash other than the frozen {h}: "
-                                f"{sorted(set(bad['config_hash']))[:3]}")
+                                f"{sorted(set(got[bad.index]))[:3]}")
     if "pre_t0" in r.columns:
         bad = r[~r["synthetic"].astype(bool) & r["pre_t0"].astype(bool)]
         if len(bad):

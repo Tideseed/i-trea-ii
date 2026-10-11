@@ -193,13 +193,80 @@ def test_mipfeas_calibration_jobs(tmp_path):
         mj.mipfeas_calibration(data=tmp_path / "data")
 
 
-def test_mipfeas_job_file_is_the_writers_output(tmp_path):
-    """jobs/mipfeas-cal-26.08.jsonl is exactly what `make-jobs mipfeas-cal` writes (skipped without the instances)."""
+def test_itx_job_files_are_the_writers_output(tmp_path):
+    """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes; D-020's A6m writer stays (its file
+    left jobs/ when M4 replaced it) (skipped without the instances)."""
     from itrea import paths
     from itrea.analysis.mipfeas import SAMPLE
-    if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in SAMPLE):
+    need = set(SAMPLE) | set(mj.ITX_M3_INSTANCES)
+    if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in need) or \
+            not (paths.DATA / "miplib" / "benchmark-v2.test").is_file():
         pytest.skip("the MIPLIB 2017 instances are not under data/")
-    out = tmp_path / "cal.jsonl"
-    assert mj.main(["mipfeas-cal", "--out", str(out)]) == 0
-    assert out.read_bytes() == (paths.ROOT / mj.MIPFEAS_CAL_OUT).read_bytes()
-    assert all(json.loads(line)["instance"].startswith("data/miplib/inst/") for line in out.read_text().splitlines())
+    for k in mj.ITX_OUT:
+        out = tmp_path / f"{k}.jsonl"
+        assert mj.main([f"itx-{k}", "--out", str(out)]) == 0
+        assert out.read_bytes() == (paths.ROOT / mj.ITX_OUT[k]).read_bytes(), k
+    assert mj.main(["mipfeas-cal", "--out", str(tmp_path / "a6m.jsonl")]) == 0
+    assert all(json.loads(x)["arm"] == "A6m" for x in (tmp_path / "a6m.jsonl").read_text().splitlines())
+
+
+def _itx_data(root):
+    """A fake data/ for the ITX writers: D-020's sample, M3's 8 and the development instances on disk, and a
+    benchmark-v2.test of 240 names whose 7 =inf= leave 233."""
+    from itrea.analysis.mipfeas import SAMPLE
+    inst = root / "miplib" / "inst"
+    inst.mkdir(parents=True)
+    names = list(SAMPLE) + list(mj.ITX_M3_INSTANCES) + [n for n in mj.development_names()
+                                                        if not n.startswith(("ca__", "item_"))]
+    names = list(dict.fromkeys(names))
+    names += [f"filler{i}" for i in range(240 - len(names))]
+    for n in names:
+        (inst / f"{n}.mps.gz").write_bytes(b"")
+    (root / "miplib" / "benchmark-v2.test").write_text("".join(f"{n}.mps.gz\n" for n in names))
+    (root / "miplib" / "solu.txt").write_text("".join(f"=inf= filler{i}\n" for i in range(7)))
+    return root
+
+
+def test_itx_writers(tmp_path):
+    """D-021 phase 1: run counts, arms, harnesses, budgets and seeds of M1–M5 and R13; distinct run ids within and
+    across the sets (each set has its own variant; M4 keeps the plain A6F); M2's AB / BA order; M5 = the 15
+    development / class-probe instances among the 233; R13 one block per instance x seed."""
+    from itrea.analysis.mipfeas import SAMPLE
+    from itrea.experiments import pair
+    data = _itx_data(tmp_path / "data")
+    sets = dict(m1=mj.itx_m1(), m2=mj.itx_m2(), m3=mj.itx_m3(data=data), m4=mj.itx_m4(data=data),
+                m5=mj.itx_m5(data=data), r13=mj.itx_r13())
+    assert {k: len(v) for k, v in sets.items()} == dict(m1=12, m2=4, m3=8, m4=30, m5=15, r13=102)
+    lab = {k: Counter(f"{j['arm']}@{j.get('variant')}" for j in v) for k, v in sets.items()}
+    assert lab["m1"] == {"A9@m1": 3, "A6F@m1": 3, "A2F@m1": 3, "A6F@m1env": 3}
+    assert lab["r13"] == {"A9@r13": 34, "A9@r13x": 34, "A6F@r13x": 34}
+    assert lab["m4"] == {"A6F@None": 30} and [j["name"] for j in sets["m4"]] == list(SAMPLE)
+    assert all(j["set"] == "mipfeas" and j["harness"] == "ext" for j in sets["m4"])
+    assert {j["budget"] for k in ("m2", "m3", "m4", "m5") for j in sets[k]} == {600.0}
+    assert {j["budget"] for k in ("m1", "r13") for j in sets[k]} == {120.0}
+    assert {j["seed"] for k in sets for j in sets[k] if k != "r13"} == {0} and \
+        {j["seed"] for j in sets["r13"]} == {0, 1}
+    assert all(j["config"] == mj.ITX_A9_CONFIG for v in sets.values() for j in v if j["arm"] == "A9")
+    assert all(j["split"] == "dev" for v in sets.values() for j in v)
+    assert all(pair.resolve_harness(j["harness"])["cuopt_rmm_gb"] == 40.0 and
+               pair.resolve_harness(j["harness"])["cuopt_memory_void"] is False for j in sets["m3"])
+    env = [j for j in sets["m1"] if j.get("variant") == "m1env"]
+    assert all(pair.resolve_harness(j["harness"])["cuopt_env_unset"] is False for j in env)
+    # R13's control: the ext harness with R13 and R14 off, so only they differ from A9@r13x (same caps, cache, voids)
+    ctl = [pair.resolve_harness(j["harness"]) for j in sets["r13"] if j["variant"] == "r13"]
+    ext = pair.resolve_harness("ext")
+    assert len(ctl) == 34 and all({k for k in ext if c[k] != ext[k]} == {"cuopt_gap_zero", "cuopt_env_unset"}
+                                  for c in ctl)
+    assert all(j.get("harness") is not None for v in sets.values() for j in v)
+    m2 = {b.name: [r.label for r in b.runs] for b in make_blocks(sets["m2"])}
+    assert m2 == {"comp21-2idx": ["A9@m2", "A6F@m2"], "neos-4763324-toguru": ["A6F@m2", "A9@m2"]}
+    assert len({j["name"] for j in sets["m5"]}) == 15 and "ca__Scenario400_reserves_1" not in \
+        {j["name"] for j in sets["m5"]}
+    assert len(make_blocks(sets["r13"])) == 34
+    ids = [pair.run_id_for(j) for v in sets.values() for j in v]
+    assert len(ids) == len(set(ids)) == 171
+    with pytest.raises(mj.JobError, match="unknown harness"):
+        mj.job("x.mps", "s", "A6F", 0, 1.0, harness="nope")
+    (tmp_path / "data" / "miplib" / "solu.txt").write_text("=inf= filler0\n")
+    with pytest.raises(mj.JobError, match="233"):
+        mj.mipfeas_233(tmp_path / "data")

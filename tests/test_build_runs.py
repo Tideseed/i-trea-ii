@@ -437,3 +437,28 @@ def test_a_job_rerun_in_another_set_gets_a_qualified_id(tmp_path):
         r_.set = "same"
     with pytest.raises(ValueError, match="inside one set"):
         B.qualify_reused_ids(runs, log=lambda *a: None)
+
+
+def test_harness_and_run_hash_columns_and_prereg(tmp_path):
+    """D-021: runs.parquet exports `run_hash` and the resolved `harness` (JSON); an EA arm's config_hash stays the EA
+    hash, the same with and without a harness, so prereg compares run_hash for a run that carries one."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    hz = dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
+              cuopt_memory_void=True)
+    for arm, run_hash, harness, seed in (("A9", "eahash000000", None, 1), ("A9", "withharness0", hz, 2)):
+        rj = dict(config=dict(ea_hash="eahash000000", run_hash=run_hash, harness=harness), status="completed")
+        make_run(raw, p, mps, arm, seed, 10, {"solver": [(1.0, X_70, "self")]}, run_json_extra=rj, cfg=run_hash)
+        (raw / "toyset" / f"mixed__{arm}__s{seed}__10s__{run_hash}" / "run.json").write_text(
+            json.dumps(dict(json.loads((raw / "toyset" / f"mixed__{arm}__s{seed}__10s__{run_hash}" / "run.json")
+                                       .read_text()), config_hash=None)))
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    r = df.set_index("seed")
+    assert r.loc[1, "config_hash"] == r.loc[2, "config_hash"] == "eahash000000"
+    assert (r.loc[1, "run_hash"], r.loc[2, "run_hash"]) == ("eahash000000", "withharness0")
+    assert r.loc[1, "harness"] == "" and json.loads(r.loc[2, "harness"]) == hz
+    frame = df.assign(ref_frozen=True, pre_t0=False, synthetic=False, base_hash="")
+    probs = [x for x in PR.check_registered(frame, pd.DataFrame(), {"A9": "eahash000000"}, git_check=False)
+             if "A9" in x and "solver-side" not in x]
+    assert len(probs) == 1 and "1 A9 run(s)" in probs[0] and "withharness0" in probs[0]
