@@ -5,7 +5,7 @@ Orbay (berk.orbay@tideseed.com). Repository: `Tideseed/i-trea-ii` (private while
 to the repository root; the code is the Python package `itrea` under `src/`. `CLAUDE.md` points here: this file holds
 every rule for agents working in the repository.
 
-**Status (2026-10-10): development phase; no confirmatory run yet.** The pre-registration D-002 v3.1 is binding since
+**Status (2026-10-11): development phase; no confirmatory run yet.** The pre-registration D-002 v3.1 is binding since
 the tag `prereg-v1` (2026-10-06). The SCIP screening's stage 1 is complete (324 candidates, seed 900); stage 2 is
 deferred (D-010 §5), so the hard pool is not frozen (#1). The algorithm is developed openly (D-010) at 120 s on
 17 instances — the development set (9, D-010, since 2026-10-06, `datasets/dev_set.csv`) and the class probe (8, D-014,
@@ -18,7 +18,7 @@ better / 0 worse, mean d +0.68 [+0.42, +0.90]; vs cuOpt alone 3 / 4, −0.07 [�
 suite 816 passed, the GPU tests of the new code 40 passed. **v1 target (D-019, Berk 2026-10-10):** checkpoint C1 on
 Fri 2026-10-23 (development closes on cuOpt 26.08), v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30)
 on cuOpt 26.10, daytime windows only; targets in the next-but-one section. Newest checkpoint:
-`vault/90-checkpoints/2026-10-09-1925.md` (D-019 came after it: journal `vault/20-journal/2026-10-10.md`). Every
+`vault/90-checkpoints/2026-10-11-1825.md` (D-018 stage 1 not adopted; D-021 our own external standard, F accepted). Every
 hypothesis and target below is pre-registered or planned, not a finding. Do not write, in any file, that I-TREA II
 "beats", "improves on" or "matches" anything until the corresponding experiment note in `vault/30-results/` says so
 with its numbers. (History: on 2026-10-06 01:4x the status read "built and tested on toy models; no commit, no tag, no

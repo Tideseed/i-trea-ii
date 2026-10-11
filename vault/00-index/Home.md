@@ -25,7 +25,7 @@ stage 1 (A9's GPU back-off, 84 runs in two daytime windows), then the C1 items b
 
 | start here | |
 |---|---|
-| `90-checkpoints/` | session checkpoints — **read the newest first** ([[2026-10-09-1925]]; the day after it: journal [[2026-10-10]]) |
+| `90-checkpoints/` | session checkpoints — **read the newest first** ([[2026-10-11-1825]]) |
 | [[Roadmap]] | the aim in Berk's words, v1 and C1, the stages and the GitHub issues of each — **what is next** |
 | [[D-019 v1 — deadline and performance target]] | v1: dates, the confirmatory and MIPfeas targets, Berk's answers (addendum) |
 | [[Development log]] | every development change and result since 2026-10-06, failures included |
@@ -93,7 +93,7 @@ A superseding decision says what changed and why; statuses as of 2026-10-10.
 | `60-incidents/` | [[Mistakes and incidents]] |
 | `70-upstream/` | drafts and records of upstream reports — **filed only with Berk's per-post yes**; filed so far: NVIDIA/cuopt#2073 (`SetSolutionCallback` with presolve; Berk's yes, 2026-10-07; record `2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve.md`) |
 | `80-reviews/` | design critique: [[2026-10-05 design critique]] and [[2026-10-05 design critique — response]]; [[2026-10-06 build review]]; consults with Hermes Agent and OpenAI GPT-6.1 Sol: [[2026-10-06 Feasibility targets consult (GPT-6.1 Sol)]], [[2026-10-06 LP stream design consult (GPT-6.1 Sol)]]; Claude Code workflows: [[2026-10-06 Repair-depth design (workflow)]], [[2026-10-07 cuOpt restart design (workflow)]], [[2026-10-08 lp_decode design (workflow)]], [[2026-10-08 lp_decode review (workflow)]], [[2026-10-08 A9 GPU back-off design (workflow)]], [[2026-10-09 A9 GPU back-off review (workflow)]]; [[2026-10-08 cuOpt population and diversity — what transfers]] |
-| `90-checkpoints/` | session checkpoints (newest [[2026-10-09-1925]]) |
+| `90-checkpoints/` | session checkpoints (newest [[2026-10-11-1825]]) |
 
 Tracking: GitHub issues on `Tideseed/i-trea-ii` (labels `phase:E0` … `phase:E6`, `dev`, `infra`, `paper`,
 `after-tuning`, `needs-berk`; milestones above). Questions waiting for Berk: the issues labelled
