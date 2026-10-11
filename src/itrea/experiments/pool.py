@@ -1206,7 +1206,7 @@ class Pool:
             self.log(f"refused: {e}")
             self.write_status("refused")
             return 2
-        for line in self.memory_lines():
+        for line in self.memory_lines() + self.memory_arm_lines():     # D-003's arithmetic, per treatment too
             self.log(line)
         self._resources_record()
         self.log(f"pool {self.window}: {len(self.blocks)} blocks, {len(self.jobs)} runs, lanes "
