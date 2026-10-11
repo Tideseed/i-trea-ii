@@ -64,7 +64,7 @@ Adapted in part from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/po
     python -m itrea.experiments.pool jobs/screen1.jsonl --layout screen
     python -m itrea.experiments.pool jobs/e2.jsonl --mailbox redis --deadline 07:15
     python -m itrea.experiments.pool jobs/x.jsonl --dry-run
-    python -m itrea.experiments.pool jobs/mipfeas-cal-26.08.jsonl --layout full --cuopt-mem-gb 24 --gpu-mem-gb 36
+    python -m itrea.experiments.pool <make-jobs mipfeas-cal --out FILE> --layout full --cuopt-mem-gb 24 --gpu-mem-gb 36
     python -m itrea.experiments.pool jobs/itx-m2.jsonl --pause-c 90        (D-021 M2: the soak at F)
 """
 from __future__ import annotations
@@ -951,7 +951,7 @@ class Pool:
         memory wait that times out while other runs are in flight voids and requeues the block (D-002 §6: the memory
         gate is an external cause); with nothing admitted it halts."""
         o = self.o
-        t_end = m_end = g_end = None
+        t_end = m_end = g_end = g_kind = None
         last_log = [0.0]
 
         def wait_log(msg: str) -> None:            # at most one line a minute per lane
@@ -990,7 +990,8 @@ class Pool:
                 if why:
                     stale = st is None or (st.get("age_s") or 0.0) >= gates.GOVERNOR_MAX_AGE_S
                     lim = o.governor_timeout_s if stale else o.thermal_timeout_s
-                    g_end = g_end or now + lim
+                    if g_end is None or g_kind != stale:      # the wait's clock restarts when its kind changes
+                        g_end, g_kind = now + lim, stale
                     if now > g_end:
                         return ("halt", f"{why} (waited {lim:.0f} s)")
                     wait_log(f"{why}; waiting")

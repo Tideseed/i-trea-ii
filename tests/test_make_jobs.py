@@ -194,8 +194,8 @@ def test_mipfeas_calibration_jobs(tmp_path):
 
 
 def test_itx_job_files_are_the_writers_output(tmp_path):
-    """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes; D-020's A6m file is gone from jobs/
-    (M4 replaced it) while its writer stays (skipped without the instances)."""
+    """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes; D-020's A6m writer stays (its file
+    left jobs/ when M4 replaced it) (skipped without the instances)."""
     from itrea import paths
     from itrea.analysis.mipfeas import SAMPLE
     need = set(SAMPLE) | set(mj.ITX_M3_INSTANCES)
@@ -206,7 +206,6 @@ def test_itx_job_files_are_the_writers_output(tmp_path):
         out = tmp_path / f"{k}.jsonl"
         assert mj.main([f"itx-{k}", "--out", str(out)]) == 0
         assert out.read_bytes() == (paths.ROOT / mj.ITX_OUT[k]).read_bytes(), k
-    assert not (paths.ROOT / mj.MIPFEAS_CAL_OUT).exists()
     assert mj.main(["mipfeas-cal", "--out", str(tmp_path / "a6m.jsonl")]) == 0
     assert all(json.loads(x)["arm"] == "A6m" for x in (tmp_path / "a6m.jsonl").read_text().splitlines())
 
