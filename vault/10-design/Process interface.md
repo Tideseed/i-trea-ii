@@ -134,13 +134,21 @@ vectors — unchanged or polished by the EA — reach SCIP through the EA's post
   job's seed (0; GAMS left −1, the one deliberate difference). The same barrier, warm-up before `t0`, checker and
   run record as every arm. 24 threads whatever the lane (`ProcSpec.cpu_threads`; a `cuopt_threads` option that
   contradicts it is refused).
+- **Environment** (review 2026-10-11). Every other process gets `OMP_NUM_THREADS = OPENBLAS_NUM_THREADS =
+  MKL_NUM_THREADS = 1`; A6m's cuOpt gets the three REMOVED — they are also in the runner's own environment (set at
+  `pair` import), so the runner drops them from the inherited environment (`Proc.env_unset`, `pair.launch_env`): GAMS
+  ran cuOpt with them unset, and libcuopt links libomp. `run.json` records `env` and `env_unset` per process. Every
+  other arm's child environment is pinned byte-identical to the one before A6m (`tests/test_pair.py`).
 - **Lane.** `pair.FULL_LANE` = lane `full`: X925 5–9, 15–19 and A725 0–4, 10–14 plus the GPU (`whole_box`); cuOpt is
   pinned to all 20 cores. A6m runs only there and that lane runs only A6m (`Lane.fits`, `pair.plan` and the pool's
   `check_layout` refuse every other pairing with a clear error), so `itrea pair --arm A6m` on the GPU lane `g0` is
   refused. The pool's `--layout full` is this one lane; it implies the serving check (both local model servers
   stopped, `--allow-serving` refused) — D-020 wants no foreign GPU process. The runner's own threads (`RUNNER_CORES`,
   the GPU-health sampler, the stop loop) share the lane's cores: accepted, recorded as `runner_cores` in `run.json`.
-  With the Redis mailbox the container's core 0 is inside the lane too; the calibration uses the file mailbox.
+  The layout refuses `--mailbox redis` (the container's core 0 is inside the lane) and `--cuopt-gpu-peak-gb` (it would
+  let the memory gate admit A6m below 81 GB); `pair.plan` refuses both on the whole-box lane as well. Each run records
+  the box's 1-min load average before and after (`gates_before` / `gates_after`) and the hottest ACPI zone while it
+  ran (`acpi_during`): A6m loads all 20 cores and the GPU.
 - **Memory.** D-020: RMM limit 36 GB (`--gpu-mem-gb 36`), host `MemoryMax` 24 GB (`--cuopt-mem-gb 24`); GAMS's max RSS
   was ≤ 16 GB on the sample, 49 GB at most (nw04) over the 233. The pool refuses A6m with other values
   (`pool.check_a6m_memory`: the RMM limit is in the run hash, `MemoryMax` is not). The gate: 24 + 36 + 1 (one CUDA

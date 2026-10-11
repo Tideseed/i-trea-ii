@@ -38,7 +38,8 @@ BUSY seconds (wall minus the governor's sleeps).
 2026-10-11: the MIPfeas harness ([[D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt
 26.08]]): the call and launch clocks, GAMS's integral exactly (`metrics.gams_integral`) and
 `runs.parquet`'s `pt_gams`, `pt_gams_launch` and `startup_offset_s`; the cuOpt summary's `settings` and `mip_gap_zero`;
-`run.json`'s `runner_cores`.
+`run.json`'s `runner_cores`, `processes[*].env_unset`, `acpi_during` and the gates' `loadavg_1m`; `block_void` per
+set.
 
 ## Clock
 All times are seconds since the shared start `t0`, read from `time.monotonic()` (CLOCK_MONOTONIC is system-wide on
@@ -282,12 +283,15 @@ it with `frozen-e2`), `ea_hash` (the effective configuration), `run_hash`, `solv
 (the D-003 gate terms and `need_gb`); `env` (versions, hardware, git state: `itrea.experiments.record_env`); `t0`,
 `t0_epoch` (at the barrier's release).
 Processes: one record per process — `role`, `kind`, `backend`, `cmd`, `cores`, `memory_max_gb`, `gpu_limit_gb` (CuPy
-pool or RMM limit), `env`, `pid`, `launch_epoch` (the launch clock's origin, D-020), `startup_s`, `exit_code`,
-`killed`, `exit_t`, `cpu_user_s`, `cpu_sys_s`, `maxrss_mb`; `exit_codes` {role: code} — **every one is checked**
-(optopt X1 logged "ok" for dead SCIP processes). `runner_cores`: the runner's own affinity (the GPU-health sampler and
+pool or RMM limit), `env` (what the runner set), `env_unset` (what it removed from the inherited environment: the
+three thread variables for A6m's cuOpt, else empty), `pid`, `launch_epoch` (the launch clock's origin, D-020),
+`startup_s`, `exit_code`, `killed`, `exit_t`, `cpu_user_s`, `cpu_sys_s`, `maxrss_mb`; `exit_codes` {role: code} —
+**every one is checked** (optopt X1 logged "ok" for dead SCIP processes). `runner_cores`: the runner's own affinity (the GPU-health sampler and
 the stop loop run there; on the whole-box lane `full` of arm A6m they share the run's cores, D-020).
-Gates and health: `gates_before` / `gates_after` (MemAvailable, the hottest ACPI zone, the box-window lease, the local
-model servers' state, other large processes; `gates_before` also the GPU compute apps), `gpu_health` (per-second samples summarised: median busy SM clock, foreign GPU share, `verdict`,
+Gates and health: `gates_before` / `gates_after` (MemAvailable, the hottest ACPI zone, the 1-min load average
+`loadavg_1m`, the box-window lease, the local model servers' state, other large processes; `gates_before` also the GPU
+compute apps), `acpi_during` (the hottest ACPI zone read every 5 s while the clock ran: `max_c`, `samples`, `period_s`;
+null without snapshots), `gpu_health` (per-second samples summarised: median busy SM clock, foreign GPU share, `verdict`,
 `reasons`), `cupy_cache` (`compiled_on_clock`).
 Outcome: `status` (`completed` = every process exited 0; `failed` = any exit code ≠ 0, a kill or a start failure —
 kept, truncated at the crash; `void` = an external cause: GPU health, thermal pause, memory floor, abort, runner error —

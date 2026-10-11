@@ -34,8 +34,9 @@ Berk usually does not coordinate the sessions — the lease does.
    `--mem 81`**, both servers in `--stops`, and the pool run as
    `python -m itrea.experiments.pool jobs/mipfeas-cal-26.08.jsonl --layout full --cuopt-mem-gb 24 --gpu-mem-gb 36`
    (host cap 24 + RMM 36 + 1 CUDA × 1 + reserve 20 = 81 GB with the file mailbox; `--cuopt-gpu-peak-gb` would lower
-   it). `--layout full` is one lane with all 20 cores, A6m only; it refuses `--allow-serving` and checks that both
-   servers are stopped before every run, and A6m refuses other memory values (the RMM limit is part of its run id).
+   it). `--layout full` is one lane with all 20 cores, A6m only; it refuses `--allow-serving`, `--mailbox redis` and
+   `--cuopt-gpu-peak-gb`, checks that both servers are stopped before every run, and A6m refuses other memory values
+   (the RMM limit is part of its run id). A6m's cuOpt runs without OMP/OPENBLAS/MKL_NUM_THREADS (as GAMS ran it).
    Expected ≈ 4.1 h of solving + ≈ 1 min per run + the governor's rests: one daytime window.
 4. Confirmatory runs (and the screening pass) need **both LLM servers stopped** (vLLM serving Ornith-1.5-35B-A3B on
    :8094, llama.cpp serving Qwen3.8-27B on :8092; Berk's yes of 2026-10-05). Schedule the restore **first**, then stop:
@@ -64,6 +65,12 @@ Berk usually does not coordinate the sessions — the lease does.
   cuOpt RMM limit + Redis 2 GB + 20 GB reserve ≤ MemAvailable), thermal start < 80 °C for GPU arms and < 88 °C for
   CPU-only arms (D-008), pause ≥ 92 °C / resume < 80 °C, fan-governor's rest flag (D-009), watchdog floor 18 GB, one
   GPU arm at a time, one runner (`/tmp/itrea-runner.lock`).
+- A block voided by a thermal pause is rerun first, at most `--max-thermal-requeues` times (default 1); one voided again
+  is skipped and the pool moves on — `logs/pool-status.json` lists it under `skipped` with its run ids. Those blocks
+  are owed: rerun them in a later window (the pool treats their moved-aside runs as not run).
+- Every run is re-checked just before it starts: if its estimate would end after `--deadline` or the lease end it does
+  not start (after a long thermal, rest-flag or memory wait this can stop the pool early); a block already partly run
+  is finished. Re-claim the lease before it runs out rather than let the pool stop.
 - A GPU-health fault (median SM clock < 2,000 MHz, or foreign GPU activity > 2 % of a run) voids the whole block and
   halts the run set: look before resuming. The stuck-low-clock fault has no remote fix (full power disconnect).
 - Do not poll processes by name from a Claude Code shell (`pgrep -f` matches its own wrapper); wait on output files or

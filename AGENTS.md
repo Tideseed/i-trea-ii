@@ -230,11 +230,19 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   X925 6 and cuOpt on A725 1–3 (two CUDA processes, 12 GB each); its matched control A3x has the same EA footprint
   without cuOpt (D-015). The exception is A6m (D-020, the MIPfeas calibration: cuOpt as GAMS ran it, 24 threads, MIP
   gaps 0): it has the whole box to itself — the pool's `--layout full`, one lane with all 20 cores, the serving check
-  implied, `--cuopt-mem-gb 24 --gpu-mem-gb 36` (81 GB) — and runs nowhere else; no other arm runs on that lane.
-  `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process. Never run analysis with default thread
-  counts beside timed runs.
+  implied, `--cuopt-mem-gb 24 --gpu-mem-gb 36` (81 GB), the file mailbox (Redis and `--cuopt-gpu-peak-gb` refused) —
+  and runs nowhere else; no other arm runs on that lane.
+  `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process but A6m's cuOpt, whose environment has the
+  three removed (GAMS ran it so; libcuopt links libomp). Never run analysis with default thread counts beside timed
+  runs.
 - **Thermal.** GPU arms start only below 80 °C (ACPI maximum), CPU-only arms below 88 °C (D-008); pause the run set at
-  ≥ 92 °C, resume below 80 °C.
+  ≥ 92 °C, resume below 80 °C. A block voided by the pause is rerun first, at most `--max-thermal-requeues` times
+  (default 1): a further void skips it (pool status `skipped`) — in screening stage 2 (2026-10-06) the same 8 blocks
+  were voided 8 times each before the cap existed. Each run records the hottest ACPI zone seen while it ran
+  (`run.json` `acpi_during`) and the 1-min load average before and after.
+- **Deadline and lease end at the start of every run.** After its gate waits, a run whose estimate would end after
+  `--deadline` or the lease end does not start: a block not yet started counts as never opened and the pool stops; a
+  block partly run keeps running (a stop never splits a block).
 - **GPU health.** A GPU run with a median SM clock below 2,000 MHz or foreign GPU activity above 2 % of its budget
   voids its whole block (all arms of that instance × seed) and halts the run set.
 - **Frozen configuration.** Test-set instances run only with the configuration whose hash equals `frozen-e2`'s, with

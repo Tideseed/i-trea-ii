@@ -32,15 +32,17 @@ run set below 18 GB free (halt) or at ≥ 92 °C (pause: the blocks in flight ar
 80 °C). A GPU-health void (stuck-low clock, foreign GPU work, too few samples) voids the block and halts the run set
 for a look. A block voided by the thermal pause is rerun first, at most `--max-thermal-requeues` times (default 1, so
 two attempts): a block voided a further time is skipped (status file `skipped`, reason thermal, with its run ids) and
-the pool moves on — before 2026-10-11 there was no cap, so the default differs only in that pathological case (a block
-that never finishes before the box overheats). Every run is checked again just before it starts, after its gate waits
-(thermal, rest flag, memory): if its estimate (`_est_run`) would end after the deadline or the lease end, it does not
-start; for the first run of a block the block counts as never opened and the pool stops as at a deadline, while a block
-already partly run keeps running (a stop never splits a block). Test-split jobs run only with the frozen configuration
-(its hash = configs/frozen-e2.yaml's) and the registered harness settings, with `prereg-v1` an ancestor of HEAD and a
-clean tree; screening jobs and any job on a screening candidate need `prereg-v1` too (screening also a clean tree), and
-other non-toy jobs need it unless `--allow-unfrozen`. Only toy instances (outside data/, not named like a candidate)
-get the smoke exemptions.
+the pool moves on. Before 2026-10-11 there was no cap, and the loop happened: in the screening's stage 2 (2026-10-06
+06:04–06:57, eight lanes) the same 8 blocks, rerun first after every pause, were voided 8 times each
+(`traces/raw/screen2/void.jsonl`); under the cap they would have been skipped after their second void and other blocks
+run. Every run is checked again just before it starts, after its gate waits (thermal, rest flag, memory): if its
+estimate (`_est_run`) would end after the deadline or the lease end, it does not start; for the first run of a block
+the block counts as never opened and the pool stops as at a deadline, while a block already partly run keeps running (a
+stop never splits a block). Test-split jobs run only with the frozen configuration (its hash =
+configs/frozen-e2.yaml's) and the registered harness settings, with `prereg-v1` an ancestor of HEAD and a clean tree;
+screening jobs and any job on a screening candidate need `prereg-v1` too (screening also a clean tree), and other
+non-toy jobs need it unless `--allow-unfrozen`. Only toy instances (outside data/, not named like a candidate) get the
+smoke exemptions.
 
 Resumable: run directories whose run.json says completed (or failed: a crash is kept, D-002 §6) are skipped. One pool
 at a time (RunLock). Log: logs/pool-<date>.log; status: logs/pool-status.json; voided runs: traces/raw/<set>/void/ and
