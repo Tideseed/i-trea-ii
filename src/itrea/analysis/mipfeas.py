@@ -1,6 +1,8 @@
 """`itrea mipfeas-report`: the paired calibration of the MIPfeas harness against GAMS's published cuOpt 26.08 run on a
-GB10 (vault D-020), by the rules D-020 fixed before any calibration run — R, the feasible counts and the verdict.
-Development only (D-010); the clock and the metric of the v1 runs are fixed in prereg-v2, not here.
+GB10 (vault D-020), by the rules D-020 fixed before any calibration run — R, the feasible counts and the verdict —,
+and since D-021 (ITX-1) the same report for **A6F** (cuOpt alone at A9's footprint F, the calibration that replaced
+A6m's: `--arm A6F`) with D-021's late-clock check and reading. Development only (D-010); the clock and the metric of
+the v1 runs are fixed in prereg-v2, not here.
 
 Inputs: `datasets/runs.parquet` (`itrea build-runs`: `pt_gams` on the call clock, `pt_gams_launch` on the launch
 clock, `startup_offset_s`, `t_first` / `t_first_event` — the portfolio's first checked incumbent on the call clock —
@@ -32,16 +34,27 @@ Statistics (D-020 § Calibration):
 - the reference check: max |ref − z*| / max(1, |z*|) over the sample (D-020 found ≤ 1e-6 on all 233), since our
   `pt_gams` is scored against our reference; and the instances where a checked incumbent beat that reference
   (`beats_ref`: γ = 0 in the port, where GAMS's script raises; supportcase22's reference is only the best known, 110).
-Verdict: PASS iff every instance of the sample has a run, 0.870 ≤ R ≤ 1.150 on the call clock and our feasible count is
-within ±1 of GAMS's on the sample (27 for D-020's sample, computed here); FAIL otherwise; INCOMPLETE (no verdict) while
-an instance is missing.
+Late-clock check (D-021 § Calibration, reported for every arm): the median first-incumbent offset ours − GAMS on the
+call clock, per stratum; it passes when the median of EACH of strata 0 and 1 is at most +0.3 s (one-sided: a late
+clock is the fault it looks for; stratum 2 and the others are thread-sensitive and only reported; the pooled median of
+strata 0–1 is printed beside); a stratum without a paired first incumbent fails it.
+Verdict for A6m (D-020's rule): PASS iff every instance of the sample has a run, 0.870 ≤ R ≤ 1.150 on the call clock
+and our feasible count is within ±1 of GAMS's on the sample (27 for D-020's sample, computed here); FAIL otherwise;
+INCOMPLETE (no verdict) while an instance is missing.
+Verdict for every other arm (A6F, D-021's reading): INCOMPLETE while an instance is missing; CLOCK-FAIL when the
+late-clock check fails (the calibration's reading stops: the barrier and the clock are diagnosed before any v1 run);
+else INSIDE (R within the band and feasible within ±1: no footprint or harness difference larger than about 30 % is
+likely — the sample's interval is ×/÷ 1.28, 8–14 % differences are not resolved — and the published row may be cited
+as a bridge) or OUTSIDE (with the clock check passed the difference is the footprint, and the machine, stated as such;
+only then could the heat ladder, R9 with Berk's yes, be asked for). v1's targets are anchored on our own A6F in either
+case.
 
 The module also reads the archive for the rest of the code: `read_gams_trc` (a trace, with their exact `read_csv`),
 `read_z`, `read_pi`, and D-020's sample (`STRATA`, re-derived by a test). The port scored on `read_gams_trc` +
 `metrics.best_steps` equals GAMS's `calculate_primal_integral` (their `create_primalintegral.py`, in the archive) on
 every one of the archive's 3,495 traces (2026-10-11; the 233 GB10 cuOpt 26.08 ones are a test).
 
-    itrea mipfeas-report [--arm A6m] [--set mipfeas] [--gams-dir data/mipfeas/gams-2026-09-16]
+    itrea mipfeas-report [--arm A6m | A6F] [--set mipfeas] [--gams-dir data/mipfeas/gams-2026-09-16]
                          [--runs datasets/runs.parquet] [--json out.json] [--md out.md]
 """
 from __future__ import annotations
@@ -69,6 +82,9 @@ SHIFT = M.MIPFEAS_SHIFT
 R_LO, R_HI = 0.870, 1.150                  # D-019's ±15 %, paired (D-020)
 FEASIBLE_TOL = 1                           # our feasible count within ±1 of GAMS's
 PASS, FAIL, INCOMPLETE = "PASS", "FAIL", "INCOMPLETE"
+INSIDE, OUTSIDE, CLOCK_FAIL = "INSIDE", "OUTSIDE", "CLOCK-FAIL"     # D-021's reading (A6F and any arm but A6m)
+D020_ARMS = ("A6m",)                       # arms read by D-020's PASS / FAIL rule
+LATE_CLOCK_STRATA, LATE_CLOCK_MAX_S = (0, 1), 0.3   # D-021: median first incumbent ours − GAMS <= +0.3 s there
 # D-020's sample: the 233 sorted by GAMS's GB10 26.08 P (stable sort), numpy array_split into six strata, five per
 # stratum by numpy default_rng(20261011).choice(stratum, 5, replace=False), each pick sorted (tests re-derive it)
 SAMPLE_SEED = 20261011
@@ -231,6 +247,25 @@ def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int =
     return chosen, why_not
 
 
+def late_clock(have: pd.DataFrame, checked=LATE_CLOCK_STRATA, limit_s: float = LATE_CLOCK_MAX_S) -> dict:
+    """D-021's late-clock check on the valid runs (`t_first`, `t_first_gams`, `stratum`): per stratum the quartiles of
+    ours − GAMS where both found a first incumbent; `ok` iff every stratum in `checked` has one and its median is at
+    most +limit_s; the pooled quartiles over the checked strata beside."""
+    both = have[have["t_first"].notna() & have["t_first_gams"].notna()]
+    d = both["t_first"] - both["t_first_gams"]
+    strata = sorted({int(k) for k in have["stratum"]} | set(checked))
+    per = []
+    for k in strata:
+        q = _quartiles(d[both["stratum"] == k])
+        ok = (q["n"] > 0 and q["median"] <= limit_s) if k in checked else None
+        per.append(dict(stratum=k, checked=k in checked, ok=ok, **q))
+    pooled = _quartiles(d[both["stratum"].isin(list(checked))])
+    ok = all(p["ok"] for p in per if p["checked"])
+    return dict(limit_s=limit_s, checked=list(checked), strata=per, pooled=pooled, ok=bool(ok),
+                rule=f"median first incumbent ours − GAMS <= +{limit_s:g} s in each of strata "
+                     f"{', '.join(map(str, checked))} (call clock)")
+
+
 def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, set_: str = SET, seed: int = SEED,
            budget: float = BUDGET, strata=STRATA) -> dict:
     """The calibration's numbers and verdict (module docstring)."""
@@ -297,18 +332,41 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
     out["flags"] = {str(x["instance"]): x["flags"] for _, x in have.iterrows() if x["flags"]}
     out["beats_ref"] = [dict(instance=str(x["instance"]), ref=float(x["ref"]), z=float(x["z"]))
                         for _, x in have.iterrows() if bool(x["beats_ref"])]
-    out["rule"] = dict(R_lo=R_LO, R_hi=R_HI, feasible_tol=FEASIBLE_TOL, clock="call")
+    lc = out["late_clock"] = late_clock(have)
+    d020 = arm in D020_ARMS
+    out["rule"] = dict(R_lo=R_LO, R_hi=R_HI, feasible_tol=FEASIBLE_TOL, clock="call", decision="D-020" if d020
+                       else "D-021", late_clock=lc["rule"])
     if missing:
         out["verdict"], out["verdict_reason"] = INCOMPLETE, (f"{len(missing)} of {len(sample)} instances have no "
                                                              f"valid run")
+        return out
+    R = out["call"]["R"]
+    r_ok = R_LO <= R <= R_HI
+    f_ok = abs(out["feasible"]["ours"] - out["feasible"]["gams_sample"]) <= FEASIBLE_TOL
+    band = (f"R {R:.3f} {'within' if r_ok else 'outside'} [{R_LO:.3f}, {R_HI:.3f}]; feasible "
+            f"{out['feasible']['ours']} vs GAMS {out['feasible']['gams_sample']} "
+            f"({'within' if f_ok else 'outside'} ±{FEASIBLE_TOL})")
+    if d020:
+        out["verdict"], out["verdict_reason"] = (PASS if (r_ok and f_ok) else FAIL), band
+    elif not lc["ok"]:
+        bad = "; ".join(f"stratum {p['stratum']}: " + ("no paired first incumbent" if not p["n"] else
+                                                      f"median {p['median']:+.3f} s")
+                        for p in lc["strata"] if p["checked"] and not p["ok"])
+        out["verdict"] = CLOCK_FAIL
+        out["verdict_reason"] = (f"late-clock check failed ({bad}; the limit is +{lc['limit_s']:g} s): the "
+                                 f"calibration's reading stops — the barrier and the clock are diagnosed before any v1 "
+                                 f"run (D-021); {band}")
+    elif r_ok and f_ok:
+        out["verdict"] = INSIDE
+        out["verdict_reason"] = (f"{band}; late-clock check passed: no footprint or harness difference larger than about "
+                                 f"30 % is likely (the sample's interval is ×/÷ 1.28; 8–14 % differences are not "
+                                 f"resolved), and the published row may be cited as a bridge; v1's targets are anchored "
+                                 f"on our own {arm} (D-021)")
     else:
-        R = out["call"]["R"]
-        r_ok = R_LO <= R <= R_HI
-        f_ok = abs(out["feasible"]["ours"] - out["feasible"]["gams_sample"]) <= FEASIBLE_TOL
-        out["verdict"] = PASS if (r_ok and f_ok) else FAIL
-        out["verdict_reason"] = (f"R {R:.3f} {'within' if r_ok else 'outside'} [{R_LO:.3f}, {R_HI:.3f}]; feasible "
-                                 f"{out['feasible']['ours']} vs GAMS {out['feasible']['gams_sample']} "
-                                 f"({'within' if f_ok else 'outside'} ±{FEASIBLE_TOL})")
+        out["verdict"] = OUTSIDE
+        out["verdict_reason"] = (f"{band}; late-clock check passed: the difference is the footprint (and the machine), "
+                                 f"stated as such; only now could the heat ladder (R9, Berk's yes) be asked for; v1's "
+                                 f"targets are anchored on our own {arm} (D-021)")
     return out
 
 
@@ -319,8 +377,9 @@ def _f(x, nd=4) -> str:
 
 def markdown(res: dict) -> str:
     c, la, sg, fe = res["call"], res["launch"], res["sgm"], res["feasible"]
+    which = "D-020" if res.get("rule", {}).get("decision", "D-020") == "D-020" else "D-021"
     lines = [f"<!-- generated by itrea.analysis.mipfeas from datasets/runs.parquet and {res['gams_dir']} -->",
-             f"MIPfeas calibration (D-020): {res['arm']} in set {res['set']}, seed {res['seed']}, "
+             f"MIPfeas calibration ({which}): {res['arm']} in set {res['set']}, seed {res['seed']}, "
              f"{res['budget']:g} s, {res['n_runs']} of {res['n_sample']} instances",
              "",
              "| stratum | instance | P ours (call) | P ours (launch) | P GAMS | log ratio (call) | first inc. ours | "
@@ -347,6 +406,13 @@ def markdown(res: dict) -> str:
                  f"{_f(fi['launch']['median'], 3)} [{_f(fi['launch']['q25'], 3)}, {_f(fi['launch']['q75'], 3)}] "
                  f"over {fi['call']['n']} instances (only ours {fi['only_ours']}, only GAMS {fi['only_gams']}); "
                  f"start-up offset median {_f(fi['startup_offset_s']['median'], 3)} s.")
+    lc = res.get("late_clock")
+    if lc:
+        per = "; ".join(f"{p['stratum']}{'*' if p['checked'] else ''}: {_f(p['median'], 3)} (n {p['n']})"
+                        for p in lc["strata"])
+        lines.append(f"Late-clock check (D-021: {lc['rule']}; * = checked, the others only reported): per stratum "
+                     f"median ours − GAMS (s) {per}; pooled over the checked strata {_f(lc['pooled']['median'], 3)} "
+                     f"(n {lc['pooled']['n']}) — {'passed' if lc['ok'] else 'FAILED'}.")
     for run, g in res["gams_rows"].items():
         lines.append(f"GAMS {g['label']} vs GB10 26.08 on the sample (port): R {_f(g['R'], 3)} "
                      f"[{_f(g.get('lo'), 3)}, {_f(g.get('hi'), 3)}], feasible {g['feasible']}, "
@@ -362,8 +428,13 @@ def markdown(res: dict) -> str:
         lines.append("")
         lines.append("Missing (no valid completed seed-0 run at the budget): " +
                      "; ".join(f"{m['instance']} ({m['why']})" for m in res["missing"]) + ".")
-    lines += ["", f"**Verdict: {res['verdict']}** — {res['verdict_reason']} (pass: {R_LO:.3f} ≤ R ≤ {R_HI:.3f} on the "
-              f"call clock and feasible within ±{FEASIBLE_TOL}, all {res['n_sample']} instances run)."]
+    if res.get("rule", {}).get("decision") == "D-021":
+        rule = (f"D-021's reading: the late-clock check first, then {R_LO:.3f} ≤ R ≤ {R_HI:.3f} on the call clock and "
+                f"feasible within ±{FEASIBLE_TOL} = INSIDE the band, else OUTSIDE; all {res['n_sample']} instances run")
+    else:
+        rule = (f"pass: {R_LO:.3f} ≤ R ≤ {R_HI:.3f} on the call clock and feasible within ±{FEASIBLE_TOL}, all "
+                f"{res['n_sample']} instances run")
+    lines += ["", f"**Verdict: {res['verdict']}** — {res['verdict_reason']} ({rule})."]
     return "\n".join(lines) + "\n"
 
 
@@ -380,9 +451,11 @@ def _jsonable(o):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="itrea mipfeas-report", description="MIPfeas harness: the paired calibration of "
-                                 "D-020 against GAMS's published cuOpt 26.08 GB10 run (R, feasible counts, verdict)")
-    ap.add_argument("--arm", default=ARM, help=f"arm label in the run table ({ARM})")
+    ap = argparse.ArgumentParser(prog="itrea mipfeas-report", description="MIPfeas harness: the paired calibration "
+                                 "against GAMS's published cuOpt 26.08 GB10 run (R, feasible counts, late-clock check, "
+                                 "verdict) — D-021's M4 with --arm A6F, D-020's with A6m")
+    ap.add_argument("--arm", default=ARM, help=f"arm label in the run table ({ARM}: D-020's PASS / FAIL; A6F: D-021's "
+                                               f"calibration, verdict INSIDE / OUTSIDE / CLOCK-FAIL)")
     ap.add_argument("--set", dest="set_", metavar="SET", default=SET, help=f"run set ({SET})")
     ap.add_argument("--seed", type=int, default=SEED, help=f"D-020: one run per instance, seed {SEED}")
     ap.add_argument("--budget", type=float, default=BUDGET, help=f"seconds ({BUDGET:g}, MIPfeas's limit)")

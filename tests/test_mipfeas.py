@@ -234,3 +234,43 @@ def test_report_cli_writes_json_and_markdown(tmp_path, capsys):
     assert "NaN" not in (tmp_path / "r.json").read_text()
     assert "Verdict: PASS" in capsys.readouterr().out and (tmp_path / "md" / "r.md").exists()
     assert MF.main(["--runs", str(tmp_path / "none.parquet"), "--gams-dir", str(d)]) == 2
+
+
+def _a6f(runs: pd.DataFrame, late: float = 0.0) -> pd.DataFrame:
+    r = runs.copy()
+    r["arm"] = "A6F"
+    r["run_id"] = r["run_id"].str.replace("__A6m__", "__A6F__", regex=False)
+    r["t_first"] = r["t_first"] + late
+    return r
+
+
+def test_report_for_a6f_reads_by_d021(tmp_path):
+    """D-021's calibration (M4: A6F at F): the late-clock check first (median first incumbent ours − GAMS ≤ +0.3 s in
+    each of strata 0 and 1), then the band: INSIDE (the published row may be cited as a bridge) or OUTSIDE (the
+    difference is the footprint); a failed clock check stops the reading (CLOCK-FAIL) whatever R is. A6m keeps
+    D-020's PASS / FAIL, with the clock check reported."""
+    d, pg = _archive(tmp_path)
+    res = MF.report(_a6f(_runs(pg)), d, arm="A6F", strata=STRATA_T)
+    lc = res["late_clock"]
+    assert res["verdict"] == MF.INSIDE and lc["ok"] and res["rule"]["decision"] == "D-021"
+    assert [(p["stratum"], p["checked"], p["n"]) for p in lc["strata"]] == [(0, True, 2), (1, True, 1)]
+    assert lc["strata"][0]["median"] == pytest.approx(0.25) and lc["pooled"]["n"] == 3
+    assert "bridge" in res["verdict_reason"] and "anchored on our own A6F" in res["verdict_reason"]
+    md = MF.markdown(res)
+    assert "MIPfeas calibration (D-021): A6F" in md and "Late-clock check" in md and "**Verdict: INSIDE**" in md
+    out = MF.report(_a6f(_runs(pg, scale=1.3)), d, arm="A6F", strata=STRATA_T)
+    assert out["verdict"] == MF.OUTSIDE and "footprint" in out["verdict_reason"]
+    late = MF.report(_a6f(_runs(pg), late=0.2), d, arm="A6F", strata=STRATA_T)       # +0.45 s: a late clock
+    assert late["verdict"] == MF.CLOCK_FAIL and not late["late_clock"]["ok"]
+    assert "stratum 0: median +0.450 s" in late["verdict_reason"] and "diagnosed" in late["verdict_reason"]
+    a6m = MF.report(_runs(pg), d, strata=STRATA_T)                                    # D-020's arm: unchanged rule
+    assert a6m["verdict"] == MF.PASS and a6m["rule"]["decision"] == "D-020" and a6m["late_clock"]["ok"]
+    assert MF.report(_a6f(_runs(pg)), d, strata=STRATA_T)["verdict"] == MF.INCOMPLETE   # --arm A6m finds no A6m run
+
+
+def test_late_clock_check_only_checks_strata_0_and_1():
+    have = pd.DataFrame(dict(stratum=[0, 1, 2, 2], t_first=[1.0, 1.2, 9.0, np.nan], t_first_gams=[0.9, 1.0, 1.0, 2.0]))
+    lc = MF.late_clock(have)
+    assert lc["ok"] and [p["checked"] for p in lc["strata"]] == [True, True, False]
+    assert lc["strata"][2]["median"] == pytest.approx(8.0) and lc["strata"][2]["ok"] is None
+    assert not MF.late_clock(have[have["stratum"] != 1])["ok"]                          # stratum 1 has no pair
