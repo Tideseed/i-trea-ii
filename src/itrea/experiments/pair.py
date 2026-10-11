@@ -17,7 +17,9 @@ Why the runner is this strict (predecessor incidents, berkorbay/optopt):
 Footprint (D-002 §3): SCIP on one Cortex-X925 core (5–9, 15–19); the partner (EA on the GPU or the CPU, cuOpt) on the
 GPU plus 3 Cortex-A725 cores (1–4, 10–14); core 0 belongs to the Redis container. Every process runs inside
 `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (`use_systemd=False` for tests) under `taskset`, with
-OMP/OPENBLAS/MKL_NUM_THREADS = 1. The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) runs two partners, which must not
+OMP/OPENBLAS/MKL_NUM_THREADS = 1 — except a whole-lane process (A6m's cuOpt), from whose environment the runner
+REMOVES the three (they are also in the runner's own environment, set below at import): GAMS ran cuOpt with them
+unset, and libcuopt links libomp (`Proc.env_unset`, recorded in run.json). The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) runs two partners, which must not
 share cores: SCIP on the lane's first X925 core, the EA on its second (`ProcSpec.x925`), cuOpt on the A725 cores
 (num_cpu_threads = 3 = their number on the GPU lane); two CUDA processes, so the memory gate counts the EA pool and
 cuOpt's RMM limit (both = gpu_mem_gb) plus two CUDA overheads. The runner gives the EA `exchange.from_cuopt: true`
@@ -80,6 +82,7 @@ A1_SEED_OFFSET = 10_000         # D-002 v3 §3: A1's second SCIP uses seed s + 1
 PARTNER_THREADS = 3             # D-002 §3: the partner footprint is 3 A725 cores (cuOpt num_cpu_threads = 3)
 DEFINITIVE = ("optimal", "infeasible", "unbounded", "infeasible_or_unbounded")   # exit reasons that end a race
 ABORT_KILL_AFTER_S = 5.0      # an abort (memory floor, thermal pause, interrupt): stop → this → SIGTERM → SIGKILL
+THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 RUNNER_CORES = (4, 10, 11, 12, 13, 14)   # A725 cores no lane uses (1–3: partner, 0: Redis): the runner's own work —
                                          # except the whole-box lane `full`, which holds every core: there the runner's
                                          # threads (the GPU-health sampler, the stop loop) share cuOpt's cores, a small,
@@ -433,6 +436,7 @@ class Proc:
     gpu_gb: float | None
     env_extra: dict
     log_path: Path
+    env_unset: tuple[str, ...] = ()    # removed from the inherited environment before env_extra applies (A6m's cuOpt)
     popen: subprocess.Popen | None = None
     launch_mono: float | None = None
     launch_epoch: float | None = None
@@ -595,6 +599,11 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             raise RunError(f"unknown process kind {spec.kind!r}")
         env = {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "PYTHONUNBUFFERED": "1",
                "ITREA_RUN_ID": run_dir.name, "ITREA_ROLE": spec.role, "CUPY_CACHE_DIR": str(opts.cupy_cache_dir)}
+        unset: tuple[str, ...] = ()
+        if spec.whole_lane:                       # A6m: the thread variables unset, as GAMS ran cuOpt (D-020)
+            unset = THREAD_VARS
+            for k in unset:
+                env.pop(k)
         if g is not None:
             env["CUPY_GPU_MEMORY_LIMIT"] = str(int(g * 1024**3))   # CuPy reads it at import (EA); cuOpt: RMM limit
             env["ITREA_GPU_MEM_GB"] = _fmt_set(g)
@@ -607,7 +616,7 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--description=itrea {run_dir.name} {spec.role}",
                    "-p", f"MemoryMax={int(round(mem * 1024))}M", "-p", "MemorySwapMax=0"] + cmd
         procs.append(Proc(spec=spec, argv=argv, cmd=cmd, cores=cores, mem_gb=mem, gpu_gb=g, env_extra=env,
-                          log_path=run_dir / f"{spec.role}.log"))
+                          log_path=run_dir / f"{spec.role}.log", env_unset=unset))
     return procs
 
 
@@ -891,9 +900,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     try:
         # ---------------------------------------------------------------- launch
         for p in procs:
-            env = dict(os.environ)
-            env.pop("CUPY_GPU_MEMORY_LIMIT", None)
-            env.update(p.env_extra)
+            env = launch_env(p)
             logf = open(p.log_path, "ab")
             try:
                 p.launch_mono, p.launch_epoch = time.monotonic(), time.time()
@@ -1064,6 +1071,17 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     return rec
 
 
+def launch_env(p: Proc, base: dict | None = None) -> dict:
+    """A process's environment: the runner's (`base`, default os.environ) without CuPy's pool limit and without
+    `p.env_unset`, then `p.env_extra`."""
+    env = dict(os.environ if base is None else base)
+    env.pop("CUPY_GPU_MEMORY_LIMIT", None)
+    for k in p.env_unset:
+        env.pop(k, None)
+    env.update(p.env_extra)
+    return env
+
+
 def _launcher_failure(run_dir: Path, p: Proc) -> bool:
     """A process that ended before ready by its own exit status (not a signal) without writing `<role>.summary.json`:
     its own code never took control (systemd-run or taskset failed, the interpreter or an import failed, bad
@@ -1099,7 +1117,8 @@ def _wait_or_kill(procs: list[Proc], kill_after_s: float) -> None:
 
 def _proc_record(p: Proc, t0: float | None) -> dict:
     d = dict(role=p.role, kind=p.spec.kind, backend=p.spec.backend, cmd=p.cmd, cores=p.cores, memory_max_gb=p.mem_gb,
-             gpu_limit_gb=p.gpu_gb, env={k: v for k, v in p.env_extra.items()}, pid=p.pid,
+             gpu_limit_gb=p.gpu_gb, env={k: v for k, v in p.env_extra.items()}, env_unset=list(p.env_unset),
+             pid=p.pid,
              launch_epoch=p.launch_epoch, log=p.log_path.name,
              startup_s=round(p.ready_mono - p.launch_mono, 3) if (p.ready_mono and p.launch_mono) else None,
              exit_code=p.exit_code, killed=p.killed, stopped_by_runner=p.stopped_by_runner,

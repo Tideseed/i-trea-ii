@@ -29,11 +29,16 @@ for a in ("--instance", "--seed", "--budget", "--run-dir", "--mailbox", "--sol-o
           "--role-name", "--config", "--cpu-threads", "--inject-band", "--inject-k", "--emphasis", "--run-id",
           "--gpu-mem-gb"):
     ap.add_argument(a)
-for f in ("--recv", "--send", "--inert", "--no-barrier"):
+for f in ("--recv", "--send", "--inert", "--no-barrier", "--mip-gap-zero"):
     ap.add_argument(f, action="store_true")
 a = ap.parse_args()
 role = a.role_name or os.environ.get("ITREA_ROLE", "solver")
 R = role.upper()
+if os.environ.get("FAKE_ENV_OUT"):                      # what the process inherited (A6m: no thread variables)
+    import json
+    with open(os.environ["FAKE_ENV_OUT"] + "." + role, "w") as fh:
+        json.dump({k: os.environ.get(k) for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                                                  "ITREA_ROLE", "CUPY_GPU_MEMORY_LIMIT", "PYTHONUNBUFFERED")}, fh)
 mb = open_mailbox(a.mailbox, role, run_id=a.run_id)
 tr = Trace(a.run_dir, role, arm=a.arm, seed=int(a.seed))
 if os.environ.get("FAKE_EXIT_EARLY_" + R):
@@ -258,6 +263,62 @@ def test_a6m_identity_settings_and_lane(toy, tmp_path):
         pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, cuopt_threads=3))
     assert not pair.GPU_LANE.fits(pair.ARMS["A6m"]) and pair.FULL_LANE.fits(pair.ARMS["A6m"])
     assert pair.ARM_ORDER[-1] == "A6m"                     # appended: the canonical order of the other arms is unchanged
+
+
+def _launch_env_before_a6m(p, base: dict) -> dict:
+    """The child environment as the runner built it before A6m (530916c): the runner's environment without CuPy's
+    pool limit, then the process's env_extra."""
+    env = dict(base)
+    env.pop("CUPY_GPU_MEMORY_LIMIT", None)
+    env.update(p.env_extra)
+    return env
+
+
+def test_process_environments_unchanged_but_a6m(toy, tmp_path):
+    """Every arm but A6m launches with the environment it had before A6m, byte for byte (the three thread variables
+    = 1); A6m's cuOpt (the whole-lane process) gets them REMOVED, although the runner's own environment has them
+    (review 2026-10-11: GAMS ran cuOpt with them unset; libcuopt links libomp)."""
+    base = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
+                CUPY_GPU_MEMORY_LIMIT="123", PATH="/usr/bin")
+    o = opts_for(tmp_path, use_systemd=True, pin=True)
+    for arm in pair.ARMS:
+        if arm == "A6m":
+            continue
+        j = job(toy, arm, seed=1000, budget=300, emphasis="aggressive" if arm == "A0star" else None)
+        cfg, _ = pair.effective_config(j, o)
+        for p in pair.plan(j, o, tmp_path / "rd" / pair.run_id_for(j, o), "SPEC", cfg):
+            assert p.env_unset == () and pair.launch_env(p, base) == _launch_env_before_a6m(p, base), (arm, p.role)
+            assert all(p.env_extra[k] == "1" for k in pair.THREAD_VARS)
+    a2 = job(toy, "A2", seed=1000, budget=300)
+    cu = {p.role: p for p in pair.plan(a2, o, tmp_path / "rd" / "x", "SPEC", pair.effective_config(a2, o)[0])}["cuopt"]
+    assert cu.env_extra == {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+                            "PYTHONUNBUFFERED": "1", "ITREA_RUN_ID": "x", "ITREA_ROLE": "cuopt",
+                            "CUPY_CACHE_DIR": str(tmp_path / "cupy-cache"), "CUPY_GPU_MEMORY_LIMIT": str(12 * 1024**3),
+                            "ITREA_GPU_MEM_GB": "12.0"}
+    fo = opts_for(tmp_path, lane=pair.FULL_LANE, gpu_mem_gb=36.0, cuopt_mem_gb=24.0)
+    m = job(toy, "A6m", seed=0, budget=600)
+    (c,) = pair.plan(m, fo, tmp_path / "rd" / "x", "SPEC", pair.effective_config(m, fo)[0])
+    assert c.env_unset == pair.THREAD_VARS and not set(pair.THREAD_VARS) & set(c.env_extra)
+    env = pair.launch_env(c, base)
+    assert not set(pair.THREAD_VARS) & set(env) and env["CUPY_GPU_MEMORY_LIMIT"] == str(36 * 1024**3)
+    assert env["PATH"] == "/usr/bin" and env["ITREA_ROLE"] == "cuopt" and env["PYTHONUNBUFFERED"] == "1"
+
+
+def test_a6m_child_inherits_no_thread_variables(toy, fake, tmp_path, monkeypatch):
+    """End to end with the fake process: the runner's own environment has the thread variables (set at import), A6m's
+    child does not, A6's child does; run.json records env_unset."""
+    monkeypatch.setenv("FAKE_ENV_OUT", str(tmp_path / "env"))
+    for k in pair.THREAD_VARS:
+        monkeypatch.setenv(k, "1")
+    rec = pair.run_pair(job(toy, "A6m", seed=0, budget=0.5),
+                        opts_for(tmp_path, fake, lane=pair.FULL_LANE, gpu_mem_gb=36.0, cuopt_mem_gb=24.0))
+    assert rec["status"] == "completed", rec["reasons"]
+    seen = json.loads((tmp_path / "env.cuopt").read_text())
+    assert all(seen[k] is None for k in pair.THREAD_VARS) and seen["CUPY_GPU_MEMORY_LIMIT"] == str(36 * 1024**3)
+    assert rec["processes"][0]["env_unset"] == list(pair.THREAD_VARS)
+    rec6 = pair.run_pair(job(toy, "A6", seed=0, budget=0.5), opts_for(tmp_path, fake))
+    assert rec6["status"] == "completed" and rec6["processes"][0]["env_unset"] == []
+    assert all(json.loads((tmp_path / "env.cuopt").read_text())[k] == "1" for k in pair.THREAD_VARS)
     assert not pair.FULL_LANE.fits(pair.ARMS["A2"]) and pair.GPU_LANE.fits(pair.ARMS["A6"])
 
 
