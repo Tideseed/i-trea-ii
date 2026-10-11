@@ -364,3 +364,14 @@ the −0.06 s selection named; R13 + R14 bundled as a stated deviation with an e
    both LLM servers off. May weeks 44–45 run the external core on 26.08 as sealed insurance (prereg-v2 tagged on the C1
    configuration first)? If windows are scarce, T = 300 s instead of 600 cuts the external run time by about 40 %
    (P300 and P600 rank instances alike, Spearman 0.996 for one solver) — your call.
+
+## Addendum — Berk's answers (2026-10-11 13:2x, question panel)
+1. **prereg-v2 readings: "Accept all"** — every item of Open 1 (the hard part from GAMS's row; decisions on the 218
+   unseen; the ε-floored guard + solutions found as the minimum; the shift-0.001 geo-mean reported, not decisive; claims
+   on both clocks; part A's A6F, harness settings, W_cuOpt from an A6F seed, live A2F, ε-floored guard on Berthold P;
+   a full-box A9 only through the heat ladder; stratified estimates if T3 is cut) enters prereg-v2. D-019's literal
+   readings are still computed and reported beside. The never-cut core is T1 + T2 (R31, R32).
+2. **Fan policy: "Keep rests as now"** — no governor change; the fan-AUTO start transient stays, caught by R25's cap void.
+3. **Calendar: "We'll cross that bridge when we come to it."** — no near-daily schedule or 26.08 insurance runs are
+   planned now; the question returns when 26.10's date (or Fri 11-06) is known.
+4. **Time limit: "Keep 600 s"** (R11 unchanged).
