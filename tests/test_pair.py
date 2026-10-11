@@ -526,3 +526,23 @@ def test_real_a3_pair(tmp_path):
     assert set(rec["exit_codes"]) == {"solver", "ea"}
     rd = tmp_path / "traces" / "raw" / "pytest" / rec["run_id"]
     assert EAConfig.from_yaml(rd / "config.yaml").hash() == rec["config"]["ea_hash"]
+
+
+def test_run_record_has_the_box_load_and_heat(toy, fake, tmp_path, monkeypatch):
+    """run.json: the 1-min load average in gates_before / gates_after (gates.snapshot) and the hottest ACPI zone seen
+    while the clock ran (`acpi_during`, read every ACPI_SAMPLE_S) — what A6m's whole-box runs are judged against."""
+    from itrea.experiments import gpu_health
+    temps = iter([71.5, 74.0, 73.0] + [72.0] * 100)
+    monkeypatch.setattr(gates, "acpi_max_c", lambda *a, **k: next(temps))
+    monkeypatch.setattr(gates, "lease", lambda *a, **k: None)
+    monkeypatch.setattr(gates, "serving_state", lambda: {})
+    monkeypatch.setattr(gates, "co_running", lambda **k: [])
+    monkeypatch.setattr(gpu_health, "compute_apps", lambda *a, **k: [])          # no nvidia-smi in a CPU test
+    monkeypatch.setattr(pair, "ACPI_SAMPLE_S", 0.2)
+    rec = pair.run_pair(job(toy, "A0", budget=1.0), opts_for(tmp_path, fake, record_snapshots=True))
+    assert rec["status"] == "completed"
+    assert "loadavg_1m" in rec["gates_before"] and "loadavg_1m" in rec["gates_after"]
+    a = rec["acpi_during"]
+    assert a["samples"] >= 2 and a["max_c"] >= 73.0 and a["period_s"] == 0.2
+    assert pair.run_pair(job(toy, "A0", seed=2, budget=0.3), opts_for(tmp_path, fake))["acpi_during"] is None
+    assert gates.loadavg_1m() is None or gates.loadavg_1m() >= 0

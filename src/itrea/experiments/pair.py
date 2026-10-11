@@ -81,6 +81,7 @@ GPU_KINDS = ("cuopt",)          # plus "ea" when its backend is cupy
 A1_SEED_OFFSET = 10_000         # D-002 v3 §3: A1's second SCIP uses seed s + 10,000
 PARTNER_THREADS = 3             # D-002 §3: the partner footprint is 3 A725 cores (cuOpt num_cpu_threads = 3)
 DEFINITIVE = ("optimal", "infeasible", "unbounded", "infeasible_or_unbounded")   # exit reasons that end a race
+ACPI_SAMPLE_S = 5.0            # the hottest ACPI zone, read this often while the clock runs (run.json `acpi_during`)
 ABORT_KILL_AFTER_S = 5.0      # an abort (memory floor, thermal pause, interrupt): stop → this → SIGTERM → SIGKILL
 THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 RUNNER_CORES = (4, 10, 11, 12, 13, 14)   # A725 cores no lane uses (1–3: partner, 0: Redis): the runner's own work —
@@ -895,6 +896,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             own_sampler = True
 
     reasons: list[str] = rec["reasons"]
+    acpi = dict(max_c=None, samples=0, period_s=ACPI_SAMPLE_S) if opts.record_snapshots else None
     status = None
     t0 = None
     cache_t0 = None
@@ -957,11 +959,18 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             t0 = mb.release()
             rec["t0"], rec["t0_epoch"] = t0, time.time()
             t_end = t0 + float(job["budget"]) + opts.grace_s
+            next_acpi = 0.0
             while True:
                 alive = [p for p in procs if p.poll() is None]
                 if not alive:
                     break
                 now = time.monotonic()
+                if acpi is not None and now >= next_acpi:      # the box's heat while this run holds it
+                    next_acpi = now + ACPI_SAMPLE_S
+                    c = gates.acpi_max_c()
+                    if c is not None:
+                        acpi["max_c"] = c if acpi["max_c"] is None else max(acpi["max_c"], c)
+                        acpi["samples"] += 1
                 if opts.abort is not None and opts.abort.is_set():
                     stop_info = dict(reason="abort: " + (opts.abort_reason() if opts.abort_reason else ""),
                                      t=now - t0, kind="abort")
@@ -1048,6 +1057,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         else:
             rec["gpu_health"] = None
         rec["gates_after"] = gates.snapshot() if opts.record_snapshots else None
+        rec["acpi_during"] = acpi
         # status: void (external) > failed (any exit code != 0 — a SIGKILL included —, a start failure) > completed.
         # A process that exits 0 after the runner's SIGTERM is recorded in processes[*].killed, not as a failure; a
         # stopped_by_runner process (above) is not a failure either.

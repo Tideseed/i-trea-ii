@@ -338,8 +338,16 @@ def rss_anon_gb(pid: int, proc: str = "/proc") -> float:
     return 0.0
 
 
+def loadavg_1m() -> float | None:
+    try:
+        return round(os.getloadavg()[0], 2)
+    except OSError:
+        return None
+
+
 def snapshot(exclude_pids: set[int] | None = None) -> dict:
-    """What the run record stores about the box at a moment: MemAvailable, the hottest ACPI zone, the box-window
-    lease, the local model servers' state and other large processes."""
+    """What the run record stores about the box at a moment: MemAvailable, the hottest ACPI zone, the 1-min load
+    average, the box-window lease, the local model servers' state and other large processes."""
     return dict(t=time.time(), mem_available_gb=round(mem_available_gb(), 2), acpi_max_c=acpi_max_c(),
-                lease=lease(), serving=serving_state(), co_running=co_running(exclude_pids=exclude_pids)[:12])
+                loadavg_1m=loadavg_1m(), lease=lease(), serving=serving_state(),
+                co_running=co_running(exclude_pids=exclude_pids)[:12])
