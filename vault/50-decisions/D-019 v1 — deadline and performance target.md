@@ -67,3 +67,9 @@ cuopt version"** and **"No nights"**. So:
   A9's geo-mean ≤ our cuOpt-26.10-alone geo-mean on the same GB10; target — mean PI −25 % on the hard part (our
   cuOpt-alone PI ≥ 0.1 or no solution) and geo-mean −10 %; stretch — geo-mean ≤ 0.0274 (SCIPConc-11, published). The
   confirmatory targets (part A) stand as proposed.
+
+## Correction (2026-10-11) — the MIPfeas clock, by [[D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt 26.08]]
+"Clock from the first process's launch" (milestone 10-16 above and #29) is not the published protocol: GAMS's traces
+start at the solver call (model generation and reading excluded). D-020 records both clocks and calibrates on the call
+clock; the v1 clock is fixed in prereg-v2. The ±15 % calibration tolerance stands, now applied to a paired per-instance
+comparison with GAMS's own GB10 cuOpt-26.08 run (Berk allowed the download of GAMS's per-instance results, 10-11).
