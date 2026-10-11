@@ -38,7 +38,8 @@ if os.environ.get("FAKE_ENV_OUT"):                      # what the process inher
     import json
     with open(os.environ["FAKE_ENV_OUT"] + "." + role, "w") as fh:
         json.dump({k: os.environ.get(k) for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-                                                  "ITREA_ROLE", "CUPY_GPU_MEMORY_LIMIT", "PYTHONUNBUFFERED")}, fh)
+                                                  "ITREA_ROLE", "CUPY_GPU_MEMORY_LIMIT", "PYTHONUNBUFFERED",
+                                                  "CUDA_CACHE_PATH", "CUDA_CACHE_MAXSIZE")}, fh)
 mb = open_mailbox(a.mailbox, role, run_id=a.run_id)
 tr = Trace(a.run_dir, role, arm=a.arm, seed=int(a.seed))
 if os.environ.get("FAKE_EXIT_EARLY_" + R):
@@ -230,6 +231,33 @@ def test_existing_run_hashes_are_pinned():
     assert h("A9", "configs/itrea2-dev-rc-3way-bo1.yaml", "bo1") == "f67354be775d"
     assert h("A9", "configs/itrea2-dev-rc-3way-bo1s.yaml", "bo1s") == "62bf82b236f6"
     assert h("A3x", "configs/itrea2-dev-rc-3way.yaml") == "1d12ad490dd0"
+    assert h("A9", "configs/itrea2-dev-rc-3way.yaml") == "0f011a2094a2"       # the A9 development default
+    # A6m (D-020) under the full lane's settings
+    full = pair.PairOptions(lane=pair.FULL_LANE, gpu_mem_gb=36.0, cuopt_mem_gb=24.0)
+    a6m = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A6m", seed=0, budget=600, config=None)
+    assert pair.run_hash(a6m, full) == "2bdfb1d95b46"
+
+
+def test_d021_run_hashes_are_pinned():
+    """The new arms and the harness (D-021) get these ids; the harness enters the hash only when the job has one."""
+    o = pair.PairOptions()
+
+    def h(arm, harness=None, config=None):
+        j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm=arm, seed=0, budget=600, config=config)
+        if harness is not None:
+            j["harness"] = harness
+        return pair.run_hash(j, o)
+    a9 = "configs/itrea2-dev-rc-3way.yaml"
+    pinned = {("A6F", None): "21b799abb61f", ("A2F", None): "ba509eeea380", ("A6F", "ext"): "acc1ab3ad730",
+              ("A2F", "ext"): "e0fe33e2f7be", ("A9", "ext"): "37577482704d", ("A6", "ext"): "66ccaffa7a42",
+              ("A2", "ext"): "abf37c7fd0d3"}
+    got = {k: h(k[0], k[1], a9 if k[0] == "A9" else None) for k in pinned}
+    assert got == pinned, got
+    m3 = {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}
+    assert h("A6F", m3) == h("A6F", {"preset": "ext", "cuopt_rmm_gb": 40.0, "cuopt_host_gb": 40.0}) == "0069fefa1a21"
+    assert h("A6F", {"preset": "ext", "cuopt_env_unset": False}) == "6d2a04a700a0"
+    assert h("A6F", {"preset": "ext"}) == h("A6F", "ext") != h("A6F")
+    assert h("A9", "ext", a9) != h("A9", None, a9) == "0f011a2094a2"
 
 
 def test_a6m_identity_settings_and_lane(toy, tmp_path):
@@ -262,7 +290,8 @@ def test_a6m_identity_settings_and_lane(toy, tmp_path):
     with pytest.raises(pair.RunError, match="fixed by the arm"):
         pair.run_hash(j, opts_for(tmp_path, lane=pair.FULL_LANE, cuopt_threads=3))
     assert not pair.GPU_LANE.fits(pair.ARMS["A6m"]) and pair.FULL_LANE.fits(pair.ARMS["A6m"])
-    assert pair.ARM_ORDER[-1] == "A6m"                     # appended: the canonical order of the other arms is unchanged
+    # appended after A3x, and A6F / A2F (D-021) after it: the canonical order of the earlier arms is unchanged
+    assert pair.ARM_ORDER[pair.ARM_ORDER.index("A3x") + 1:] == ("A6m", "A6F", "A2F")
 
 
 def _launch_env_before_a6m(p, base: dict) -> dict:
@@ -546,3 +575,118 @@ def test_run_record_has_the_box_load_and_heat(toy, fake, tmp_path, monkeypatch):
     assert a["samples"] >= 2 and a["max_c"] >= 73.0 and a["period_s"] == 0.2
     assert pair.run_pair(job(toy, "A0", seed=2, budget=0.3), opts_for(tmp_path, fake))["acpi_during"] is None
     assert gates.loadavg_1m() is None or gates.loadavg_1m() >= 0
+
+
+# ================================================================================================ D-021 (ITX-1)
+def test_f_arms_take_the_gpu_lanes_cores(toy, tmp_path):
+    """A6F = cuOpt alone on all of F (the GPU lane's cores: X925 5–6 + A725 1–3), num_cpu_threads = |F|; A2F = SCIP on
+    F's first X925 core and cuOpt on the other |F| - 1 cores with |F| - 1 threads, no exchange. F comes from the lane,
+    so another lane gives another F (and another run id)."""
+    procs, o, rd = _plan(toy, tmp_path, "A6F")
+    (c,) = procs.values()
+    F = sorted(pair.GPU_LANE.x925 + pair.GPU_LANE.a725)
+    assert c.cores == F == [1, 2, 3, 5, 6] and c.argv[c.argv.index("--cpu-threads") + 1] == str(len(F))
+    assert c.mem_gb == 12.0 and c.gpu_gb == EAConfig().gpu_mem_gb and "--mip-gap-zero" not in c.argv
+    assert "--send" not in c.argv and c.env_unset == () and c.env_extra["OMP_NUM_THREADS"] == "1"
+    assert c.cmd[c.cmd.index("taskset") + 2] == "1,2,3,5,6"
+    procs, _, _ = _plan(toy, tmp_path, "A2F")
+    s, c = procs["solver"], procs["cuopt"]
+    assert s.cores == [5] and "--inert" in s.argv and c.cores == [1, 2, 3, 6]
+    assert c.argv[c.argv.index("--cpu-threads") + 1] == "4" and "--send" not in c.argv
+    wide = pair.Lane("w", (5, 6, 7), (1, 2, 3, 4), gpu=True)
+    j = job(toy, "A6F", seed=0, budget=600)
+    assert pair.run_hash(j, opts_for(tmp_path, lane=wide)) != pair.run_hash(j, opts_for(tmp_path))
+    cfg, _ = pair.effective_config(j, opts_for(tmp_path, lane=wide))
+    (cw,) = pair.plan(j, opts_for(tmp_path, lane=wide), tmp_path / "x", "S", cfg)
+    assert cw.cores == [1, 2, 3, 4, 5, 6, 7] and cw.argv[cw.argv.index("--cpu-threads") + 1] == "7"
+    with pytest.raises(pair.RunError, match="contradicts"):
+        pair.run_hash(j, opts_for(tmp_path, cuopt_threads=3))
+    assert not pair.Lane("c1", (7, 8)).fits(pair.ARMS["A6F"]) and not pair.FULL_LANE.fits(pair.ARMS["A2F"])
+    assert pair.ARMS["A6F"].lane == pair.ARMS["A2F"].lane == "partner"
+
+
+def test_harness_presets_overrides_and_refusals(toy):
+    ext = pair.resolve_harness("ext")
+    assert ext == dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0,
+                       cuda_cache=True)
+    assert pair.resolve_harness(None) is None and pair.resolve_harness({}) == ext
+    assert pair.resolve_harness({"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40})["cuopt_rmm_gb"] == 40.0
+    assert pair.resolve_harness({"cuopt_env_unset": False})["cuopt_env_unset"] is False
+    for bad, text in (("int", "unknown harness"), ({"preset": "nope"}, "unknown harness"),
+                      ({"cuopt_rmm": 40}, "unknown harness keys"), ({"cuopt_rmm_gb": 0}, "positive"),
+                      ({"cuopt_rmm_gb": True}, "positive"), ({"cuda_cache": "yes"}, "true or false"), (3, "preset")):
+        with pytest.raises(pair.RunError, match=text):
+            pair.resolve_harness(bad)
+    with pytest.raises(pair.RunError, match="D-020's own settings"):
+        pair.job_harness(job(toy, "A6m", harness="ext"))
+
+
+def test_harness_ext_plans_every_cuopt_process(toy, tmp_path):
+    """Under the ext harness (D-021 R13, R14, R15, R29): cuOpt gets gaps 0, no thread variables, its own RMM limit
+    (24 GB, separate from the EA's 12-GB pool) and host MemoryMax 24 GB; every process gets the project's CUDA JIT
+    cache. Without the harness nothing changes."""
+    base = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
+    o = opts_for(tmp_path, use_systemd=True, pin=True, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0,
+                 cuda_cache_dir=tmp_path / "cuda")
+    for arm in ("A9", "A6F", "A2F", "A6", "A2"):
+        cfgf = "configs/itrea2-dev-rc-3way.yaml" if arm == "A9" else None
+        j = job(toy, arm, seed=0, budget=600, config=cfgf, harness="ext")
+        cfg, _ = pair.effective_config(j, o)
+        procs = {p.role: p for p in pair.plan(j, o, tmp_path / "rd" / pair.run_id_for(j, o), "S", cfg)}
+        c = procs["cuopt"]
+        assert c.mem_gb == 24.0 and c.gpu_gb == 24.0 and "--mip-gap-zero" in c.argv, arm
+        assert c.argv[c.argv.index("--gpu-mem-gb") + 1] == "24.0" and "MemoryMax=24576M" in c.cmd
+        assert c.env_unset == pair.THREAD_VARS and not set(pair.THREAD_VARS) & set(pair.launch_env(c, base))
+        assert c.env_extra["CUPY_GPU_MEMORY_LIMIT"] == str(24 * 1024**3)
+        for p in procs.values():
+            assert p.env_extra["CUDA_CACHE_PATH"] == str(tmp_path / "cuda"), (arm, p.role)
+            assert p.env_extra["CUDA_CACHE_MAXSIZE"] == "4294967296"
+            if p.spec.kind != "cuopt":
+                assert p.env_unset == () and p.env_extra["OMP_NUM_THREADS"] == "1"
+        if arm == "A9":
+            ea = procs["ea"]
+            assert ea.gpu_gb == 12.0 and ea.mem_gb == 6.0 and "--send" in c.argv     # the EA keeps its own pool
+        j0 = dict(j)
+        j0.pop("harness")
+        p0 = {p.role: p for p in pair.plan(j0, o, tmp_path / "rd" / "x", "S", pair.effective_config(j0, o)[0])}
+        assert "CUDA_CACHE_PATH" not in p0["cuopt"].env_extra and p0["cuopt"].env_unset == ()
+    kept = job(toy, "A6F", seed=0, budget=120, harness={"preset": "ext", "cuopt_env_unset": False})
+    (c,) = pair.plan(kept, o, tmp_path / "x", "S", pair.effective_config(kept, o)[0])
+    assert c.env_unset == () and c.env_extra["OMP_NUM_THREADS"] == "1" and "--mip-gap-zero" in c.argv
+    with pytest.raises(pair.RunError, match="measured cuOpt peak"):
+        pair.job_budget(job(toy, "A6F", harness="ext"), opts_for(tmp_path, cuopt_gpu_peak_gb=10.5))
+
+
+def test_harness_memory_gate_follows_d003(toy, tmp_path):
+    """D-021 R29's gate arithmetic, from D-003's formula and the harness's caps (file mailbox; Redis adds 2 GB):
+    A9 ≈ 97 (99), A2F ≈ 78 (80), A6F ≈ 69 (71) GB, M3's A6F at RMM 40 / host 40 = 101 GB."""
+    o = opts_for(tmp_path, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0)
+    r = opts_for(tmp_path, solver_mem_gb=9.0, ea_mem_gb=6.0, cuopt_mem_gb=12.0, mailbox="redis")
+
+    def need(arm, harness, opts):
+        return pair.job_budget(job(toy, arm, seed=0, budget=600, harness=harness,
+                                   config="configs/itrea2-dev-rc-3way.yaml" if arm == "A9" else None), opts).need_gb
+    assert (need("A9", "ext", o), need("A9", "ext", r)) == (97.0, 99.0)
+    assert (need("A2F", "ext", o), need("A2F", "ext", r)) == (78.0, 80.0)
+    assert (need("A6F", "ext", o), need("A6F", "ext", r)) == (69.0, 71.0)
+    assert need("A6F", {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}, o) == 101.0
+    assert need("A9", None, o) == 9 + 6 + 12 + 12 + 12 + 2 + gates.RESERVE_GB         # unchanged without a harness
+
+
+def test_named_scopes(toy, tmp_path):
+    """D-021 R27: every process runs in a scope named itrea-run-<run-hash>-<role>-<epoch> (never in argv, never in a
+    hash), so host tools such as thermal-watch can find the project's processes."""
+    assert pair.scope_unit("glass4__A9__s0__600s__37577482704d", "cuopt", 1791716000) == \
+        "itrea-run-37577482704d-cuopt-1791716000"
+    o = opts_for(tmp_path, use_systemd=True, pin=True)
+    j = job(toy, "A9", seed=0, budget=600, config="configs/itrea2-dev-rc-3way.yaml")
+    rid = pair.run_id_for(j, o)
+    procs = pair.plan(j, o, tmp_path / "rd" / rid, "S", pair.effective_config(j, o)[0], epoch=1791716000)
+    h = rid.rsplit("__", 1)[-1]
+    for p in procs:
+        assert p.scope_unit == f"itrea-run-{h}-{p.role}-1791716000"
+        assert p.cmd[:5] == ["systemd-run", "--user", "--scope", "--quiet", f"--unit={p.scope_unit}"]
+        assert not any("--unit" in a for a in p.argv)
+    assert len({p.scope_unit for p in procs}) == 3
+    assert all(p.scope_unit is None for p in pair.plan(j, opts_for(tmp_path), tmp_path / "x", "S",
+                                                       pair.effective_config(j, o)[0]))

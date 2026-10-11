@@ -105,7 +105,7 @@ from itrea.trace import read_events
 
 ROLES = ("solver", "solver2", "ea", "cuopt")
 SOLVER_ROLE, EA_ROLE = "solver", "ea"
-GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x", "A6m")
+GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x", "A6m", "A6F", "A2F")
 EA_GPU_ARMS = ("A3", "A3r", "A5", "A5x0", "A5y0", "H3", "A9", "A3x")
 CUOPT_X_ARMS = ("A9",)                    # the EA reads cuOpt's channels (exchange.from_cuopt, D-015)
 EA_CPU_ARMS = ("A4",)

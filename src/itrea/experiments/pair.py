@@ -36,6 +36,17 @@ whole-box lane refuses every other arm. Its run hash folds in the 24 threads and
 run id with A6. Its RMM limit and MemoryMax come from the runner's options (D-020: `--gpu-mem-gb 36 --cuopt-mem-gb
 24`); the RMM limit is part of the run hash, as for A6.
 
+ITX-1 (D-021), on the GPU lane g0 whose cores are F (X925 5–6 + A725 1–3 + the GPU today, taken from the lane):
+- **A6F** = cuOpt alone pinned to all of F, num_cpu_threads = |F| (`ProcSpec.f_share`); **A2F** = SCIP on F's first
+  X925 core, cuOpt on the other |F| - 1 cores with |F| - 1 threads, no exchange (as A2). F's size is part of their
+  run hash (a changed F is another configuration, R5);
+- the job-level **harness** (`resolve_harness`; preset "ext" or a dict of overrides): every cuOpt process gets MIP gaps
+  0 (R13), the thread variables removed (R14), its own RMM limit and host MemoryMax (R29: 24 / 24 GB, separate from the
+  EA's 12-GB pool, which the EA keeps); every process gets the project's CUDA JIT cache (`CUDA_CACHE_PATH`,
+  `CUDA_CACHE_MAXSIZE`, R15). The resolved dict enters the run hash only when the field is present, so every run id
+  without it is unchanged; it is refused on A6m and (pool) on test / screening jobs;
+- **named scopes** `itrea-run-<run-hash>-<role>-<epoch>` (R27; never part of a hash or of argv).
+
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
     python -m itrea.experiments.pair --instance /tmp/toy.mps --arm A0 --seed 0 --budget 10 --set smoke
@@ -56,6 +67,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -93,7 +105,20 @@ A725_CORES = (0, 1, 2, 3, 4, 10, 11, 12, 13, 14)
 GAMS_CUOPT_THREADS = 24         # D-020: GAMS ran cuOpt with num_cpu_threads 24 on the 20-core GB10 (arm A6m)
 MAILBOX_ROOT = Path("/dev/shm/itrea")
 CUPY_CACHE_DIR = Path.home() / ".cache/itrea/cupy"
+CUDA_CACHE_DIR = Path.home() / ".cache/itrea/cuda"   # D-021 R15: the project's own CUDA JIT cache (harness cuda_cache)
+CUDA_CACHE_MAXSIZE = 4294967296                       # 4 GiB: large enough never to evict (the shared cache holds 1.1 GB)
 REDIS_URL = "redis://127.0.0.1:6390/0"
+# D-021 (ITX-1) harness settings: a job-level field `harness` = a preset name or {"preset": name, <key>: value, ...}.
+# Absent = the runner as before (no key enters the hash); present = the resolved dict (every key below) enters the run
+# hash. cuOpt keys act on every cuOpt process of the arm (A9, A6F, A2F, A6, A2, H2); cuda_cache on every process.
+HARNESS_KEYS = ("cuopt_gap_zero", "cuopt_env_unset", "cuopt_rmm_gb", "cuopt_host_gb", "cuda_cache")
+HARNESS_PRESETS: dict[str, dict] = {
+    # R13 gaps 0, R14 cuOpt's thread variables unset, R29 cuOpt RMM 24 GB separate from the EA's pool and host
+    # MemoryMax 24 GB, R15 the project-own CUDA JIT cache for every process
+    "ext": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True),
+}
+_HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache")
+_HARNESS_GB = ("cuopt_rmm_gb", "cuopt_host_gb")
 
 
 class RunError(RuntimeError):
@@ -124,6 +149,9 @@ class ProcSpec:
                                      # None = the partner footprint's (PairOptions.cuopt_threads or PARTNER_THREADS)
     gap_zero: bool = False     # cuopt: --mip-gap-zero, both MIP gaps 0 as GAMS ran it (A6m, D-020)
     whole_lane: bool = False   # pinned to every core of its lane (A6m on the whole-box lane)
+    f_share: bool = False      # cuopt: every core of the lane F that no other process of the arm holds (F minus the
+                               # arm's X925 cores: A6F all of F, A2F F minus SCIP's core), num_cpu_threads = their
+                               # number (D-021 R6 / R8)
 
     @property
     def gpu(self) -> bool:
@@ -170,6 +198,7 @@ _CUOPT = ProcSpec("cuopt", "cuopt")
 _CUOPT_X = ProcSpec("cuopt", "cuopt", exchange=True)                  # A9: --send on cuOpt's own channels
 _EA_GPU_X925 = ProcSpec("ea", "ea", backend="cupy", x925=True)        # A9: the A725 cores belong to cuOpt
 _CUOPT_GAMS = ProcSpec("cuopt", "cuopt", cpu_threads=GAMS_CUOPT_THREADS, gap_zero=True, whole_lane=True)   # A6m
+_CUOPT_F = ProcSpec("cuopt", "cuopt", f_share=True)                   # A6F / A2F: the lane's cores the arm leaves free
 _NOX = (("exchange.enabled", False), ("lp_stream.enabled", False))   # the stream needs the exchange (review 770df17)
 
 ARMS: dict[str, ArmSpec] = {a.name: a for a in [
@@ -197,7 +226,13 @@ ARMS: dict[str, ArmSpec] = {a.name: a for a in [
                 "(D-015 addendum); development arm"),
     ArmSpec("A6m", (_CUOPT_GAMS,), lane="full",
             doc="cuOpt alone as GAMS ran it for MIPfeas (D-020): num_cpu_threads 24, MIP gaps 0, all 20 cores "
-                "(whole-box lane, --layout full); the MIPfeas calibration arm"),
+                "(whole-box lane, --layout full); out of v1 (D-021 R9)"),
+    ArmSpec("A6F", (_CUOPT_F,), lane="partner",
+            doc="cuOpt alone on all of F, A9's footprint (D-021 R6): pinned to every core of the GPU lane, "
+                "num_cpu_threads = |F|; ITX-1's 'cuOpt alone' and its calibration arm"),
+    ArmSpec("A2F", (_SCIP, _CUOPT_F), lane="partner",
+            doc="SCIP || cuOpt race on F (D-021 R8): SCIP on F's first X925 core, cuOpt on the other |F| - 1 cores "
+                "with |F| - 1 threads, no exchange (as A2); the live race"),
 ]}
 # canonical order (the Williams design permutes the arms of a block in this order)
 ARM_ORDER = tuple(ARMS)
@@ -265,6 +300,7 @@ class PairOptions:
     python: str = sys.executable
     cuopt_python: str | None = None            # another interpreter for cuOpt (D-001; same venv since 2026-10-05)
     cupy_cache_dir: Path = CUPY_CACHE_DIR
+    cuda_cache_dir: Path = CUDA_CACHE_DIR      # harness cuda_cache: CUDA_CACHE_PATH of every process (D-021 R15)
     gpu_health: bool = True
     gpu_period_s: float = 1.0
     tolerate_serving_gpu: bool = False         # the model servers' GPU processes are recorded, not foreign (pool sets it
@@ -345,27 +381,97 @@ def base_config_hash(job: dict) -> str:
     return base.hash()
 
 
-def cuopt_threads(spec: ProcSpec, opts: PairOptions) -> int:
-    """num_cpu_threads of a cuOpt process: the arm's own (A6m: 24, whatever the lane) or the partner footprint's
-    (`opts.cuopt_threads`, default PARTNER_THREADS). An option that contradicts the arm's own count is refused."""
+def resolve_harness(spec) -> dict | None:
+    """The job-level harness (D-021) resolved to every key of HARNESS_KEYS, or None when the job has none. `spec` is a
+    preset name ("ext") or a dict {"preset": name (default "ext"), <key>: value, ...} that overrides the preset's keys
+    (M3: {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}; M1's env-only contrast: {"preset": "ext",
+    "cuopt_env_unset": false}). Unknown names or keys and wrongly typed values raise RunError. Sizes become floats, so
+    40 and 40.0 give one hash."""
+    if spec is None:
+        return None
+    if isinstance(spec, str):
+        if spec not in HARNESS_PRESETS:
+            raise RunError(f"unknown harness {spec!r} (presets: {', '.join(HARNESS_PRESETS)})")
+        return {k: HARNESS_PRESETS[spec][k] for k in HARNESS_KEYS}
+    if not isinstance(spec, dict):
+        raise RunError(f"harness must be a preset name or a dict, not {spec!r}")
+    d = dict(spec)
+    out = resolve_harness(d.pop("preset", "ext"))
+    unknown = sorted(set(d) - set(HARNESS_KEYS))
+    if unknown:
+        raise RunError(f"unknown harness keys {unknown} (known: {', '.join(HARNESS_KEYS)})")
+    for k, v in d.items():
+        if k in _HARNESS_BOOL:
+            if not isinstance(v, bool):
+                raise RunError(f"harness {k} must be true or false, not {v!r}")
+            out[k] = v
+        else:
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
+                raise RunError(f"harness {k} must be a positive number of GB, not {v!r}")
+            out[k] = float(v)
+    return out
+
+
+def job_harness(job: dict) -> dict | None:
+    """The job's resolved harness (`resolve_harness`); refused for A6m, which carries D-020's own settings."""
+    h = resolve_harness(job.get("harness"))
+    if h is not None and arm_spec(job).lane == "full":
+        raise RunError(f"arm {job['arm']} carries D-020's own settings; a harness is not allowed on it (D-021 R9)")
+    return h
+
+
+def cuopt_cores(spec: ProcSpec, arm: ArmSpec, lane: Lane) -> list[int]:
+    """The cores of a cuOpt process: every core of the lane (A6m), the lane's cores that no other process of the arm
+    holds (A6F: all of F; A2F: F minus SCIP's X925 core), or the lane's A725 cores (the partner footprint)."""
+    if spec.whole_lane:
+        return sorted(lane.x925 + lane.a725)
+    if spec.f_share:
+        return sorted(lane.x925[arm.n_x925:] + lane.a725)
+    return list(lane.a725)
+
+
+def cuopt_threads(spec: ProcSpec, opts: PairOptions, arm: ArmSpec | None = None) -> int:
+    """num_cpu_threads of a cuOpt process: the arm's own (A6m: 24, whatever the lane), the number of its cores on the
+    lane (A6F: |F|, A2F: |F| - 1; F = the cores of opts.lane, so F's size is part of these arms' identity) or the
+    partner footprint's (`opts.cuopt_threads`, default PARTNER_THREADS). An option that contradicts a count the arm
+    fixes is refused."""
     if spec.cpu_threads is not None:
         if opts.cuopt_threads not in (None, spec.cpu_threads):
             raise RunError(f"cuOpt's thread count is fixed by the arm ({spec.cpu_threads}); cuopt_threads "
                            f"{opts.cuopt_threads} contradicts it")
         return int(spec.cpu_threads)
+    if spec.f_share:
+        if arm is None:
+            raise RunError("cuOpt on F: its thread count needs the arm")
+        n = len(cuopt_cores(spec, arm, opts.lane))
+        if opts.cuopt_threads not in (None, n):
+            raise RunError(f"arm {arm.name}: cuOpt's thread count is its number of cores on lane {opts.lane.name} "
+                           f"({n}); cuopt_threads {opts.cuopt_threads} contradicts it")
+        return n
     return int(opts.cuopt_threads or PARTNER_THREADS)
 
 
+def cuopt_rmm_gb(cfg: EAConfig, harness: dict | None) -> float:
+    """cuOpt's RMM limit: the harness's own (separate from the EA's pool, D-021 R29) or the EA configuration's
+    gpu_mem_gb (= the EA's CuPy pool, D-002 §3)."""
+    return float(harness["cuopt_rmm_gb"]) if harness is not None else float(cfg.gpu_mem_gb)
+
+
 def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
-    """What identifies a run of an arm without an EA (its <cfg-hash>). Only A6m's dict carries `mip_gap_zero`, so
-    every other arm's dict — and hash — is what it was before A6m existed (tests pin them)."""
+    """What identifies a run of an arm without an EA (its <cfg-hash>). Only A6m's dict carries `mip_gap_zero` and only
+    a job with a harness carries `harness` (D-021), so every other arm's dict — and hash — is what it was before A6m
+    existed (tests pin them). `gpu_mem_gb` is cuOpt's RMM limit (the harness's when there is one)."""
     arm = arm_spec(job)
+    h = job_harness(job)
     d: dict = {"arm": arm.name, "emphasis": job.get("emphasis") if any(p.emphasis for p in arm.procs) else None}
     cu = [p for p in arm.procs if p.kind == "cuopt"]
     if cu:
-        d.update(gpu_mem_gb=cfg.gpu_mem_gb, cuopt_threads=cuopt_threads(cu[0], opts))
+        d.update(gpu_mem_gb=cuopt_rmm_gb(cfg, h) if h is not None else cfg.gpu_mem_gb,
+                 cuopt_threads=cuopt_threads(cu[0], opts, arm))
         if cu[0].gap_zero:
             d["mip_gap_zero"] = True
+    if h is not None:
+        d["harness"] = h
     return d
 
 
@@ -373,15 +479,22 @@ def run_hash(job: dict, opts: PairOptions | None = None) -> str:
     """<cfg-hash> of the run id: the effective EA configuration hash for arms with an EA (it equals the EA summary's
     config_hash); a hash of the solver-side settings otherwise. An arm with an EA AND cuOpt (A9) folds in cuOpt's
     thread count when it is not the default PARTNER_THREADS, so a thread-count variant gets its own run id (the default
-    id stays the EA configuration hash; build_runs reads the EA hash from `run.json["config"]["ea_hash"]`)."""
+    id stays the EA configuration hash; build_runs reads the EA hash from `run.json["config"]["ea_hash"]`). A job's
+    harness (D-021) is folded in the same way, only when the job has one."""
     opts = opts or PairOptions()
     cfg, _ = effective_config(job, opts)
     arm = arm_spec(job)
     if arm.has_ea:
         h = cfg.hash()
+        extra: dict = {}
         n = opts.cuopt_threads or PARTNER_THREADS
         if any(p.kind == "cuopt" for p in arm.procs) and n != PARTNER_THREADS:
-            h = hashlib.sha256(json.dumps({"ea": h, "cuopt_threads": n}, sort_keys=True).encode()).hexdigest()[:12]
+            extra["cuopt_threads"] = n
+        hz = job_harness(job)
+        if hz is not None:
+            extra["harness"] = hz
+        if extra:
+            h = hashlib.sha256(json.dumps({"ea": h, **extra}, sort_keys=True).encode()).hexdigest()[:12]
         return h
     return hashlib.sha256(json.dumps(solver_settings(job, opts, cfg), sort_keys=True).encode()).hexdigest()[:12]
 
@@ -437,7 +550,9 @@ class Proc:
     gpu_gb: float | None
     env_extra: dict
     log_path: Path
-    env_unset: tuple[str, ...] = ()    # removed from the inherited environment before env_extra applies (A6m's cuOpt)
+    env_unset: tuple[str, ...] = ()    # removed from the inherited environment before env_extra applies (A6m's cuOpt;
+                                       # every cuOpt process under a harness with cuopt_env_unset, D-021 R14)
+    scope_unit: str | None = None      # the systemd scope's unit name (itrea-run-<run-hash>-<role>-<epoch>.scope)
     popen: subprocess.Popen | None = None
     launch_mono: float | None = None
     launch_epoch: float | None = None
@@ -529,10 +644,23 @@ def solver_flags(spec: ProcSpec, cfg: EAConfig | None) -> list[str]:
     return out or ["--inert"]
 
 
-def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EAConfig) -> list[Proc]:
-    """The processes of a run (nothing is launched)."""
+def scope_unit(run_id: str, role: str, epoch: int) -> str:
+    """The run scope's unit name `itrea-run-<run-hash>-<role>-<epoch>` (D-021 R27: host tools such as thermal-watch
+    find the project's processes by it; never part of a hash). <run-hash> is the run id's last field."""
+    h = str(run_id).rsplit("__", 1)[-1]
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", f"itrea-run-{h}-{role}-{int(epoch)}")
+
+
+def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EAConfig,
+         epoch: int | None = None) -> list[Proc]:
+    """The processes of a run (nothing is launched). `epoch` names the scopes (default: now)."""
     arm = arm_spec(job)
     lane = opts.lane
+    hz = job_harness(job)
+    epoch = int(time.time()) if epoch is None else int(epoch)
+    if hz is not None and opts.cuopt_gpu_peak_gb is not None and any(p.kind == "cuopt" for p in arm.procs):
+        raise RunError("a job with a harness is budgeted on its caps (D-021 R29): a measured cuOpt peak "
+                       "(--cuopt-gpu-peak-gb) is refused")
     if arm.lane == "full" and not lane.whole_box:
         raise RunError(f"arm {arm.name} runs only on the whole-box lane (pool --layout full, D-020), not on lane "
                        f"{lane.name}")
@@ -592,19 +720,23 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             argv += ["--config", str(run_dir / "config.yaml")]
             g = gpu_gb if spec.gpu else None
         elif spec.kind == "cuopt":
-            cores = sorted(lane.x925 + lane.a725) if spec.whole_lane else list(lane.a725)
-            mem = opts.cuopt_mem_gb
-            argv += ["--cpu-threads", str(cuopt_threads(spec, opts)), "--gpu-mem-gb", _fmt_set(gpu_gb)]
-            if spec.gap_zero:
+            cores = cuopt_cores(spec, arm, lane)
+            if hz is not None:                       # D-021 R29: cuOpt's own caps, separate from the EA's pool
+                mem, g = float(hz["cuopt_host_gb"]), cuopt_rmm_gb(cfg, hz)
+            else:
+                mem, g = opts.cuopt_mem_gb, gpu_gb       # RMM limit = the EA's pool limit (D-002 §3)
+            argv += ["--cpu-threads", str(cuopt_threads(spec, opts, arm)), "--gpu-mem-gb", _fmt_set(g)]
+            if spec.gap_zero or (hz is not None and hz["cuopt_gap_zero"]):
                 argv.append("--mip-gap-zero")
             argv += cuopt_flags(spec, cfg if arm.has_ea else None)
-            g = gpu_gb                                   # RMM limit = the EA's pool limit (D-002 §3)
         else:
             raise RunError(f"unknown process kind {spec.kind!r}")
         env = {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "PYTHONUNBUFFERED": "1",
                "ITREA_RUN_ID": run_dir.name, "ITREA_ROLE": spec.role, "CUPY_CACHE_DIR": str(opts.cupy_cache_dir)}
         unset: tuple[str, ...] = ()
-        if spec.whole_lane:                       # A6m: the thread variables unset, as GAMS ran cuOpt (D-020)
+        # A6m: the thread variables unset, as GAMS ran cuOpt (D-020); under a harness with cuopt_env_unset every cuOpt
+        # process (D-021 R14), confined by taskset
+        if spec.whole_lane or (spec.kind == "cuopt" and hz is not None and hz["cuopt_env_unset"]):
             unset = THREAD_VARS
             for k in unset:
                 env.pop(k)
@@ -613,14 +745,20 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             env["ITREA_GPU_MEM_GB"] = _fmt_set(g)
         else:
             env["CUDA_VISIBLE_DEVICES"] = ""      # a CPU process must not create a CUDA context (A4 = NumPy EA)
+        if hz is not None and hz["cuda_cache"]:   # D-021 R15: the project's own CUDA JIT cache, never evicting
+            env["CUDA_CACHE_PATH"] = str(opts.cuda_cache_dir)
+            env["CUDA_CACHE_MAXSIZE"] = str(CUDA_CACHE_MAXSIZE)
         cmd = list(argv)
         if opts.pin and cores:
             cmd = ["taskset", "-c", ",".join(map(str, cores))] + cmd
+        unit = None
         if opts.use_systemd:
-            cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--description=itrea {run_dir.name} {spec.role}",
+            unit = scope_unit(run_dir.name, spec.role, epoch)
+            cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
+                   f"--description=itrea {run_dir.name} {spec.role}",
                    "-p", f"MemoryMax={int(round(mem * 1024))}M", "-p", "MemorySwapMax=0"] + cmd
         procs.append(Proc(spec=spec, argv=argv, cmd=cmd, cores=cores, mem_gb=mem, gpu_gb=g, env_extra=env,
-                          log_path=run_dir / f"{spec.role}.log", env_unset=unset))
+                          log_path=run_dir / f"{spec.role}.log", env_unset=unset, scope_unit=unit))
     return procs
 
 
@@ -827,6 +965,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     if job.get("split") == "test" and not opts.allow_test:
         raise RunError("test-split jobs run only through the pool (freeze check: frozen-e2 hash, prereg-v1)")
     cfg, overrides = effective_config(job, opts)
+    harness = job_harness(job)
     run_id = run_id_for(job, opts)
     run_dir = Path(opts.traces_dir) / "raw" / job["set"] / run_id
     if run_dir.exists():
@@ -870,7 +1009,8 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         stratum=job.get("stratum"), split=job.get("split"),
         config=dict(path=job.get("config"), overrides=overrides, base_hash=base_config_hash(job),
                     ea_hash=cfg.hash() if arm.has_ea else None, run_hash=run_hash(job, opts),
-                    solver_settings=None if arm.has_ea else solver_settings(job, opts, cfg)),
+                    solver_settings=None if arm.has_ea else solver_settings(job, opts, cfg),
+                    harness=harness),
         problem=dict(prob_summary, load_s=round(load_s, 3)),
         mailbox=dict(kind=opts.mailbox, spec=spec),
         lane=dataclasses.asdict(opts.lane), systemd=opts.use_systemd, pinned=opts.pin,
@@ -883,6 +1023,8 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     rec["gates_before"] = gates.snapshot() if opts.record_snapshots else None
     if rec["gates_before"] is not None:
         rec["gates_before"]["gpu_apps"] = gpu_health.compute_apps()
+    if harness is not None and harness["cuda_cache"]:
+        opts.cuda_cache_dir.mkdir(parents=True, exist_ok=True)
 
     sampler, own_sampler = None, False
     if opts.gpu_health:
@@ -1131,7 +1273,7 @@ def _wait_or_kill(procs: list[Proc], kill_after_s: float) -> None:
 def _proc_record(p: Proc, t0: float | None) -> dict:
     d = dict(role=p.role, kind=p.spec.kind, backend=p.spec.backend, cmd=p.cmd, cores=p.cores, memory_max_gb=p.mem_gb,
              gpu_limit_gb=p.gpu_gb, env={k: v for k, v in p.env_extra.items()}, env_unset=list(p.env_unset),
-             pid=p.pid,
+             scope_unit=p.scope_unit, pid=p.pid,
              launch_epoch=p.launch_epoch, log=p.log_path.name,
              startup_s=round(p.ready_mono - p.launch_mono, 3) if (p.ready_mono and p.launch_mono) else None,
              exit_code=p.exit_code, killed=p.killed, stopped_by_runner=p.stopped_by_runner,
