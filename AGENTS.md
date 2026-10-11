@@ -173,13 +173,13 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `src/itrea/solvers/scip_run.py` | SCIP process; injection through a heuristic plugin (`trySol`) | built |
 | `src/itrea/solvers/highs_run.py` | HiGHS process; user-solution callback | built |
 | `src/itrea/solvers/cuopt_run.py` | cuOpt process; never receives solutions; RMM limit; in A9 (`--send`) it posts its incumbents and bound on its own channels (`to_ea_cuopt` / `info_cuopt`); `--mip-gap-zero` (both MIP gaps 0, GAMS's MIPfeas settings, arm A6m, D-020); the solve's parameters recorded as the summary's `settings` | built |
-| `src/itrea/experiments/gates.py` | lease, memory gate, thermal gate, run lock, watchdog | core |
-| `src/itrea/experiments/gpu_health.py` | per-second SM clock, temperature and foreign-GPU sampling; block voiding | built |
+| `src/itrea/experiments/gates.py` | lease, memory gate, thermal gate, run lock, watchdog; readers of the host's fan governor (state file: alive, cap; log: clock-cap intervals) and of thermal-watch's 98 °C stop lines (D-021) | core |
+| `src/itrea/experiments/gpu_health.py` | per-second SM clock, temperature and foreign-GPU sampling; block voiding (stuck clock < 2,000 MHz halts; D-021's cap floor 2,300 MHz in `CAP_FLOOR_MHZ`) | built |
 | `src/itrea/experiments/exchange_ctl.py` | the `itrea-redis` container: up, status, flush one run's keys, down | built |
 | `src/itrea/experiments/record_env.py` | versions, hardware, git state for every run record | built |
-| `src/itrea/experiments/pair.py` | one run: launch the arm's processes, start barrier, stop, every exit code checked, `run.json`; A9's three processes and its matched control A3x (D-015); arm A6m (cuOpt as GAMS ran it for MIPfeas: 24 threads, MIP gaps 0, all 20 cores on the whole-box lane `full`; D-020) | built |
-| `src/itrea/experiments/pool.py` | a job file under every D-002/D-003 control: Williams arm order per block, blocks never split, gates per run; layouts `pair` (GPU lane g0 + `--cpu-lanes`), `screen` (nine X925 lanes), `full` (one lane, the whole box: A6m only, serving check implied, D-020's `--cuopt-mem-gb 24 --gpu-mem-gb 36`) | built |
-| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke`, `backoff0` / `backoff1` (D-018 stages 0 / 1), `mipfeas-cal` (D-020: A6m on the 30-instance sample → `jobs/mipfeas-cal-26.08.jsonl`) (`itrea make-jobs …`) | built |
+| `src/itrea/experiments/pair.py` | one run: launch the arm's processes, start barrier, stop, every exit code checked, `run.json`; A9's three processes and its matched control A3x (D-015); arm A6m (cuOpt as GAMS ran it for MIPfeas: 24 threads, MIP gaps 0, all 20 cores on the whole-box lane `full`; D-020); ITX-1 (D-021): arms A6F / A2F on F (the GPU lane's cores), the job-level `harness` (preset `ext`: cuOpt gaps 0, thread variables unset, RMM 24 GB separate from the EA's pool, host 24 GB, the project's CUDA JIT cache), named scopes `itrea-run-<run-hash>-<role>-<epoch>`, the void causes `thermal_watch`, `gpu_cap`, `cuopt_memory`, `compiled_on_clock` | built |
+| `src/itrea/experiments/pool.py` | a job file under every D-002/D-003 control: Williams arm order per block, blocks never split, gates per run; layouts `pair` (GPU lane g0 + `--cpu-lanes`), `screen` (nine X925 lanes), `full` (one lane, the whole box: A6m only, serving check implied, D-020's `--cuopt-mem-gb 24 --gpu-mem-gb 36`); D-021: the fan-governor start gate (`--no-governor`), `--pause-c`, `--cap-floor-mhz`, the new void causes rerun once then skipped, explicit `position` order, per-treatment memory arithmetic in `--dry-run` | built |
+| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke`, `backoff0` / `backoff1` (D-018 stages 0 / 1), `mipfeas-cal` (D-020: A6m on the 30-instance sample; its file left `jobs/` when D-021's M4 replaced it), `itx-m1` … `itx-m5`, `itx-r13` (D-021 phase 1 → `jobs/itx-*.jsonl`) (`itrea make-jobs …`) | built |
 | `src/itrea/benchmarks/hardset.py` | the hard pool: screening candidates, the stage-2 rule, strata, family split, freeze (`itrea screen-candidates`, `screen-stage2`, `pool-freeze`) | built |
 | `src/itrea/analysis/metrics.py` | primal gap, P(T), primal-dual integral, times to target (adapted from optopt); GAMS's MIPfeas integral exactly (`gams_integral`, D-020: equals GAMS's own function on all 3,495 traces of their archive) | built |
 | `src/itrea/analysis/check_solutions.py` | independent exact check of every stored incumbent (adapted from optopt) | built |
@@ -188,7 +188,7 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `src/itrea/analysis/lineage.py` | depth-1 matched Rank 0 odds ratio, Mantel–Haenszel (descriptive) | built |
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
-| `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row — paired R with a bootstrap interval on the call and launch clocks, feasible counts, strata, first-incumbent differences, GAMS's own GB10 26.04 / B200 rows, verdict PASS / FAIL / INCOMPLETE; the GAMS archive's readers (`read_gams_trc`, z*, published P) and D-020's sample | built |
+| `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row — paired R with a bootstrap interval on the call and launch clocks, feasible counts, strata, first-incumbent differences, GAMS's own GB10 26.04 / B200 rows, verdict PASS / FAIL / INCOMPLETE; since D-021 also `--arm A6F` (M4) with the late-clock check (median first incumbent ours − GAMS ≤ +0.3 s in strata 0 and 1) and D-021's reading INSIDE / OUTSIDE / CLOCK-FAIL; the GAMS archive's readers (`read_gams_trc`, z*, published P) and D-020's sample | built |
 | `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria (M1–M5, outcome, fallbacks) applied to the run table and run directories, with a verdict (`itrea backoff-report --stage 0\|1`); the sanity rule gates on the measured duty only and reports the lane-steps ratio (D-018's second stated deviation; `--steps-gate` = the rule as first written); stage-1 control `A9@bo1s` — stage 0 read 2026-10-09 | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
 | `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b`; `tests/test_configs.py` keeps it equal to the code). **Current development defaults** (D-010; never a confirmatory configuration): **A3** — `itrea2-dev-rc-ld.yaml` (`itrea2-dev-rc-3way` + `repair.continuous: lp_decode`, hash `f030e23909ad`, D-017); **A9 / A3x** — `itrea2-dev-rc-3way.yaml` (repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair; hash `1d12ad490dd0`; the runner adds `exchange.from_cuopt` for A9 and refuses lp_decode there); **D-018 stage 1** — `itrea2-dev-rc-3way-bo1.yaml` (back-off active with the stage-0 values: D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40; run hash `f67354be775d`) against `-bo1s.yaml` (the same values in shadow mode = the control; run hash `62bf82b236f6`). History: `-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms: shadow, forced duty ½ / ¼ / ⅛), `itrea2-adaptive.yaml`, `-adaptive-lps.yaml`, `-adaptive-lps-rc.yaml` (earlier development steps, D-010–D-012), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml` (D-002's E3) | core |
@@ -231,20 +231,36 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   without cuOpt (D-015). The exception is A6m (D-020, the MIPfeas calibration: cuOpt as GAMS ran it, 24 threads, MIP
   gaps 0): it has the whole box to itself — the pool's `--layout full`, one lane with all 20 cores, the serving check
   implied, `--cuopt-mem-gb 24 --gpu-mem-gb 36` (81 GB), the file mailbox (Redis and `--cuopt-gpu-peak-gb` refused) —
-  and runs nowhere else; no other arm runs on that lane.
-  `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process but A6m's cuOpt, whose environment has the
-  three removed (GAMS ran it so; libcuopt links libomp). Never run analysis with default thread counts beside timed
-  runs.
+  and runs nowhere else; no other arm runs on that lane (D-021 R9 keeps it out of v1).
+  **ITX-1 (D-021):** every compared GPU arm gets the same share **F** = A9's layout (the GPU lane: X925 5–6, A725 1–3,
+  the GPU): **A6F** = cuOpt alone on all of F with |F| = 5 threads, **A2F** = SCIP on X925 5 + cuOpt on the other four
+  cores (4 threads), no exchange. A job's **`harness`** (`"ext"`, or a dict overriding its keys) gives every cuOpt
+  process MIP gaps 0, no thread variables, its own RMM limit (24 GB, separate from the EA's 12-GB pool) and host
+  `MemoryMax` 24 GB, and every process the project's CUDA JIT cache `~/.cache/itrea/cuda`; it enters the run hash only
+  when present (every earlier run id is unchanged), and is refused on A6m and on test / screening jobs (a prereg-v2
+  item). Gates under ext: A9 97 GB, A2F 78, A6F 69 (+ 2 with Redis); M3's A6F at RMM 40 / host 40: 101.
+  `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process but A6m's cuOpt and cuOpt under a harness
+  with `cuopt_env_unset`, whose environment has the three removed (GAMS ran it so; libcuopt links libomp). Never run
+  analysis with default thread counts beside timed runs.
 - **Thermal.** GPU arms start only below 80 °C (ACPI maximum), CPU-only arms below 88 °C (D-008); pause the run set at
   ≥ 92 °C, resume below 80 °C. A block voided by the pause is rerun first, at most `--max-thermal-requeues` times
   (default 1): a further void skips it (pool status `skipped`) — in screening stage 2 (2026-10-06) the same 8 blocks
   were voided 8 times each before the cap existed. Each run records the hottest ACPI zone seen while it ran
-  (`run.json` `acpi_during`) and the 1-min load average before and after.
+  (`run.json` `acpi_during`) and the 1-min load average before and after. **D-021:** a GPU run also starts only while
+  the host fan governor is alive (`~/.local/state/thermal/fan-state` < 30 s old) with its clock cap off
+  (`--no-governor` only on a host without it); `--pause-c` lowers the pause / void line (M2's soak: 90, never above
+  92); a run during which thermal-watch stopped units at ≥ 98 °C is void (`thermal_watch`, never an arm crash); every
+  run records the fan state at its start and end and its start temperature. The governor's rests stay as they are
+  (Berk, 2026-10-11).
 - **Deadline and lease end at the start of every run.** After its gate waits, a run whose estimate would end after
   `--deadline` or the lease end does not start: a block not yet started counts as never opened and the pool stops; a
   block partly run keeps running (a stop never splits a block).
 - **GPU health.** A GPU run with a median SM clock below 2,000 MHz or foreign GPU activity above 2 % of its budget
-  voids its whole block (all arms of that instance × seed) and halts the run set.
+  voids its whole block (all arms of that instance × seed) and halts the run set. **Cap void (D-021 R25):** a GPU run
+  whose busy SM median is below 2,300 MHz (`--cap-floor-mhz`) or that overlaps a fan-governor clock cap (2,200 MHz,
+  which passes the 2,000 floor) is void (`gpu_cap`): its block is rerun once, after the fan reads AUTO, then skipped
+  and listed. Under a harness a cuOpt RMM allocation error or a kill at cuOpt's cap is void too (`cuopt_memory`, rerun
+  once); a failure of SCIP or the EA stays an arm outcome.
 - **Frozen configuration.** Test-set instances run only with the configuration whose hash equals `frozen-e2`'s, with
   `prereg-v1` an ancestor of HEAD. Tuning happens on the tuning set only, within the logged E4 budget.
 - **Every incumbent checked.** Every incumbent vector of every process is stored and checked by the independent exact
@@ -252,7 +268,9 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   truncated, never silently re-run.
 - **Clock rule.** Before the barrier only parse, imports, CUDA context and kernel warm-up on a synthetic problem; any
   LP, presolve or evaluation of the instance's population after `t0`, in every arm. A run that compiles a kernel after
-  `t0` (`compiled_on_clock`) voids its block (D-002 v3.1).
+  `t0` (`compiled_on_clock`) voids its block (D-002 v3.1). Under a harness the runner does it itself (D-021 R15): an
+  entry of the project's CUDA JIT cache written after `t0` (the `index` file aside) or CuPy cache growth after `t0`
+  voids the run (`compiled_on_clock`) and the pool reruns the block once.
 - **Deterministic warm-up.** Before `t0` the warm-up runs every crossover and mutation operator on 1-, 2- and
   3-child batches with the run's gene dtype (87bc759, 2026-10-09) and the elite kernels on three copies of one warm-up
   vector, so they do not depend on how many distinct members the warm-up population holds (6ae6a6f, 2026-10-08) —
@@ -313,7 +331,8 @@ pytest -q                     # toy-scale correctness tests (GPU tests skip with
 ```
 Once runs exist: `itrea build-runs`, `itrea prereg`, then `itrea reproduce` re-derives every table in `datasets/` and
 `paper/generated/` from the traces and lists any difference (skill `itrea-reproduce`). Development reports (after
-`itrea build-runs`, with `OMP_NUM_THREADS=1`): `itrea backoff-report --stage 0|1`, `itrea mipfeas-report` (D-020's
-calibration; GAMS's archive in `data/mipfeas/gams-2026-09-16/`), `tools/d016_report.py`, `tools/d017_report.py`.
+`itrea build-runs`, with `OMP_NUM_THREADS=1`): `itrea backoff-report --stage 0|1`, `itrea mipfeas-report --arm A6F`
+(D-021's M4 calibration; `--arm A6m` = D-020's; GAMS's archive in `data/mipfeas/gams-2026-09-16/`),
+`tools/d016_report.py`, `tools/d017_report.py`.
 Re-running experiments needs the public instances in `data/` and the job files in `jobs/`; wall-clock numbers depend on
 the machine (`vault/10-design/Compute resources.md`).
