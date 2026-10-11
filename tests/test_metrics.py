@@ -94,3 +94,42 @@ def test_summarize_keys_and_values():
     s = M.summarize(M.best_steps([(2.0, 20.0), (6.0, 10.0)], 1), 10.0, 1, 10.0, prefix="x_")
     assert s["x_pt"] == pytest.approx(0.4) and s["x_final_gap"] == 0.0 and s["x_best_obj"] == 10.0
     assert s["x_t_gap1"] == 6.0 and s["x_t_gap1_event"] and s["x_n_steps"] == 2
+
+
+# ------------------------------------------------------------------------------- GAMS's MIPfeas integral (D-020)
+def test_gams_gap_branches_in_their_order():
+    assert M.gams_gap(15.0, 10.0) == (round(5 / 15, 6), False)                  # rounded to 6 decimals
+    assert M.gams_gap(1.23456789, 1.0) == (round(0.23456789 / 1.23456789, 6), False)
+    assert M.gams_gap(0.5, 0.2) == (0.3, False)                                  # denominator floor 1
+    assert M.gams_gap(5.0, -10.0) == (1.0, False)                                # opposite signs: 1, not 1.5
+    assert M.gams_gap(9.0, 10.0) == (0.0, True)                                  # beats z*: 0 + flag (theirs raises)
+    assert M.gams_gap(-5.0, 10.0) == (0.0, True)                                 # the beat test comes before signs
+    g, b = M.gams_gap(10.0 - 1e-9, 10.0)                                        # below their rounding: no beat
+    assert g == 0.0 and not b
+    assert M.gams_gap(10.0000004, 10.0) == (0.0, False)                          # rounds to 0
+    assert M.gams_gap(80.0, 100.0, sense=-1) == (0.2, False)                     # maximisation: the mirror
+    assert M.gams_gap(120.0, 100.0, sense=-1) == (0.0, True)
+    assert M.gams_gap(-3.0, 0.0) == (0.0, True) and M.gams_gap(3.0, 0.0) == (1.0, False)   # z* = 0: 3/max(3, 1)
+
+
+def test_gams_integral_by_hand():
+    # T = 600, z* = 10 (min): nothing until 100 (γ 2), 20 at 100 (0.5), 12 at 400 (2/12 rounded), held to 600
+    st = M.best_steps([(100.0, 20.0), (400.0, 12.0)], 1)
+    g12 = round(2 / 12, 6)
+    r = M.gams_integral(st, 10.0, 1)
+    assert r.value == pytest.approx((100 * 2 + 300 * 0.5 + 200 * g12) / 600, abs=1e-15) and not r.beats_ref
+    assert M.gams_integral([], 10.0, 1).value == 2.0                              # no incumbent: 2
+    assert M.gams_integral([(0.0, 10.0)], 10.0, 1).value == 0.0
+    late = M.gams_integral(M.best_steps([(100.0, 20.0), (700.0, 10.0)], 1), 10.0, 1)      # at or after T: nothing
+    assert late.value == pytest.approx((100 * 2 + 500 * 0.5) / 600)
+    assert M.gams_integral([(600.0, 10.0)], 10.0, 1).value == 2.0
+    b = M.gams_integral(M.best_steps([(10.0, 12.0), (30.0, 9.0)], 1), 10.0, 1)
+    assert b.beats_ref and b.beats_ref_t == 30.0
+    assert b.value == pytest.approx((10 * 2 + 20 * round(2 / 12, 6)) / 600)
+    mx = M.gams_integral(M.best_steps([(5.0, 50.0), (20.0, 80.0)], -1), 100.0, -1, T=40.0)   # maximisation, T = 40
+    assert mx.value == pytest.approx((5 * 2 + 15 * 0.5 + 20 * 0.2) / 40)
+    sign = M.gams_integral([(0.0, 5.0)], -10.0, 1, T=10.0)                         # opposite signs held: 1
+    assert sign.value == 1.0 and M.mipfeas_integral([(0.0, 5.0)], -10.0, 1, 10.0) == 1.5    # pt_mf has no sign rule
+    assert M.gams_integral([], None, 1).value == 2.0 and math.isnan(M.gams_integral([(1.0, 5.0)], None, 1).value)
+    with pytest.raises(ValueError):
+        M.gams_integral([(5.0, 2.0), (1.0, 1.0)], 1.0, 1)
