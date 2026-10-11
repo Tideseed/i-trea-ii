@@ -5,7 +5,7 @@ fan-governor's rest flag — so a test that launches through the pool or the pai
 the morning (it did, 2026-10-06 07:51). Every test therefore sees plenty of memory and no rest flag; tests that check a
 gate set their own values on top of this, and `test_gates.py`, which tests the readers themselves, is left alone.
 Since D-021 the runner also reads the fan governor (state file, clock-cap log) and thermal-watch's daily log: every
-test sees a live governor on AUTO with its cap off, no cap interval and no 98 °C stop."""
+test sees a live governor on AUTO with its cap off, no cap interval, no 98 °C stop and no scope Result."""
 import time
 
 import pytest
@@ -23,3 +23,4 @@ def _box_independent(request, monkeypatch):
                               "rest=no cap=0"), raw="(test) state=auto cap=0", age_s=1.0))
     monkeypatch.setattr(gates, "cap_intervals", lambda *a, **k: [])
     monkeypatch.setattr(gates, "thermal_watch_stops", lambda *a, **k: [])
+    monkeypatch.setattr(gates, "scope_result", lambda *a, **k: None)     # never the live user manager

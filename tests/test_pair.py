@@ -804,6 +804,26 @@ def test_cap_kill_is_confirmed_by_the_scope_or_the_peak(tmp_path):
     assert pair.cap_kill(p, oom) is None and ru is not None
 
 
+def test_a_cap_kill_confirmed_only_by_the_scope_is_cuopt_memory(toy, fake, tmp_path, monkeypatch):
+    """A cuOpt SIGKILL whose only confirmation is the scope's Result=oom-kill (maxrss below 0.95 x MemoryMax, as the
+    cgroup also charges page cache) is cuopt_memory, not a failure: the Result is read once (it is reset after
+    reading); and no 30-s wait for a thermal-watch line follows an explained kill."""
+    _with_units(monkeypatch)
+    reads = []
+
+    def result(unit):
+        reads.append(unit)
+        return "oom-kill" if len(reads) == 1 else None          # a second read finds the scope reset
+    monkeypatch.setattr(gates, "scope_result", result)
+    monkeypatch.setenv("FAKE_SIGKILL_SELF_CUOPT", "1")
+    t = time.monotonic()
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=2.0, harness="ext"),
+                        opts_for(tmp_path, fake, cuda_cache_dir=tmp_path / "cuda", thermal_watch_wait_s=20.0))
+    assert rec["status"] == "void" and rec["void_cause"] == "cuopt_memory", rec["reasons"]
+    assert "Result oom-kill" in rec["void_checks"]["cuopt_memory"] and "external_kill" not in rec["void_checks"]
+    assert reads == ["itrea-run-test-cuopt"] and time.monotonic() - t < 15.0
+
+
 def test_an_unexplained_sigkill_is_an_external_kill(toy, fake, tmp_path, monkeypatch):
     """A SIGKILL of any process of any arm that the runner did not send, at no cap and not by thermal-watch, voids
     the run (`external_kill`) — for SCIP as for cuOpt, with or without a harness."""

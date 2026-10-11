@@ -1369,15 +1369,17 @@ def rmm_error(p: Proc, run_dir: Path) -> dict | None:
                 peak=peak, limit=lim, at_cap=at_cap)
 
 
-def cuopt_memory_fault(p: Proc, run_dir: Path, scope_result: Callable[[str], str | None] | None = None) -> str | None:
+def cuopt_memory_fault(p: Proc, run_dir: Path, scope_result: Callable[[str], str | None] | None = None,
+                       capped: str | None = None) -> str | None:
     """D-021 R29: cuOpt failed at its own cap, CONFIRMED — an RMM allocation error whose peak reached 0.8 x the limit,
-    or a SIGKILL at its host cap (`cap_kill`). None otherwise."""
+    or a SIGKILL at its host cap (`cap_kill`, or its already computed result `capped`: the scope's Result can be read
+    only once, it is reset after reading). None otherwise."""
     if p.spec.kind != "cuopt":
         return None
     r = rmm_error(p, run_dir)
     if r is not None and r["at_cap"]:
         return r["reason"]
-    return cap_kill(p, scope_result)
+    return capped if capped is not None else cap_kill(p, scope_result)
 
 
 def _external_stop(p: Proc, run_dir: Path) -> bool:
@@ -1420,6 +1422,11 @@ def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc]
       EA's CuPy cache, written after t0 (the same terms for both GPU codes)."""
     out: list[tuple[str, str]] = []
     info: dict = {}
+    capped: dict[str, str] = {}            # once per process: reading a scope's Result resets the scope
+    for p in procs:
+        ck = cap_kill(p)
+        if ck:
+            capped[p.role] = ck
     launched = [p.launch_epoch for p in procs if p.launch_epoch is not None]
     tw_roles: set[str] = set()
     if launched:
@@ -1428,7 +1435,7 @@ def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc]
         t_to = (max(exits) if exits else time.time()) + opts.thermal_watch_wait_s
         lines = gates.thermal_watch_stops(t_from, min(time.time(), t_to))
         hits, tw_roles = thermal_watch_hits(lines, procs)
-        if not hits and any(_external_stop(p, run_dir) for p in procs):
+        if not hits and any(_external_stop(p, run_dir) and p.role not in capped for p in procs):
             while not hits and time.time() < t_to:
                 time.sleep(min(2.0, max(0.05, t_to - time.time())))
                 lines = gates.thermal_watch_stops(t_from, min(time.time(), t_to))
@@ -1468,18 +1475,14 @@ def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc]
                                                  and caps["fan_state_end"] == 0))
         if why:
             out.append(("gpu_cap", "; ".join(why)))
-    capped: dict[str, str] = {}
     for p in procs:
         r = rmm_error(p, run_dir)
         if r is not None and not r["at_cap"]:
             info.setdefault("rmm_error_below_cap", []).append(r["reason"])
-        ck = cap_kill(p)
-        if ck:
-            capped[p.role] = ck
     if capped:
         info["cap_kills"] = capped                       # SCIP / EA at their caps: arm outcomes (R29)
     if harness is not None:
-        mem = [r for r in (cuopt_memory_fault(p, run_dir) for p in procs) if r]
+        mem = [r for r in (cuopt_memory_fault(p, run_dir, capped=capped.get(p.role)) for p in procs) if r]
         if mem:
             if harness.get("cuopt_memory_void", True):
                 out.append(("cuopt_memory", "; ".join(mem)))
