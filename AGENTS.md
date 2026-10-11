@@ -294,6 +294,12 @@ appendix (skill `itrea-literature`).
 AgentRA (Agent Research Assistant) — the AI agent that designs with the author and executes the experiments — is
 mainly Claude Opus 5.5, working through Claude Code.
 
+**Updates to Berk** (his rules, 2026-10-06 / 10-08 / 10-11): frequent, short, quantified (effects with intervals, counts,
+p — not adjectives). Each update opens with a short **Performance** block — Good news / Bad news about how the approach
+itself does (effects vs SCIP alone, cuOpt alone and the controls, weak-set numbers, targets met or missed; "nothing new
+measured" if so) — then a separate Good news / Bad news block for implementation, harness, box and bugs. A gap that
+comes with a concrete remedy is not bad news; bad news is a measured loss, failure or regression.
+
 ## Reproduce
 ```bash
 uv venv && source .venv/bin/activate && uv pip install -e ".[dev,plots,gpu]"   # see README for cuOpt
