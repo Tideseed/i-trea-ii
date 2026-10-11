@@ -11,6 +11,10 @@ The memory formula (D-003):
     process (1 GB each until measured) + the Redis container cap (2 GB, when Redis carries the exchange) + 20 GB reserve
     ≤ MemAvailable at launch.
 Every reader takes an optional path / sysfs root so the tests can feed it fake files.
+
+D-021 adds readers of the host's thermal tools: fan-governor's state file (`fan_state`, `governor_block`: a GPU run
+starts only with the governor alive and its clock cap off), its log's clock-cap intervals (`cap_intervals`,
+`cap_overlaps`: a run overlapping one is a cap void) and thermal-watch's 98 °C stop lines (`thermal_watch_stops`).
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 LEASE = Path.home() / ".local/state/box-window/lease.json"
@@ -41,7 +45,17 @@ SERVING_UNITS = ("ornith-vllm", "llama-qwen38")
 # fan-governor's rest flag (host convention since 2026-10-02, Berk: "allow the spark to recover some … fans should not
 # go max for prolonged periods"): written after 30 min of continuous fan MAX, removed once the fan is back on AUTO (idle
 # and cool) and the rest has lasted its length (escalating 10–30 min). Launchers start nothing new while it exists.
-REST_FLAG = Path.home() / ".local/state/thermal/rest"
+THERMAL_DIR = Path.home() / ".local/state/thermal"   # the host's thermal tools ([other repository] tools/bin)
+REST_FLAG = THERMAL_DIR / "rest"
+# fan-governor's state file (rewritten every 5 s: `<iso> state=<auto|max> for=<s>s zone=<C> gpu=<W>W rest=<yes|no>
+# cap=<0|1>`) and its log ("fan -> max", "REST requested", "clock cap 2200 MHz on (…)", "clock cap off (…)"); its
+# stage 2 locks the GPU clock at 2,200 MHz after a zone stays >= 85 °C for 20 s at fan MAX and releases it at AUTO.
+FAN_STATE = THERMAL_DIR / "fan-state"
+FAN_LOG = THERMAL_DIR / "fan-governor.log"
+GOVERNOR_MAX_AGE_S = 30.0  # D-021 R24: the governor is alive when its state file is younger than this
+# thermal-watch (every 30 s) appends `<iso> HOT <n>C stopped:<units>` to THERMAL_DIR/<YYYY-MM-DD>.log after stopping
+# experiment units at >= 98 °C (D-021 R27: our named scopes `itrea-run-*` once its pattern lists them)
+THERMAL_WATCH_C = 98.0
 
 
 class GateError(RuntimeError):
@@ -115,6 +129,119 @@ def acpi_max_c(root: str | os.PathLike | None = None) -> float | None:
 def rest_due(flag: str | os.PathLike | None = None) -> bool:
     """True while fan-governor's rest flag exists (D-009): start no new run; in-flight runs finish."""
     return Path(flag if flag is not None else REST_FLAG).exists()
+
+
+def _iso_epoch(s: str) -> float | None:
+    try:
+        t = datetime.fromisoformat(s.strip())
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:
+        t = t.astimezone()
+    return t.timestamp()
+
+
+def parse_fan_state(line: str) -> dict:
+    """One fan-state line -> {iso, epoch, state, for_s, zone_c, gpu_w, rest, cap}; fields that do not parse are None."""
+    line = (line or "").strip()
+    parts = line.split()
+    kv = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+
+    def num(v, suffix=""):
+        try:
+            return float(v[: -len(suffix)] if suffix and v.endswith(suffix) else v)
+        except (TypeError, ValueError):
+            return None
+    cap = kv.get("cap")
+    return dict(iso=parts[0] if parts else None, epoch=_iso_epoch(parts[0]) if parts else None, state=kv.get("state"),
+                for_s=num(kv.get("for"), "s"), zone_c=num(kv.get("zone")), gpu_w=num(kv.get("gpu"), "W"),
+                rest=(kv.get("rest") == "yes") if "rest" in kv else None,
+                cap=int(cap) if cap is not None and cap.isdigit() else None)
+
+
+def fan_state(path: str | os.PathLike | None = None, now: float | None = None) -> dict | None:
+    """fan-governor's state now: the parsed line plus `raw` and `age_s` (seconds since the file was written), or None
+    when the file is missing or unreadable."""
+    p = Path(path) if path is not None else FAN_STATE
+    try:
+        raw = p.read_text().strip().splitlines()[-1]
+        mtime = p.stat().st_mtime
+    except (OSError, IndexError):
+        return None
+    d = parse_fan_state(raw)
+    d.update(raw=raw, age_s=round((time.time() if now is None else now) - mtime, 1))
+    return d
+
+
+def governor_block(state: dict | None, max_age_s: float = GOVERNOR_MAX_AGE_S, need_auto: bool = False) -> str | None:
+    """D-021 R24: why a GPU run may not start now by the fan governor's state (None = it may): no state file, a state
+    older than max_age_s (the governor is not running), the clock cap on, or — for a block requeued after a cap void —
+    the fan not yet back on AUTO."""
+    if state is None:
+        return "fan governor: no state file (not running?)"
+    if state.get("age_s") is None or state["age_s"] >= max_age_s:
+        return f"fan governor: state file {state.get('age_s')} s old (>= {max_age_s:g} s: not running?)"
+    if state.get("cap") != 0:
+        return f"fan governor: clock cap on (cap={state.get('cap')})"
+    if need_auto and state.get("state") != "auto":
+        return f"fan governor: fan {state.get('state')} (a cap-voided block waits for AUTO)"
+    return None
+
+
+def cap_intervals(log: str | os.PathLike | None = None) -> list[tuple[float, float | None]]:
+    """The governor's clock-cap intervals from its log: (on, off) epochs; off = None while still on. A "start:" line (a
+    governor restart, which forgets its cap) ends an open interval — a lock left behind is caught by the SM floor."""
+    p = Path(log) if log is not None else FAN_LOG
+    try:
+        lines = p.read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    out: list[tuple[float, float | None]] = []
+    on: float | None = None
+    for line in lines:
+        iso, _, msg = line.partition(" ")
+        t = _iso_epoch(iso)
+        if t is None:
+            continue
+        if msg.startswith("clock cap") and msg.split("(")[0].rstrip().endswith(" on"):
+            if on is None:
+                on = t
+        elif msg.startswith("clock cap off") or msg.startswith("start:"):
+            if on is not None:
+                out.append((on, t))
+                on = None
+    if on is not None:
+        out.append((on, None))
+    return out
+
+
+def cap_overlaps(t_from: float, t_to: float, log: str | os.PathLike | None = None) -> list[dict]:
+    """Governor clock-cap intervals that overlap [t_from, t_to] (epochs): [{on, off}] (off None = still on)."""
+    return [dict(on=a, off=b) for a, b in cap_intervals(log) if a <= t_to and (b is None or b >= t_from)]
+
+
+def thermal_watch_stops(t_from: float, t_to: float, root: str | os.PathLike | None = None) -> list[str]:
+    """thermal-watch's 98 °C stop lines (`<iso> HOT <n>C stopped:<units>`) stamped in [t_from, t_to] (epochs), read
+    from the daily logs of every date the window touches."""
+    d = Path(root) if root is not None else THERMAL_DIR
+    days, day, last = [], datetime.fromtimestamp(float(t_from)).date(), datetime.fromtimestamp(float(t_to)).date()
+    while day <= last:
+        days.append(day.isoformat())
+        day += timedelta(days=1)
+    out = []
+    for day in days:
+        try:
+            lines = (d / f"{day}.log").read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            iso, _, msg = line.partition(" ")
+            if not msg.startswith("HOT "):
+                continue
+            ts = _iso_epoch(iso)
+            if ts is not None and t_from <= ts <= t_to:
+                out.append(line)
+    return out
 
 
 def wait_cool(start_below: float = THERMAL_WAIT_C, timeout_s: float = 3600.0, poll_s: float = 30.0,

@@ -52,6 +52,15 @@ try:
 except RuntimeError:
     sys.exit(0)                       # stopped before start: a normal end
 tr.start(t0)
+if os.environ.get("FAKE_CUDA_COMPILE_" + R):            # a CUDA JIT entry written on the clock (D-021 R15)
+    d = os.path.join(os.environ["CUDA_CACHE_PATH"], "a", "b")
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "0123abcd"), "w").write("x")
+if os.environ.get("FAKE_RMM_FAIL_" + R):                # cuOpt's RMM allocation error at its limit (D-021 R29)
+    time.sleep(0.2)
+    tr.close(exit_reason="exception", error_status=6,
+             error="CuoptError: cuOpt error status 6: Memory allocation failed")
+    sys.exit(1)
 base = float(os.environ.get("FAKE_BASE_" + R, "100"))
 k = 0
 while time.monotonic() - t0 < float(a.budget) and not mb.stopped():
@@ -690,3 +699,80 @@ def test_named_scopes(toy, tmp_path):
     assert len({p.scope_unit for p in procs}) == 3
     assert all(p.scope_unit is None for p in pair.plan(j, opts_for(tmp_path), tmp_path / "x", "S",
                                                        pair.effective_config(j, o)[0]))
+
+
+def test_cuda_compile_on_the_clock_voids_the_run(toy, fake, tmp_path, monkeypatch):
+    """D-021 R15: with the harness's CUDA cache, an entry written after t0 (the index file aside) voids the run
+    (`compiled_on_clock`); entries written before t0 and the index do not. Without a harness the cache is not set."""
+    cache = tmp_path / "cuda"
+    (cache / "x").mkdir(parents=True)
+    (cache / "x" / "old").write_text("warm")
+    o = opts_for(tmp_path, fake, cuda_cache_dir=cache)
+    monkeypatch.setenv("FAKE_ENV_OUT", str(tmp_path / "env"))
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.5, harness="ext"), o)
+    assert rec["status"] == "completed" and rec["compiled_on_clock_cuda"] is False, rec["reasons"]
+    seen = json.loads((tmp_path / "env.cuopt").read_text())
+    assert seen["CUDA_CACHE_PATH"] == str(cache) and seen["OMP_NUM_THREADS"] is None
+    (cache / "index").write_text("rewritten on the clock")          # ignored
+    monkeypatch.setenv("FAKE_CUDA_COMPILE_CUOPT", "1")
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=0.5, harness="ext"), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "compiled_on_clock", rec["reasons"]
+    assert rec["compiled_on_clock_cuda"] is True and rec["cuda_cache"]["entries_on_clock"] == ["a/b/0123abcd"]
+    monkeypatch.delenv("FAKE_CUDA_COMPILE_CUOPT")
+    rec = pair.run_pair(job(toy, "A6F", seed=2, budget=0.5), o)       # no harness: no cache variable, no check
+    assert rec["status"] == "completed" and rec["cuda_cache"] is None and rec["config"]["harness"] is None
+
+
+def test_cuopt_memory_error_is_a_harness_void(toy, fake, tmp_path, monkeypatch):
+    """D-021 R29: under the harness, cuOpt's RMM allocation error (error status 6, "Memory allocation failed") voids
+    the run (`cuopt_memory`); without a harness it stays a failed run; a failure of SCIP stays an arm outcome."""
+    o = opts_for(tmp_path, fake, cuda_cache_dir=tmp_path / "cuda")
+    monkeypatch.setenv("FAKE_RMM_FAIL_CUOPT", "1")
+    rec = pair.run_pair(job(toy, "A2F", seed=0, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "cuopt_memory", rec["reasons"]
+    assert "Memory allocation failed" in rec["void_checks"]["cuopt_memory"]
+    rec = pair.run_pair(job(toy, "A2F", seed=1, budget=2.0), o)
+    assert rec["status"] == "failed" and "void_cause" not in rec
+    monkeypatch.delenv("FAKE_RMM_FAIL_CUOPT")
+    monkeypatch.setenv("FAKE_CRASH_SOLVER", "3")
+    rec = pair.run_pair(job(toy, "A2F", seed=2, budget=2.0, harness="ext"), o)
+    assert rec["status"] == "failed" and rec["void_checks"] == {}
+
+
+def test_governor_cap_and_thermal_watch_void_a_run(toy, fake, tmp_path, monkeypatch):
+    """D-021 R25 / R27: a GPU run overlapping a governor clock-cap interval is a cap void (`gpu_cap`); thermal-watch's
+    98 °C stop line inside a run voids it (`thermal_watch`, never an arm crash), and it outranks the cap; a CPU-only
+    run is never a cap void; the start and end fan states are recorded."""
+    o = opts_for(tmp_path, fake, record_snapshots=True)
+    monkeypatch.setattr(gates, "cap_intervals", lambda *a, **k: [(0.0, None)])        # on since forever
+    rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.5), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "gpu_cap", rec["reasons"]
+    assert rec["fan_state_start"]["state"] == "auto" and rec["fan_state_end"]["cap"] == 0
+    assert "acpi_start_c" in rec
+    rec = pair.run_pair(job(toy, "A0", seed=0, budget=0.5), o)
+    assert rec["status"] == "completed" and rec["void_checks"] == {}
+    rec = pair.run_pair(job(toy, "A6F", seed=1, budget=0.5), opts_for(tmp_path, fake, cap_floor_mhz=None))
+    assert rec["status"] == "completed"                                              # the check switched off
+    monkeypatch.setattr(gates, "thermal_watch_stops", lambda *a, **k: ["2026-10-11T12:00:00+02:00 HOT 98C stopped: "
+                                                                        "itrea-run-x-cuopt-1.scope"])
+    rec = pair.run_pair(job(toy, "A6F", seed=2, budget=0.5), o)
+    assert rec["status"] == "void" and rec["void_cause"] == "thermal_watch"
+    assert set(rec["void_checks"]) == {"thermal_watch", "gpu_cap"}
+
+
+def test_cap_void_by_the_busy_sm_median(toy, fake, tmp_path):
+    """A GPU run whose busy SM median is below the cap floor (2,300 MHz) but above the stuck-clock floor (2,000) is a
+    cap void, not a GPU-health halt."""
+    from itrea.experiments import gpu_health
+
+    def q(cmd):
+        return "2200, 60, 95\n" if "--query-gpu" in " ".join(cmd) else ""
+    s = gpu_health.Sampler(period_s=0.05, query=q)
+    s.start()
+    try:
+        rec = pair.run_pair(job(toy, "A6F", seed=0, budget=0.6), opts_for(tmp_path, fake, gpu_health=True,
+                                                                            shared_sampler=s))
+    finally:
+        s.stop()
+    assert rec["gpu_health"]["verdict"] == "ok" and rec["status"] == "void" and rec["void_cause"] == "gpu_cap"
+    assert "2200 MHz < 2300 MHz" in rec["void_checks"]["gpu_cap"]

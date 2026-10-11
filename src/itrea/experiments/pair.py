@@ -45,7 +45,13 @@ ITX-1 (D-021), on the GPU lane g0 whose cores are F (X925 5–6 + A725 1–3 + t
   EA's 12-GB pool, which the EA keeps); every process gets the project's CUDA JIT cache (`CUDA_CACHE_PATH`,
   `CUDA_CACHE_MAXSIZE`, R15). The resolved dict enters the run hash only when the field is present, so every run id
   without it is unchanged; it is refused on A6m and (pool) on test / screening jobs;
-- **named scopes** `itrea-run-<run-hash>-<role>-<epoch>` (R27; never part of a hash or of argv).
+- **named scopes** `itrea-run-<run-hash>-<role>-<epoch>` (R27; never part of a hash or of argv);
+- **void causes** (`void_checks`, after the run, in this order): `thermal_watch` (thermal-watch's 98 °C stop line
+  inside the run, R27), `gpu_cap` (a GPU run with a busy SM median below `cap_floor_mhz` = 2,300 MHz, or overlapping a
+  fan-governor clock-cap interval, R25), `cuopt_memory` (harness: cuOpt's RMM allocation error or a kill at its cap,
+  R29), `compiled_on_clock` (harness: an entry of the CUDA cache — or the EA's CuPy cache — written after t0, R15).
+  A failure of SCIP or the EA stays an arm outcome. run.json also records the fan governor's state at the start and
+  the end (`fan_state_start` / `fan_state_end`) and the start temperature (`acpi_start_c`, R28).
 
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
@@ -301,6 +307,11 @@ class PairOptions:
     cuopt_python: str | None = None            # another interpreter for cuOpt (D-001; same venv since 2026-10-05)
     cupy_cache_dir: Path = CUPY_CACHE_DIR
     cuda_cache_dir: Path = CUDA_CACHE_DIR      # harness cuda_cache: CUDA_CACHE_PATH of every process (D-021 R15)
+    cap_floor_mhz: float | None = gpu_health.CAP_FLOOR_MHZ   # a GPU run with a busy SM median below this, or one
+                                               # overlapping a governor "clock cap on" interval, is void (gpu_cap,
+                                               # D-021 R25); None = off. The 2,000-MHz stuck-clock halt is separate
+    thermal_watch_wait_s: float = 30.0         # after an external stop of a process: wait this long for thermal-watch's
+                                               # 98 °C stop line (it is written after the units are stopped)
     gpu_health: bool = True
     gpu_period_s: float = 1.0
     tolerate_serving_gpu: bool = False         # the model servers' GPU processes are recorded, not foreign (pool sets it
@@ -1023,6 +1034,9 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     rec["gates_before"] = gates.snapshot() if opts.record_snapshots else None
     if rec["gates_before"] is not None:
         rec["gates_before"]["gpu_apps"] = gpu_health.compute_apps()
+    # D-021 R28: the start temperature and the fan governor's state at the start (and at the end, below)
+    rec["acpi_start_c"] = (rec["gates_before"] or {}).get("acpi_max_c")
+    rec["fan_state_start"] = gates.fan_state() if opts.record_snapshots else None
     if harness is not None and harness["cuda_cache"]:
         opts.cuda_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1200,6 +1214,10 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             rec["gpu_health"] = None
         rec["gates_after"] = gates.snapshot() if opts.record_snapshots else None
         rec["acpi_during"] = acpi
+        rec["fan_state_end"] = gates.fan_state() if opts.record_snapshots else None
+        rec["cuda_cache"] = (cuda_cache_on_clock(opts.cuda_cache_dir, rec.get("t0_epoch"))
+                             if harness is not None and harness["cuda_cache"] else None)
+        rec["compiled_on_clock_cuda"] = (rec["cuda_cache"] or {}).get("compiled_on_clock")
         # status: void (external) > failed (any exit code != 0 — a SIGKILL included —, a start failure) > completed.
         # A process that exits 0 after the runner's SIGTERM is recorded in processes[*].killed, not as a failure; a
         # stopped_by_runner process (above) is not a failure either.
@@ -1215,6 +1233,15 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             reasons += ["gpu health: " + r for r in rec["gpu_health"]["reasons"]]
             status = "void"
             rec["void_cause"] = "gpu_health"
+        # D-021's external causes (R15, R25, R27, R29), each recorded whether or not it decides the status; the first in
+        # VOID_ORDER voids a run that is not void already (a failure of SCIP or the EA stays an arm outcome)
+        checks = void_checks(job, arm, harness, procs, run_dir, rec, opts, t0)
+        rec["void_checks"] = {c: why for c, why in checks}
+        if status != "void" and checks:
+            cause, why = checks[0]
+            status = "void"
+            rec["void_cause"] = cause
+            reasons.append(f"{cause}: {why}")
         if status == "void" and "void_cause" not in rec:
             rec["void_cause"] = "abort" if any(r.startswith(("abort", "aborted")) for r in reasons) else "interrupted"
         rec["status"] = status
@@ -1224,6 +1251,119 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         _atomic_json(run_dir / "run.json", rec)
         opts.log(f"{run_id}: {status}" + (f" ({'; '.join(reasons)})" if reasons else ""))
     return rec
+
+
+VOID_ORDER = ("thermal_watch", "gpu_cap", "cuopt_memory", "compiled_on_clock")   # D-021's void causes, by precedence
+
+
+def cuda_cache_on_clock(d: Path, t0_epoch: float | None) -> dict:
+    """D-021 R15: entry files of the project's CUDA JIT cache written at or after t0 (mtime >= t0_epoch; the `index`
+    file, rewritten on lookups, is ignored) = a compile on the clock. `compiled_on_clock` None when the run never
+    started."""
+    out: dict = dict(dir=str(d), t0_epoch=t0_epoch, n_on_clock=None, entries_on_clock=[], compiled_on_clock=None)
+    if t0_epoch is None:
+        return out
+    names = []
+    for root, _, files in os.walk(d):
+        for f in files:
+            if f == "index":
+                continue
+            p = Path(root) / f
+            try:
+                if p.stat().st_mtime >= t0_epoch:
+                    names.append(os.path.relpath(p, d))
+            except OSError:
+                continue
+    out.update(n_on_clock=len(names), entries_on_clock=sorted(names)[:50], compiled_on_clock=bool(names))
+    return out
+
+
+def _summary(run_dir: Path, role: str) -> dict:
+    try:
+        d = json.loads((run_dir / f"{role}.summary.json").read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def cuopt_memory_fault(p: Proc, run_dir: Path) -> str | None:
+    """D-021 R29: cuOpt failed at its own cap — an RMM allocation error (cuOpt's error status 6 "Memory allocation
+    failed", or an RMM out-of-memory exception; the warm-up's included) or a SIGKILL the runner did not send (the scope's
+    OOM kill at MemoryMax). None otherwise."""
+    if p.spec.kind != "cuopt":
+        return None
+    s = _summary(run_dir, p.role)
+    err = " ".join(str(s.get(k) or "") for k in ("error", "error_message"))
+    low = err.lower()
+    if (s.get("error_status") == 6 and "memory allocation failed" in low) or \
+            any(k in low for k in ("out_of_memory", "outofmemory", "std::bad_alloc")):
+        return f"{p.role}: RMM allocation error at its {p.gpu_gb:g} GB limit ({err.strip()[:200]})"
+    if p.exit_code == -signal.SIGKILL and p.killed is None:
+        rss = round(p.rusage.ru_maxrss / 1048576, 2) if p.rusage is not None else None
+        return f"{p.role}: SIGKILL not sent by the runner at its {p.mem_gb:g} GB host cap (maxrss {rss} GB)"
+    return None
+
+
+def _external_stop(p: Proc, run_dir: Path) -> bool:
+    """A process stopped by someone else than the runner (SIGTERM / SIGKILL it did not send, or a summary that says
+    it ended on a SIGTERM): thermal-watch's `systemctl stop` of its scope looks like this."""
+    if p.killed is not None:
+        return False
+    return p.exit_code in (-signal.SIGTERM, -signal.SIGKILL) or _summary(run_dir, p.role).get("exit_reason") == "sigterm"
+
+
+def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc], run_dir: Path, rec: dict,
+                opts: PairOptions, t0: float | None) -> list[tuple[str, str]]:
+    """D-021's external void causes found in a finished run, in VOID_ORDER: [(cause, reason)].
+    - thermal_watch (R27): thermal-watch's 98 °C stop line between the first launch and now (after an external stop
+      of a process, waited for up to opts.thermal_watch_wait_s: the line is written after the units are stopped);
+    - gpu_cap (R25, GPU arms, opts.cap_floor_mhz set): busy SM median < cap_floor_mhz, or the timed window overlaps a
+      governor clock-cap interval (its log), or the governor's state read cap=1 at the start or the end;
+    - cuopt_memory (R29, with a harness): `cuopt_memory_fault`;
+    - compiled_on_clock (R15, with a harness whose cuda_cache is on): an entry of the project's CUDA cache, or of the
+      EA's CuPy cache, written after t0 (the same terms for both GPU codes)."""
+    out: list[tuple[str, str]] = []
+    launched = [p.launch_epoch for p in procs if p.launch_epoch is not None]
+    if launched:
+        t_from = min(launched)
+        hot = gates.thermal_watch_stops(t_from, time.time())
+        if not hot and any(_external_stop(p, run_dir) for p in procs):
+            end = time.monotonic() + opts.thermal_watch_wait_s
+            while not hot and time.monotonic() < end:
+                time.sleep(2.0)
+                hot = gates.thermal_watch_stops(t_from, time.time())
+        if hot:
+            out.append(("thermal_watch", f"thermal-watch stopped units at >= {gates.THERMAL_WATCH_C:g} °C: {hot[0]}"))
+    if arm.gpu and t0 is not None and opts.cap_floor_mhz is not None:
+        why = []
+        med = (rec.get("gpu_health") or {}).get("median_sm_mhz")
+        if med is not None and med < opts.cap_floor_mhz:
+            why.append(f"busy SM median {med:.0f} MHz < {opts.cap_floor_mhz:.0f} MHz")
+        t0e = rec.get("t0_epoch")
+        if t0e is not None:
+            span = min(float(job["budget"]), float(rec.get("wall_s") or 0.0))
+            ov = gates.cap_overlaps(t0e, t0e + span)
+            if ov:
+                why.append(f"overlaps the governor's clock cap ({len(ov)} interval(s) from {ov[0]['on']:.0f})")
+        for k in ("fan_state_start", "fan_state_end"):
+            if (rec.get(k) or {}).get("cap") == 1:
+                why.append(f"{k}: cap=1")
+        if why:
+            out.append(("gpu_cap", "; ".join(why)))
+    if harness is not None:
+        mem = [r for r in (cuopt_memory_fault(p, run_dir) for p in procs) if r]
+        if mem:
+            out.append(("cuopt_memory", "; ".join(mem)))
+        if harness["cuda_cache"]:
+            cc, cp = rec.get("cuda_cache") or {}, rec.get("cupy_cache") or {}
+            why = []
+            if cc.get("compiled_on_clock"):
+                why.append(f"{cc['n_on_clock']} CUDA cache entries after t0 ({', '.join(cc['entries_on_clock'][:3])})")
+            if cp.get("compiled_on_clock") and any(p.spec.kind == "ea" and p.spec.gpu for p in procs):
+                why.append(f"CuPy cache grew after t0 ({cp.get('files_at_t0')} -> {cp.get('files_at_end')} files)")
+            if why:
+                out.append(("compiled_on_clock", "; ".join(why)))
+    return sorted(out, key=lambda x: VOID_ORDER.index(x[0]))
 
 
 def launch_env(p: Proc, base: dict | None = None) -> dict:
