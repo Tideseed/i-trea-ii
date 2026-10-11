@@ -133,14 +133,20 @@ def _runs(pg, scale=1.0, drop=(), extra=(), first=FIRST):
         rows.append(dict(run_id=f"{n}__A6m__s0__600s__h", instance=n, arm="A6m", set="mipfeas", seed=0, budget=600.0,
                          status="completed", synthetic=False, block_void=False, attempt=0, pt_gams=ours,
                          pt_gams_launch=min(2.0, ours * 1.1) if ours < 2 else 2.0, startup_offset_s=3.0,
-                         t_first=600.0 if tf is None else tf + 0.25, t_first_event=tf is not None, ref=10.0))
+                         t_first=600.0 if tf is None else tf + 0.25, t_first_event=tf is not None, ref=10.0,
+                         **INTACT))
     return pd.DataFrame(rows + list(extra))
+
+
+INTACT = dict(incumbents_missing="", n_inc_unchecked=0, inc_count_mismatch="", pre_t0=False, n_inc_bad_t=0,
+              n_inc_failed=0, n_obj_mismatch=0, beats_ref=False)
 
 
 def test_report_pass_fail_incomplete(tmp_path):
     d, pg = _archive(tmp_path)
     res = MF.report(_runs(pg), d, strata=STRATA_T)
     assert res["verdict"] == MF.PASS and res["call"]["R"] == pytest.approx(1.0) and res["call"]["n"] == 4
+    assert not res["flags"] and not res["beats_ref"]
     assert res["feasible"] == dict(ours=3, gams_on_runs=3, gams_sample=3)
     assert res["call"]["lo"] <= 1.0 <= res["call"]["hi"]
     lr = np.log((np.array([min(2.0, g * 1.1) if g < 2 else 2.0 for g in pg.values()]) + 0.001)
@@ -168,12 +174,51 @@ def test_report_pass_fail_incomplete(tmp_path):
     assert inc["verdict"] == MF.INCOMPLETE and [m["instance"] for m in inc["missing"]] == ["d"]
     assert "status failed" in inc["missing"][0]["why"] and inc["n_runs"] == 3
     assert "Missing" in MF.markdown(inc) and "INCOMPLETE" in MF.markdown(inc)
-    # a rerun (higher attempt) is the one taken; other arms, sets and budgets are ignored
-    rerun = dict(_runs(pg).iloc[0].to_dict(), run_id="a__rerun", attempt=1, pt_gams=pg["a"] * 1.05)
+    # two valid runs of one instance (a rerun under another configuration, say): refused, never one picked; other arms
+    # are ignored
+    rerun = dict(_runs(pg).iloc[0].to_dict(), run_id="a__A6m__s0__600s__other", attempt=1, pt_gams=pg["a"] * 1.05)
     other = dict(_runs(pg).iloc[1].to_dict(), run_id="b__A6", arm="A6", pt_gams=0.9)
     res2 = MF.report(_runs(pg, extra=[rerun, other]), d, strata=STRATA_T)
-    a = next(r for r in res2["instances"] if r["instance"] == "a")
-    assert a["run_id"] == "a__rerun" and a["p_call"] == pytest.approx(pg["a"] * 1.05)
+    assert res2["verdict"] == MF.INCOMPLETE and [m["instance"] for m in res2["missing"]] == ["a"]
+    assert "2 valid runs" in res2["missing"][0]["why"] and "a__A6m__s0__600s__other" in res2["missing"][0]["why"]
+
+
+@pytest.mark.parametrize("fault, text", [(dict(incumbents_missing="cuopt"), "incumbent file missing for cuopt"),
+                                         (dict(n_inc_unchecked=3), "3 incumbents unchecked"),
+                                         (dict(inc_count_mismatch="cuopt"), "stored incumbents != trace"),
+                                         (dict(pre_t0=True, n_inc_bad_t=1), "before t0"),
+                                         (dict(n_inc_bad_t=2), "before t0")])
+def test_report_refuses_a_run_that_is_not_intact(tmp_path, fault, text):
+    """A completed run whose incumbents are not all stored, checked and stamped after t0 is no calibration run: a
+    missing incumbent file would score P = 2 and move R with no cause shown (review 2026-10-11)."""
+    d, pg = _archive(tmp_path)
+    runs = _runs(pg)
+    for k, v in fault.items():
+        runs.loc[runs["instance"] == "b", k] = v
+    res = MF.report(runs, d, strata=STRATA_T)
+    assert res["verdict"] == MF.INCOMPLETE and [m["instance"] for m in res["missing"]] == ["b"]
+    assert text in res["missing"][0]["why"] and "not intact" in res["missing"][0]["why"]
+    assert text in MF.markdown(res)
+
+
+def test_report_flags_kept_runs_and_beats_and_the_ratio(tmp_path):
+    """Failed checks and objective mismatches keep the run (only checked incumbents count) and are printed; a checked
+    incumbent better than z* is printed; R is (SGM_ours + 0.001)/(SGM_GAMS + 0.001), not the ratio of the SGMs."""
+    d, pg = _archive(tmp_path)
+    runs = _runs(pg, scale=1.2)
+    runs.loc[runs["instance"] == "a", ["n_inc_failed", "n_obj_mismatch"]] = [2, 1]
+    runs.loc[runs["instance"] == "d", "beats_ref"] = True
+    res = MF.report(runs, d, strata=STRATA_T)
+    assert res["verdict"] in (MF.PASS, MF.FAIL) and not res["missing"]
+    assert "2 incumbents failed the check" in res["flags"]["a"] and "1 reported objectives" in res["flags"]["a"]
+    assert [b["instance"] for b in res["beats_ref"]] == ["d"]
+    md = MF.markdown(res)
+    assert "Integrity flags" in md and "Beats the reference" in md and "(SGM_ours + 0.001) / (SGM_GAMS + 0.001)" in md
+    sg = res["sgm"]
+    assert res["call"]["R"] == pytest.approx((sg["ours_call"] + 0.001) / (sg["gams_on_runs"] + 0.001))
+    assert res["call"]["R"] != pytest.approx(sg["ours_call"] / sg["gams_on_runs"])
+    with pytest.raises(ValueError, match="integrity columns"):
+        MF.report(runs.drop(columns=["n_inc_unchecked"]), d, strata=STRATA_T)
 
 
 def test_report_cli_writes_json_and_markdown(tmp_path, capsys):

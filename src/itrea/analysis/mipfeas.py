@@ -8,22 +8,30 @@ and `ref`) and GAMS's archive `data/mipfeas/gams-2026-09-16/` (Berk's yes, 2026-
 `primalintegral.csv` (their per-instance integral; column `cuopt-gb10` = cuOpt 26.08 on the GB10),
 `optimal_objective.csv` (their z*) and the traces `trc_files/<name>_<machine>_<solver>.trc`.
 
-Runs: the arm (A6m) and set (mipfeas), seed 0, budget 600, status completed, not synthetic, not block-void; a rerun
-keeps the highest attempt. An instance of the sample without such a run is listed as missing together with whatever
-runs it has (failed, void, another budget …) — never dropped silently; the verdict needs all 30.
+Runs: the arm (A6m) and set (mipfeas), seed 0, budget 600, status completed, not synthetic, not block-void, and
+**intact** — no incumbent file missing (`incumbents_missing`), none unchecked (`n_inc_unchecked`), the stored count
+equal to the trace's (`inc_count_mismatch`), none stamped before t0 (`pre_t0`, `n_inc_bad_t`): a run without them
+would be scored as if its incumbents never existed (a missing incumbent file gives P = 2). Incumbents that failed the
+check (`n_inc_failed`) or whose reported objective differs from the recomputed one (`n_obj_mismatch`) keep the run —
+only checked incumbents count anyway (D-002) — and are printed as flags. An instance with two or more such runs (a
+rerun under another configuration hash, say) is refused, never resolved by picking one. An instance without exactly
+one valid run is listed with every run it has and why each was not taken; the verdict needs all 30.
 
 Statistics (D-020 § Calibration):
 - per instance P_ours on both clocks and P_GAMS (`primalintegral.csv`, `cuopt-gb10`);
-- R = exp(mean_i log((P_ours,i + 0.001)/(P_GAMS,i + 0.001))), the ratio of the two shifted geometric means on the
-  sample, with a 95 % percentile bootstrap interval over instances (`stats.bootstrap_mean` on the log ratios: 10,000
-  resamples, seed `stats.BOOT_SEED`); on the call clock (the pass rule) and the launch clock (reported);
+- R = exp(mean_i log((P_ours,i + 0.001)/(P_GAMS,i + 0.001))) = (SGM_ours + 0.001)/(SGM_GAMS + 0.001), where SGM is
+  the shifted geometric mean exp(mean log(P + 0.001)) − 0.001 on the sample — the ratio of the two geometric means of
+  P + 0.001, not SGM_ours / SGM_GAMS — with a 95 % percentile bootstrap interval over instances
+  (`stats.bootstrap_mean` on the log ratios: 10,000 resamples, seed `stats.BOOT_SEED`); on the call clock (the pass
+  rule) and the launch clock (reported);
 - both shifted geometric means (s = 0.001), the feasible counts (P < 2), R per stratum (D-020's six strata);
 - first incumbent: ours (call clock; launch clock = + `startup_offset_s`) minus the first `I` record of GAMS's GB10
   26.08 trace — median and quartiles over the instances where both found one;
 - GAMS's own GB10 cuOpt 26.04 and B200 cuOpt 26.08 traces against GB10 26.08 on the sample, scored with the port
   (`metrics.gams_integral`, their z*): the size of a version or machine difference, for scale;
 - the reference check: max |ref − z*| / max(1, |z*|) over the sample (D-020 found ≤ 1e-6 on all 233), since our
-  `pt_gams` is scored against our reference.
+  `pt_gams` is scored against our reference; and the instances where a checked incumbent beat that reference
+  (`beats_ref`: γ = 0 in the port, where GAMS's script raises; supportcase22's reference is only the best known, 110).
 Verdict: PASS iff every instance of the sample has a run, 0.870 ≤ R ≤ 1.150 on the call clock and our feasible count is
 within ±1 of GAMS's on the sample (27 for D-020's sample, computed here); FAIL otherwise; INCOMPLETE (no verdict) while
 an instance is missing.
@@ -157,25 +165,70 @@ def _quartiles(xs) -> dict:
     return dict(n=int(x.size), median=float(med), q25=float(q25), q75=float(q75))
 
 
+INTEGRITY_COLUMNS = ("incumbents_missing", "n_inc_unchecked", "inc_count_mismatch", "pre_t0", "n_inc_bad_t",
+                     "n_inc_failed", "n_obj_mismatch")
+
+
+def integrity_faults(row) -> list[str]:
+    """Why a run is not a valid calibration run (module docstring); [] if it is."""
+    out = []
+    if str(row["incumbents_missing"] or ""):
+        out.append(f"incumbent file missing for {row['incumbents_missing']}")
+    if int(row["n_inc_unchecked"]) > 0:
+        out.append(f"{int(row['n_inc_unchecked'])} incumbents unchecked")
+    if str(row["inc_count_mismatch"] or ""):
+        out.append(f"stored incumbents != trace incumbents for {row['inc_count_mismatch']}")
+    if bool(row["pre_t0"]) or int(row["n_inc_bad_t"]) > 0:
+        out.append(f"{int(row['n_inc_bad_t'])} incumbents stamped before t0 or without a time")
+    return out
+
+
+def integrity_flags(row) -> list[str]:
+    """What a valid run carries but does not lose its validity for (only checked incumbents count, D-002)."""
+    out = []
+    if int(row["n_inc_failed"]) > 0:
+        out.append(f"{int(row['n_inc_failed'])} incumbents failed the check")
+    if int(row["n_obj_mismatch"]) > 0:
+        out.append(f"{int(row['n_obj_mismatch'])} reported objectives differ from the recomputed ones")
+    return out
+
+
 def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int = SEED,
                 budget: float = BUDGET) -> tuple[dict[str, pd.Series], dict[str, list[str]]]:
-    """The calibration's run per instance (module docstring) and, per instance, a description of every other run of
-    the arm in the set that was not taken (status, seed, budget, void)."""
+    """The calibration's run per instance (module docstring) and, per instance, why every other run of the arm in the
+    set was not taken (status, seed, budget, void, integrity) — or, for an instance with several valid runs, that it
+    was refused. The run table needs build_runs' integrity columns (INTEGRITY_COLUMNS); without them nothing can be
+    shown intact, so it raises."""
+    absent = [c for c in INTEGRITY_COLUMNS if c not in runs.columns]
+    if absent:
+        raise ValueError(f"the run table lacks the integrity columns {absent} (rebuild it with `itrea build-runs`)")
     r = runs[(runs["arm"].astype(str) == arm) & (runs["set"].astype(str) == set_)]
     if "synthetic" in r.columns:
         r = r[~r["synthetic"].astype(bool)]
     void = r["block_void"].astype(bool) if "block_void" in r.columns else pd.Series(False, index=r.index)
     ok = (r["status"].astype(str) == "completed") & ~void & (r["seed"].astype(int) == int(seed)) & \
         np.isclose(r["budget"].astype(float), float(budget))
-    att = r["attempt"] if "attempt" in r.columns else pd.Series(0, index=r.index)
-    good = r[ok].assign(_att=att[ok]).sort_values(["instance", "_att", "run_id"], kind="mergesort")
-    chosen = {str(n): g.iloc[-1] for n, g in good.groupby("instance", sort=True)}
-    others: dict[str, list[str]] = {}
-    for idx, row in r[~ok].iterrows():
-        why = (f"{row['run_id']}: status {row.get('status') or '?'}, seed {row['seed']}, budget {row['budget']:g}"
-               + (", block void" if void.loc[idx] else ""))
-        others.setdefault(str(row["instance"]), []).append(why)
-    return chosen, others
+    why_not: dict[str, list[str]] = {}
+    valid: dict[str, list[pd.Series]] = {}
+    for idx, row in r.sort_values("run_id", kind="mergesort").iterrows():
+        n = str(row["instance"])
+        if not ok.loc[idx]:
+            why_not.setdefault(n, []).append(f"{row['run_id']}: status {row.get('status') or '?'}, seed {row['seed']}, "
+                                             f"budget {row['budget']:g}" + (", block void" if void.loc[idx] else ""))
+            continue
+        faults = integrity_faults(row)
+        if faults:
+            why_not.setdefault(n, []).append(f"{row['run_id']}: not intact ({'; '.join(faults)})")
+        else:
+            valid.setdefault(n, []).append(row)
+    chosen = {}
+    for n, rows in valid.items():
+        if len(rows) == 1:
+            chosen[n] = rows[0]
+        else:
+            why_not.setdefault(n, []).insert(0, f"{len(rows)} valid runs ({', '.join(str(x['run_id']) for x in rows)}): "
+                                                "refused, never one picked")
+    return chosen, why_not
 
 
 def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, set_: str = SET, seed: int = SEED,
@@ -201,14 +254,16 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
                     f"{r['run_id']}: no pt_gams (no reference, or a run table built before D-020)"
                 missing.append(dict(instance=n, stratum=k, why=why))
                 rows.append(dict(row, run_id=None, p_call=math.nan, p_launch=math.nan, t_first=math.nan,
-                                 startup_offset_s=math.nan, ref=math.nan, ref_rel_diff=math.nan))
+                                 startup_offset_s=math.nan, ref=math.nan, ref_rel_diff=math.nan, flags="",
+                                 beats_ref=False))
                 continue
             off = float(r.get("startup_offset_s", math.nan))
             t_first = float(r["t_first"]) if bool(r.get("t_first_event", False)) else math.nan
             ref = float(r.get("ref", math.nan))
             rows.append(dict(row, run_id=str(r["run_id"]), p_call=pc, p_launch=float(r.get("pt_gams_launch", math.nan)),
                              t_first=t_first, startup_offset_s=off, ref=ref,
-                             ref_rel_diff=abs(ref - z[n]) / max(1.0, abs(z[n])) if math.isfinite(ref) else math.nan))
+                             ref_rel_diff=abs(ref - z[n]) / max(1.0, abs(z[n])) if math.isfinite(ref) else math.nan,
+                             flags="; ".join(integrity_flags(r)), beats_ref=bool(r.get("beats_ref", False))))
     df = pd.DataFrame(rows)
     have = df[df["run_id"].notna()]
     feas = lambda p: int((np.asarray(p, dtype=float) < M.MIPFEAS_NONE).sum())      # noqa: E731
@@ -239,9 +294,13 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
                                 sgm=M.shifted_geomean(p, shift=SHIFT))
     out["gams_rows"] = others_rows
     out["ref_rel_diff_max"] = float(have["ref_rel_diff"].max()) if len(have) else math.nan
+    out["flags"] = {str(x["instance"]): x["flags"] for _, x in have.iterrows() if x["flags"]}
+    out["beats_ref"] = [dict(instance=str(x["instance"]), ref=float(x["ref"]), z=float(x["z"]))
+                        for _, x in have.iterrows() if bool(x["beats_ref"])]
     out["rule"] = dict(R_lo=R_LO, R_hi=R_HI, feasible_tol=FEASIBLE_TOL, clock="call")
     if missing:
-        out["verdict"], out["verdict_reason"] = INCOMPLETE, f"{len(missing)} of {len(sample)} instances have no run"
+        out["verdict"], out["verdict_reason"] = INCOMPLETE, (f"{len(missing)} of {len(sample)} instances have no "
+                                                             f"valid run")
     else:
         R = out["call"]["R"]
         r_ok = R_LO <= R <= R_HI
@@ -272,8 +331,9 @@ def markdown(res: dict) -> str:
         lines.append(f"| {r['stratum']} | {r['instance']} | {_f(r['p_call'])} | {_f(r['p_launch'])} | "
                      f"{_f(r['p_gams'])} | {_f(float(lr), 3)} | {_f(r['t_first'], 3)} | {_f(r['t_first_gams'], 3)} |")
     lines += ["",
-              f"R (call clock) = {_f(c['R'], 3)} [{_f(c.get('lo'), 3)}, {_f(c.get('hi'), 3)}] over {c['n']} "
-              f"instances; R (launch clock) = {_f(la['R'], 3)} [{_f(la.get('lo'), 3)}, {_f(la.get('hi'), 3)}].",
+              f"R = (SGM_ours + 0.001) / (SGM_GAMS + 0.001) = exp(mean log((P_ours + 0.001) / (P_GAMS + 0.001))): call "
+              f"clock {_f(c['R'], 3)} [{_f(c.get('lo'), 3)}, {_f(c.get('hi'), 3)}] over {c['n']} instances; launch "
+              f"clock {_f(la['R'], 3)} [{_f(la.get('lo'), 3)}, {_f(la.get('hi'), 3)}] (95 % bootstrap intervals).",
               f"Shifted geometric means (s = 0.001): ours {_f(sg['ours_call'])} (call) / {_f(sg['ours_launch'])} "
               f"(launch); GAMS {_f(sg['gams_on_runs'])} on the same instances, {_f(sg['gams_sample'])} on the "
               f"whole sample.",
@@ -292,9 +352,15 @@ def markdown(res: dict) -> str:
                      f"[{_f(g.get('lo'), 3)}, {_f(g.get('hi'), 3)}], feasible {g['feasible']}, "
                      f"geo-mean {_f(g['sgm'])}.")
     lines.append(f"Reference check: max |ref − z*| / max(1, |z*|) = {res['ref_rel_diff_max']:.2e}.")
+    if res["beats_ref"]:
+        lines.append("Beats the reference (a checked incumbent better than z*: γ = 0 here, GAMS's script would raise): "
+                     + "; ".join(f"{b['instance']} (ref {b['ref']:g}, z* {b['z']:g})" for b in res["beats_ref"]) + ".")
+    if res["flags"]:
+        lines.append("Integrity flags (runs kept; only checked incumbents count): " +
+                     "; ".join(f"{n}: {f}" for n, f in res["flags"].items()) + ".")
     if res["missing"]:
         lines.append("")
-        lines.append("Missing (no completed seed-0 run at the budget): " +
+        lines.append("Missing (no valid completed seed-0 run at the budget): " +
                      "; ".join(f"{m['instance']} ({m['why']})" for m in res["missing"]) + ".")
     lines += ["", f"**Verdict: {res['verdict']}** — {res['verdict_reason']} (pass: {R_LO:.3f} ≤ R ≤ {R_HI:.3f} on the "
               f"call clock and feasible within ±{FEASIBLE_TOL}, all {res['n_sample']} instances run)."]
