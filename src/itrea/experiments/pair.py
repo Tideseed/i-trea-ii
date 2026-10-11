@@ -535,6 +535,9 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
     if arm.lane == "full" and not lane.whole_box:
         raise RunError(f"arm {arm.name} runs only on the whole-box lane (pool --layout full, D-020), not on lane "
                        f"{lane.name}")
+    if lane.whole_box and (opts.mailbox == "redis" or opts.cuopt_gpu_peak_gb is not None):
+        raise RunError("the whole-box lane refuses the Redis mailbox (core 0 is inside the lane) and a measured cuOpt "
+                       "peak for the memory gate (D-020's 81 GB counts the RMM limit)")
     if lane.whole_box and arm.lane != "full":
         full = ", ".join(a for a, sp in ARMS.items() if sp.lane == "full")
         raise RunError(f"the whole-box lane {lane.name} runs only {full} (D-020; a full-box A9 needs its own arm and "
