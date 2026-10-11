@@ -28,6 +28,12 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   information only).
 - **Clock rule:** `n_inc_bad_t` / `pre_t0` count stored incumbents stamped before t0 (t < 0) or before the trace
   clock started (t NaN); prereg refuses such runs.
+- **MIPfeas, GAMS's integral exactly** (D-020, `metrics.gams_integral`), both with T = the run's budget: `pt_gams` on
+  the CALL clock (incumbent times since t0, as every metric here); `pt_gams_launch` on the LAUNCH clock, every
+  incumbent time plus `startup_offset_s` = run.json `t0_epoch` − min(`processes[*].launch_epoch`) (parse, CUDA context
+  and warm-up counted; an incumbent later than T − offset falls outside), NaN when the record lacks either epoch (and
+  for synthetic rows). The portfolio's first checked incumbent on the call clock is `t_first` (`t_first_event` false =
+  none by T). `pt_mf` (D-002 §4) is unchanged beside them.
 - **Post accounting** (D-002 integrity): every EA post up to T is tried-accepted, tried-rejected, superseded-untried (a
   newer post replaced it — the mailbox keeps only the latest) or pending-at-T, from the EA's `post` events and the
   solver's `verdict` events. Tried-accepted = `accepted` (the SCIP adapter's meaning: SCIP's own feasibility check
@@ -58,13 +64,16 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   after SCIP proved optimality) is not a crash.
 - **GPU-health voiding:** a GPU run whose `run.json["gpu_health"]` verdict is "void" (median busy SM clock < 2,000 MHz
   or foreign GPU processes in > 2 % of samples; `itrea.experiments.gpu_health`) sets `gpu_void`, and every run of its
-  block (instance × seed × budget) gets `block_void`.
+  block (set × instance × seed × budget: a void run of one set never voids another set's runs of the same instance,
+  e.g. the MIPfeas calibration's) gets `block_void`.
 
-Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`;
+Run directory contract (`traces/raw/<set>/<run_id>/`, `run_id = <stem>__<arm>__s<seed>__<budget>s__<cfg-hash>`; the
+same job run again in another set keeps its directory, and the tables qualify the later id as `<run_id>#<set>`
+(`qualify_reused_ids`, issue #33);
 the stem may itself contain "__", so the id is parsed from the right). Keys read, all optional (`.get`):
-`run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, attempt, window_id, williams_pos,
+`run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, t0_epoch, attempt, window_id, williams_pos,
 git_rev | git_revision, prereg_tag, gpu_health {verdict, median_sm_mhz, foreign_share, gpu_run},
-processes [{role, exit_code | returncode}] or {role: {...}} or exit_codes {role: code};
+processes [{role, exit_code | returncode, launch_epoch}] or {role: {...}} or exit_codes {role: code};
 `<role>.summary.json`: instance, arm, seed, budget, config_hash, sense, t0, exit_reason, status, backend, solver,
 startup_s (number or {step: seconds}) | startup {step: seconds}, exchange_s, exchange_bytes (top level or counters);
 `<role>.events.jsonl` kinds: incumbent, bound, post, verdict, frontier, callback.
@@ -96,7 +105,7 @@ from itrea.trace import read_events
 
 ROLES = ("solver", "solver2", "ea", "cuopt")
 SOLVER_ROLE, EA_ROLE = "solver", "ea"
-GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x")
+GPU_ARMS = ("A2", "A3", "A3r", "A5", "A5x0", "A5y0", "A6", "H2", "H3", "A9", "A3x", "A6m")
 EA_GPU_ARMS = ("A3", "A3r", "A5", "A5x0", "A5y0", "H3", "A9", "A3x")
 CUOPT_X_ARMS = ("A9",)                    # the EA reads cuOpt's channels (exchange.from_cuopt, D-015)
 EA_CPU_ARMS = ("A4",)
@@ -120,8 +129,9 @@ INC_COLUMNS = {
 
 # --------------------------------------------------------------------------------------------- run directories
 def parse_run_id(run_id: str) -> dict:
-    """`<stem>__<arm>__s<seed>__<budget>s__<cfg>` parsed from the right ({} if it does not have that shape)."""
-    parts = str(run_id).split("__")
+    """`<stem>__<arm>__s<seed>__<budget>s__<cfg>` parsed from the right ({} if it does not have that shape); a reuse
+    qualifier `#<set>` (`qualify_reused_ids`) is ignored."""
+    parts = str(run_id).split(REUSE_SEP)[0].split("__")
     if len(parts) < 5 or not parts[-3].startswith("s") or not parts[-2].endswith("s"):
         return {}
     try:
@@ -809,15 +819,41 @@ def reference_datasets(runs: list[Run]) -> dict[str, str]:
     return {n: ("miplib" if m else "") for n, m in mip.items()}
 
 
+REUSE_SEP = "#"   # `<run_id>#<set>`: a job's id reused by a later run in another set ("@" and "~" are taken by arm labels)
+
+
+def qualify_reused_ids(runs: list[Run], log=print) -> list[Run]:
+    """A run id names a JOB (`<stem>__<arm>__s<seed>__<budget>s__<cfg>`), and the directory adds the set: the same job
+    run again in another set has the same id (the D-018 stage-1 A6 reruns of the dev / classprobe A6 jobs, issue #33).
+    The earliest of them (run.json `created_epoch`, then the set name) keeps the bare id, so every table built before
+    keeps its ids; each later one becomes `<run_id>#<set>` in the tables (`run_id_base` keeps the bare id; the
+    directory is unchanged). The same id twice in ONE set is still an error (a rerun there must replace the old run)."""
+    by: dict[str, list[Run]] = {}
+    for r in runs:
+        by.setdefault(r.run_id, []).append(r)
+    for rid, rs in sorted(by.items()):
+        if len(rs) < 2:
+            continue
+        sets = [r.set for r in rs]
+        if len(set(sets)) != len(sets):
+            raise ValueError(f"duplicate run id {rid!r} inside one set {sorted(sets)} (a rerun must get its own "
+                             f"directory and run_id)")
+        def created(r: Run) -> float:
+            f = _fl(r.run_json.get("created_epoch"))
+            return f if math.isfinite(f) else math.inf
+        rs.sort(key=lambda r: (created(r), r.set))
+        for r in rs[1:]:
+            r.run_id = f"{rid}{REUSE_SEP}{r.set}"
+        log(f"run id {rid} reused in {len(rs)} sets: {rs[0].set} keeps it; "
+            f"{', '.join(r.run_id for r in rs[1:])}")
+    return sorted(runs, key=lambda r: r.run_id)
+
+
 def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLike = DATASETS, recheck: bool = False,
           workers: int = 1, write: bool = True, log=print, solu_path: str | os.PathLike = SOLU_PATH,
           verify_instances: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     raw_root, out_dir = Path(raw_root), Path(out_dir)
-    runs = sorted((load_run(p, raw_root) for p in discover(raw_root)), key=lambda r: r.run_id)
-    ids = [r.run_id for r in runs]
-    if len(set(ids)) != len(ids):
-        dup = sorted({i for i in ids if ids.count(i) > 1})
-        raise ValueError(f"duplicate run ids (a rerun must get its own directory and run_id): {dup[:5]}")
+    runs = qualify_reused_ids([load_run(p, raw_root) for p in discover(raw_root)], log)
     inc_path = out_dir / "incumbents_checked.parquet"
     cached = pd.read_parquet(inc_path) if inc_path.exists() else None    # under --recheck: only to log changes
     inc = check_runs(runs, cached, recheck, workers, log, verify_instances=verify_instances)
@@ -868,6 +904,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         row = _identity(run)
         row.update(_ref_cols(ref, s, study_best.get(run.name), run.name in conflict))
         row.update(_metric_cols(port, steps, ref, s, T, dual, study_best.get(run.name), set(run.summaries)))
+        row.update(launch_clock_cols(run, port, ref, s, T))
         rs_ = refs_screen[run.name]
         ps = M.primal_integral(port, rs_.value, s, T)
         share = M.sign_crossing_share(port, rs_.value, s, T)
@@ -904,7 +941,8 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         s, ref = sense.get(name, 1), refs[name]
         st = {"solver": steps_of[a0.run_id].get(SOLVER_ROLE, []), "ea": steps_of[a5.run_id].get(EA_ROLE, [])}
         port = M.merge_steps(*st.values(), sense=s)
-        row = dict(run_id=f"{name}__{UNCOUPLED[2]}__s{seed}__{budget:g}s__computed", set=a0.set, instance=name,
+        rid = f"{name}__{UNCOUPLED[2]}__s{seed}__{budget:g}s__computed"
+        row = dict(run_id=rid, run_id_base=rid, set=a0.set, instance=name,
                    instance_path=a0.instance or "", arm=UNCOUPLED[2], seed=seed, budget=budget,
                    config_hash=a5.config_hash, synthetic=True, run_dir="",
                    attempt=max(_int(a0.run_json.get("attempt"), 0), _int(a5.run_json.get("attempt"), 0)))
@@ -931,7 +969,8 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
     if len(df):
         void = df["gpu_void"].fillna(False).astype(bool) | (df.get("status", pd.Series("", index=df.index))
                                                              .fillna("") == "void")
-        df["block_void"] = void.groupby([df["instance"], df["seed"], df["budget"]]).transform("any").astype(bool)
+        df["block_void"] = void.groupby([df["set"], df["instance"], df["seed"], df["budget"]]) \
+            .transform("any").astype(bool)
     df = _normalise(df, RUN_COLUMNS).sort_values("run_id", kind="mergesort").reset_index(drop=True)
     if write:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -965,7 +1004,7 @@ def _identity(run: Run) -> dict:
     ss = rc.get("solver_settings") if isinstance(rc.get("solver_settings"), dict) else None
     job = rj.get("job") if isinstance(rj.get("job"), dict) else {}
     emph = (ss or {}).get("emphasis") or job.get("emphasis") or ""
-    return dict(run_id=run.run_id, set=run.set, instance=run.name, instance_path=run.instance or "", arm=run.arm,
+    return dict(run_id=run.run_id, run_id_base=run.run_id.split(REUSE_SEP)[0], set=run.set, instance=run.name, instance_path=run.instance or "", arm=run.arm,
                 base_arm=str(rj.get("base_arm") or run.arm), seed=run.seed, budget=run.budget,
                 config_hash=run.config_hash, base_hash=str(rc.get("base_hash") or ""),
                 config_overrides=json.dumps(rc.get("overrides") or {}, sort_keys=True, default=str),
@@ -1004,6 +1043,28 @@ def _metric_cols(port, steps: dict, ref: R.Reference, s: int, T: float, dual, bo
             for k in ROLE_KEYS:
                 out[f"{role}_{k}"] = sm[k]
     return out
+
+
+def startup_offset(run: Run) -> float:
+    """Seconds from the first process's launch to t0 (D-020's launch clock): run.json `t0_epoch` − the smallest
+    `processes[*].launch_epoch`; NaN when either is missing."""
+    rj = run.run_json
+    procs = rj.get("processes")
+    if isinstance(procs, dict):
+        procs = list(procs.values())
+    le = [_fl(p.get("launch_epoch")) for p in procs or [] if isinstance(p, dict)]
+    le = [x for x in le if not math.isnan(x)]
+    t0e = _fl(rj.get("t0_epoch"))
+    return math.nan if (math.isnan(t0e) or not le) else t0e - min(le)
+
+
+def launch_clock_cols(run: Run, port, ref: R.Reference, s: int, T: float) -> dict:
+    """`startup_offset_s` and GAMS's integral on the launch clock (`pt_gams_launch`, module docstring)."""
+    off = startup_offset(run)
+    if math.isnan(off):
+        return dict(startup_offset_s=off, pt_gams_launch=math.nan)
+    return dict(startup_offset_s=off, pt_gams_launch=M.gams_integral([(t + off, v) for t, v in port], ref.value, s,
+                                                                      T).value)
 
 
 def _integrity_cols(run: Run, inc: pd.DataFrame) -> dict:
@@ -1069,7 +1130,7 @@ def _role_cols() -> dict:
 
 RUN_COLUMNS = {
     # identity
-    "run_id": "str", "set": "str", "instance": "str", "instance_path": "str", "arm": "str", "base_arm": "str",
+    "run_id": "str", "run_id_base": "str", "set": "str", "instance": "str", "instance_path": "str", "arm": "str", "base_arm": "str",
     "seed": "int", "budget": "float", "config_hash": "str", "base_hash": "str", "config_overrides": "str",
     "emphasis": "str", "solver_settings": "str", "parent_git_revs": "str", "synthetic": "bool", "status": "str",
     "void_cause": "str", "split": "str", "stratum": "str", "attempt": "int",
@@ -1082,6 +1143,7 @@ RUN_COLUMNS = {
     "ref_zero_screen": "bool", "sign_crossing_screen": "bool", "sign_crossing_screen_any": "bool",
     "sign_crossing_screen_share": "float", "ref_zero": "bool", "sign_crossing": "bool", "sign_crossing_any": "bool",
     "sign_crossing_share": "float", "pt_mf": "float",
+    "pt_gams": "float", "pt_gams_launch": "float", "startup_offset_s": "float",   # D-020: call / launch clock
     "beats_ref": "bool", "beats_ref_t": "float", "t_first": "float", "t_first_event": "bool", "t_gap5": "float",
     "t_gap5_event": "bool", "t_gap1": "float", "t_gap1_event": "bool", "final_gap": "float", "best_obj": "float",
     "n_steps": "int", "pdi": "float",

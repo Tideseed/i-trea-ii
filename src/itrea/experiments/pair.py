@@ -17,7 +17,9 @@ Why the runner is this strict (predecessor incidents, berkorbay/optopt):
 Footprint (D-002 §3): SCIP on one Cortex-X925 core (5–9, 15–19); the partner (EA on the GPU or the CPU, cuOpt) on the
 GPU plus 3 Cortex-A725 cores (1–4, 10–14); core 0 belongs to the Redis container. Every process runs inside
 `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (`use_systemd=False` for tests) under `taskset`, with
-OMP/OPENBLAS/MKL_NUM_THREADS = 1. The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) runs two partners, which must not
+OMP/OPENBLAS/MKL_NUM_THREADS = 1 — except a whole-lane process (A6m's cuOpt), from whose environment the runner
+REMOVES the three (they are also in the runner's own environment, set below at import): GAMS ran cuOpt with them
+unset, and libcuopt links libomp (`Proc.env_unset`, recorded in run.json). The three-way arm A9 (SCIP <-> EA <- cuOpt, D-015) runs two partners, which must not
 share cores: SCIP on the lane's first X925 core, the EA on its second (`ProcSpec.x925`), cuOpt on the A725 cores
 (num_cpu_threads = 3 = their number on the GPU lane); two CUDA processes, so the memory gate counts the EA pool and
 cuOpt's RMM limit (both = gpu_mem_gb) plus two CUDA overheads. The runner gives the EA `exchange.from_cuopt: true`
@@ -26,6 +28,13 @@ A3's flags. GPU-health voiding treats every process the runner launched (and its
 matched control is A3x (SCIP on x925[0], the EA on x925[1], no cuOpt), not A3: A3's EA runs on the three A725 cores,
 and its HiGHS LP worker (`seeding.lp_source: highs_async`, which inherits the EA's affinity) beside it, while A9's EA
 shares one faster X925 core with that worker.
+
+Arm A6m (D-020, the MIPfeas calibration) is cuOpt alone as GAMS ran it for Mittelmann's MIPfeas: num_cpu_threads 24
+and mip_absolute_gap = mip_relative_gap = 0 (`--mip-gap-zero`), whatever the lane, pinned to every core of the
+whole-box lane `full` (all 20 cores, `FULL_LANE`; `--layout full` in the pool) and refused on any other lane, as the
+whole-box lane refuses every other arm. Its run hash folds in the 24 threads and the zero gaps, so it never shares a
+run id with A6. Its RMM limit and MemoryMax come from the runner's options (D-020: `--gpu-mem-gb 36 --cuopt-mem-gb
+24`); the RMM limit is part of the run hash, as for A6.
 
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
@@ -72,8 +81,16 @@ GPU_KINDS = ("cuopt",)          # plus "ea" when its backend is cupy
 A1_SEED_OFFSET = 10_000         # D-002 v3 §3: A1's second SCIP uses seed s + 10,000
 PARTNER_THREADS = 3             # D-002 §3: the partner footprint is 3 A725 cores (cuOpt num_cpu_threads = 3)
 DEFINITIVE = ("optimal", "infeasible", "unbounded", "infeasible_or_unbounded")   # exit reasons that end a race
+ACPI_SAMPLE_S = 5.0            # the hottest ACPI zone, read this often while the clock runs (run.json `acpi_during`)
 ABORT_KILL_AFTER_S = 5.0      # an abort (memory floor, thermal pause, interrupt): stop → this → SIGTERM → SIGKILL
-RUNNER_CORES = (4, 10, 11, 12, 13, 14)   # A725 cores no lane uses (1–3: partner, 0: Redis): the runner's own work
+THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+RUNNER_CORES = (4, 10, 11, 12, 13, 14)   # A725 cores no lane uses (1–3: partner, 0: Redis): the runner's own work —
+                                         # except the whole-box lane `full`, which holds every core: there the runner's
+                                         # threads (the GPU-health sampler, the stop loop) share cuOpt's cores, a small,
+                                         # recorded load (run.json `runner_cores`) accepted for A6m (D-020)
+X925_CORES = (5, 6, 7, 8, 9, 15, 16, 17, 18, 19)
+A725_CORES = (0, 1, 2, 3, 4, 10, 11, 12, 13, 14)
+GAMS_CUOPT_THREADS = 24         # D-020: GAMS ran cuOpt with num_cpu_threads 24 on the 20-core GB10 (arm A6m)
 MAILBOX_ROOT = Path("/dev/shm/itrea")
 CUPY_CACHE_DIR = Path.home() / ".cache/itrea/cupy"
 REDIS_URL = "redis://127.0.0.1:6390/0"
@@ -103,6 +120,10 @@ class ProcSpec:
     backend: str | None = None  # ea: "cupy" | "numpy"
     x925: bool = False         # ea: one X925 core of its own, after the solvers' (A9: cuOpt holds the A725 cores;
                                # A3x: the same footprint without cuOpt)
+    cpu_threads: int | None = None   # cuopt: num_cpu_threads fixed by the arm, whatever the lane (A6m: 24, D-020);
+                                     # None = the partner footprint's (PairOptions.cuopt_threads or PARTNER_THREADS)
+    gap_zero: bool = False     # cuopt: --mip-gap-zero, both MIP gaps 0 as GAMS ran it (A6m, D-020)
+    whole_lane: bool = False   # pinned to every core of its lane (A6m on the whole-box lane)
 
     @property
     def gpu(self) -> bool:
@@ -115,6 +136,7 @@ class ArmSpec:
     procs: tuple[ProcSpec, ...]
     ea_overrides: tuple[tuple[str, object], ...] = ()   # arm-implied EA configuration changes
     lane: str = "solo"         # "partner": GPU lane / partner footprint (one at a time) | "solo": solver-only CPU lane
+                               # | "full": the whole-box lane only (A6m, D-020)
     doc: str = ""
 
     @property
@@ -147,6 +169,7 @@ _EA_CPU = ProcSpec("ea", "ea", backend="numpy")
 _CUOPT = ProcSpec("cuopt", "cuopt")
 _CUOPT_X = ProcSpec("cuopt", "cuopt", exchange=True)                  # A9: --send on cuOpt's own channels
 _EA_GPU_X925 = ProcSpec("ea", "ea", backend="cupy", x925=True)        # A9: the A725 cores belong to cuOpt
+_CUOPT_GAMS = ProcSpec("cuopt", "cuopt", cpu_threads=GAMS_CUOPT_THREADS, gap_zero=True, whole_lane=True)   # A6m
 _NOX = (("exchange.enabled", False), ("lp_stream.enabled", False))   # the stream needs the exchange (review 770df17)
 
 ARMS: dict[str, ArmSpec] = {a.name: a for a in [
@@ -172,6 +195,9 @@ ARMS: dict[str, ArmSpec] = {a.name: a for a in [
     ArmSpec("A3x", (_SCIP_X, _EA_GPU_X925), lane="partner",
             doc="A3 with A9's EA footprint (the EA on the lane's second X925 core, no cuOpt): A9's matched control "
                 "(D-015 addendum); development arm"),
+    ArmSpec("A6m", (_CUOPT_GAMS,), lane="full",
+            doc="cuOpt alone as GAMS ran it for MIPfeas (D-020): num_cpu_threads 24, MIP gaps 0, all 20 cores "
+                "(whole-box lane, --layout full); the MIPfeas calibration arm"),
 ]}
 # canonical order (the Williams design permutes the arms of a block in this order)
 ARM_ORDER = tuple(ARMS)
@@ -195,17 +221,22 @@ def arm_spec(job: dict) -> ArmSpec:
 @dataclass(frozen=True)
 class Lane:
     """A fixed set of cores a run is pinned to. x925[0] = the solver, x925[1] = A1's second solver or the EA of A9 /
-    A3x, a725 = the partner (EA or cuOpt; cuOpt's num_cpu_threads = PARTNER_THREADS = len(a725) on the GPU lane)."""
+    A3x, a725 = the partner (EA or cuOpt; cuOpt's num_cpu_threads = PARTNER_THREADS = len(a725) on the GPU lane).
+    whole_box: the lane holds every core (A6m only, and A6m only there; D-020)."""
     name: str
     x925: tuple[int, ...]
     a725: tuple[int, ...] = ()
     gpu: bool = False
+    whole_box: bool = False
 
     def fits(self, arm: ArmSpec) -> bool:
+        if (arm.lane == "full") != self.whole_box:
+            return False
         return len(self.x925) >= arm.n_x925 and (not arm.needs_a725 or len(self.a725) >= 1) and (self.gpu or not arm.gpu)
 
 
 GPU_LANE = Lane("g0", (5, 6), (1, 2, 3), gpu=True)
+FULL_LANE = Lane("full", X925_CORES, A725_CORES, gpu=True, whole_box=True)   # the whole box, one run at a time (D-020)
 
 
 # ------------------------------------------------------------------------------------------------------- options
@@ -314,12 +345,27 @@ def base_config_hash(job: dict) -> str:
     return base.hash()
 
 
+def cuopt_threads(spec: ProcSpec, opts: PairOptions) -> int:
+    """num_cpu_threads of a cuOpt process: the arm's own (A6m: 24, whatever the lane) or the partner footprint's
+    (`opts.cuopt_threads`, default PARTNER_THREADS). An option that contradicts the arm's own count is refused."""
+    if spec.cpu_threads is not None:
+        if opts.cuopt_threads not in (None, spec.cpu_threads):
+            raise RunError(f"cuOpt's thread count is fixed by the arm ({spec.cpu_threads}); cuopt_threads "
+                           f"{opts.cuopt_threads} contradicts it")
+        return int(spec.cpu_threads)
+    return int(opts.cuopt_threads or PARTNER_THREADS)
+
+
 def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
-    """What identifies a run of an arm without an EA (its <cfg-hash>)."""
+    """What identifies a run of an arm without an EA (its <cfg-hash>). Only A6m's dict carries `mip_gap_zero`, so
+    every other arm's dict — and hash — is what it was before A6m existed (tests pin them)."""
     arm = arm_spec(job)
     d: dict = {"arm": arm.name, "emphasis": job.get("emphasis") if any(p.emphasis for p in arm.procs) else None}
-    if any(p.kind == "cuopt" for p in arm.procs):
-        d.update(gpu_mem_gb=cfg.gpu_mem_gb, cuopt_threads=opts.cuopt_threads or PARTNER_THREADS)
+    cu = [p for p in arm.procs if p.kind == "cuopt"]
+    if cu:
+        d.update(gpu_mem_gb=cfg.gpu_mem_gb, cuopt_threads=cuopt_threads(cu[0], opts))
+        if cu[0].gap_zero:
+            d["mip_gap_zero"] = True
     return d
 
 
@@ -391,6 +437,7 @@ class Proc:
     gpu_gb: float | None
     env_extra: dict
     log_path: Path
+    env_unset: tuple[str, ...] = ()    # removed from the inherited environment before env_extra applies (A6m's cuOpt)
     popen: subprocess.Popen | None = None
     launch_mono: float | None = None
     launch_epoch: float | None = None
@@ -486,6 +533,16 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
     """The processes of a run (nothing is launched)."""
     arm = arm_spec(job)
     lane = opts.lane
+    if arm.lane == "full" and not lane.whole_box:
+        raise RunError(f"arm {arm.name} runs only on the whole-box lane (pool --layout full, D-020), not on lane "
+                       f"{lane.name}")
+    if lane.whole_box and (opts.mailbox == "redis" or opts.cuopt_gpu_peak_gb is not None):
+        raise RunError("the whole-box lane refuses the Redis mailbox (core 0 is inside the lane) and a measured cuOpt "
+                       "peak for the memory gate (D-020's 81 GB counts the RMM limit)")
+    if lane.whole_box and arm.lane != "full":
+        full = ", ".join(a for a, sp in ARMS.items() if sp.lane == "full")
+        raise RunError(f"the whole-box lane {lane.name} runs only {full} (D-020; a full-box A9 needs its own arm and "
+                       f"decision), not {arm.name}")
     if not lane.fits(arm):
         raise RunError(f"lane {lane.name} (x925={lane.x925}, a725={lane.a725}, gpu={lane.gpu}) cannot run {arm.name}")
     label = arm_label(job)
@@ -535,15 +592,22 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             argv += ["--config", str(run_dir / "config.yaml")]
             g = gpu_gb if spec.gpu else None
         elif spec.kind == "cuopt":
-            cores = list(lane.a725)
+            cores = sorted(lane.x925 + lane.a725) if spec.whole_lane else list(lane.a725)
             mem = opts.cuopt_mem_gb
-            argv += ["--cpu-threads", str(opts.cuopt_threads or PARTNER_THREADS), "--gpu-mem-gb", _fmt_set(gpu_gb)]
+            argv += ["--cpu-threads", str(cuopt_threads(spec, opts)), "--gpu-mem-gb", _fmt_set(gpu_gb)]
+            if spec.gap_zero:
+                argv.append("--mip-gap-zero")
             argv += cuopt_flags(spec, cfg if arm.has_ea else None)
             g = gpu_gb                                   # RMM limit = the EA's pool limit (D-002 §3)
         else:
             raise RunError(f"unknown process kind {spec.kind!r}")
         env = {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "PYTHONUNBUFFERED": "1",
                "ITREA_RUN_ID": run_dir.name, "ITREA_ROLE": spec.role, "CUPY_CACHE_DIR": str(opts.cupy_cache_dir)}
+        unset: tuple[str, ...] = ()
+        if spec.whole_lane:                       # A6m: the thread variables unset, as GAMS ran cuOpt (D-020)
+            unset = THREAD_VARS
+            for k in unset:
+                env.pop(k)
         if g is not None:
             env["CUPY_GPU_MEMORY_LIMIT"] = str(int(g * 1024**3))   # CuPy reads it at import (EA); cuOpt: RMM limit
             env["ITREA_GPU_MEM_GB"] = _fmt_set(g)
@@ -556,7 +620,7 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--description=itrea {run_dir.name} {spec.role}",
                    "-p", f"MemoryMax={int(round(mem * 1024))}M", "-p", "MemorySwapMax=0"] + cmd
         procs.append(Proc(spec=spec, argv=argv, cmd=cmd, cores=cores, mem_gb=mem, gpu_gb=g, env_extra=env,
-                          log_path=run_dir / f"{spec.role}.log"))
+                          log_path=run_dir / f"{spec.role}.log", env_unset=unset))
     return procs
 
 
@@ -810,6 +874,8 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         problem=dict(prob_summary, load_s=round(load_s, 3)),
         mailbox=dict(kind=opts.mailbox, spec=spec),
         lane=dataclasses.asdict(opts.lane), systemd=opts.use_systemd, pinned=opts.pin,
+        runner_cores=sorted(os.sched_getaffinity(0)),   # the runner's own threads; on the whole-box lane they share
+                                                        # the run's cores (RUNNER_CORES)
         memory_budget=dict(dataclasses.asdict(budget), need_gb=round(budget.need_gb, 2)),
         processes=[], created_epoch=time.time())
     rec["env"] = record_env.record()
@@ -830,6 +896,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             own_sampler = True
 
     reasons: list[str] = rec["reasons"]
+    acpi = dict(max_c=None, samples=0, period_s=ACPI_SAMPLE_S) if opts.record_snapshots else None
     status = None
     t0 = None
     cache_t0 = None
@@ -838,9 +905,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     try:
         # ---------------------------------------------------------------- launch
         for p in procs:
-            env = dict(os.environ)
-            env.pop("CUPY_GPU_MEMORY_LIMIT", None)
-            env.update(p.env_extra)
+            env = launch_env(p)
             logf = open(p.log_path, "ab")
             try:
                 p.launch_mono, p.launch_epoch = time.monotonic(), time.time()
@@ -894,11 +959,18 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             t0 = mb.release()
             rec["t0"], rec["t0_epoch"] = t0, time.time()
             t_end = t0 + float(job["budget"]) + opts.grace_s
+            next_acpi = 0.0
             while True:
                 alive = [p for p in procs if p.poll() is None]
                 if not alive:
                     break
                 now = time.monotonic()
+                if acpi is not None and now >= next_acpi:      # the box's heat while this run holds it
+                    next_acpi = now + ACPI_SAMPLE_S
+                    c = gates.acpi_max_c()
+                    if c is not None:
+                        acpi["max_c"] = c if acpi["max_c"] is None else max(acpi["max_c"], c)
+                        acpi["samples"] += 1
                 if opts.abort is not None and opts.abort.is_set():
                     stop_info = dict(reason="abort: " + (opts.abort_reason() if opts.abort_reason else ""),
                                      t=now - t0, kind="abort")
@@ -985,6 +1057,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         else:
             rec["gpu_health"] = None
         rec["gates_after"] = gates.snapshot() if opts.record_snapshots else None
+        rec["acpi_during"] = acpi
         # status: void (external) > failed (any exit code != 0 — a SIGKILL included —, a start failure) > completed.
         # A process that exits 0 after the runner's SIGTERM is recorded in processes[*].killed, not as a failure; a
         # stopped_by_runner process (above) is not a failure either.
@@ -1009,6 +1082,17 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         _atomic_json(run_dir / "run.json", rec)
         opts.log(f"{run_id}: {status}" + (f" ({'; '.join(reasons)})" if reasons else ""))
     return rec
+
+
+def launch_env(p: Proc, base: dict | None = None) -> dict:
+    """A process's environment: the runner's (`base`, default os.environ) without CuPy's pool limit and without
+    `p.env_unset`, then `p.env_extra`."""
+    env = dict(os.environ if base is None else base)
+    env.pop("CUPY_GPU_MEMORY_LIMIT", None)
+    for k in p.env_unset:
+        env.pop(k, None)
+    env.update(p.env_extra)
+    return env
 
 
 def _launcher_failure(run_dir: Path, p: Proc) -> bool:
@@ -1046,7 +1130,8 @@ def _wait_or_kill(procs: list[Proc], kill_after_s: float) -> None:
 
 def _proc_record(p: Proc, t0: float | None) -> dict:
     d = dict(role=p.role, kind=p.spec.kind, backend=p.spec.backend, cmd=p.cmd, cores=p.cores, memory_max_gb=p.mem_gb,
-             gpu_limit_gb=p.gpu_gb, env={k: v for k, v in p.env_extra.items()}, pid=p.pid,
+             gpu_limit_gb=p.gpu_gb, env={k: v for k, v in p.env_extra.items()}, env_unset=list(p.env_unset),
+             pid=p.pid,
              launch_epoch=p.launch_epoch, log=p.log_path.name,
              startup_s=round(p.ready_mono - p.launch_mono, 3) if (p.ready_mono and p.launch_mono) else None,
              exit_code=p.exit_code, killed=p.killed, stopped_by_runner=p.stopped_by_runner,

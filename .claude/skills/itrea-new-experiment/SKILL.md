@@ -49,9 +49,10 @@ description: >
 - `backend` must be explicit per arm (`cupy` for A3/A5, `numpy` for A4); `auto` is not allowed in timed runs.
 
 ## 3. Job file
-- Build it with the job builder, never by hand: `itrea make-jobs screen1|screen2|e1|e4|confirm|smoke|backoff0|backoff1`
-  (`itrea.experiments.make_jobs`); a development job file is written with `make_jobs.job(...)` and
-  `make_jobs.write_jobs(...)`, one `variant` label per arm. Instance paths relative to the repository root, arm, seed,
+- Build it with the job builder, never by hand: `itrea make-jobs
+  screen1|screen2|e1|e4|confirm|smoke|backoff0|backoff1|mipfeas-cal` (`itrea.experiments.make_jobs`; `mipfeas-cal` =
+  D-020's A6m calibration, run under `--layout full`, skill `itrea-window`); a development job file is written with
+  `make_jobs.job(...)` and `make_jobs.write_jobs(...)`, one `variant` label per arm. Instance paths relative to the repository root, arm, seed,
   budget, config path and overrides; the pool applies the Williams arm order per block from hash(instance, seed,
   20261005) and runs blocks in random order with strata interleaved.
 - Commit the job file before the run; record its SHA-256 in the journal.

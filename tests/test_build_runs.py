@@ -372,3 +372,68 @@ def test_prereg_ignores_smoke_runs_and_flags_ambiguity(tmp_path):
     twin = runs[(runs["instance"] == "i01") & (runs["arm"] == "A2")].assign(run_id="twin")
     with pytest.raises(PR.PreregError, match="several non-void runs"):
         PR.run(pd.concat([runs, twin], ignore_index=True), pool, hashes, git_check=False)
+
+
+def test_gams_integral_on_the_call_and_the_launch_clock(tmp_path):
+    """D-020: pt_gams is GAMS's integral on the call clock (times since t0), pt_gams_launch on the launch clock (every
+    time + startup_offset_s = t0_epoch − the first launch_epoch), both with T = the budget; NaN without the epochs."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    rj = dict(t0_epoch=1000.0, processes=[dict(role="solver", exit_code=0, launch_epoch=996.0),
+                                          dict(role="other", exit_code=0, launch_epoch=997.0)])
+    make_run(raw, p, mps, "A6m", 0, 10, {"solver": [(2.0, X_85, "self"), (6.0, X_70, "self")]}, run_json_extra=rj)
+    make_run(raw, p, mps, "A6", 0, 10, {"solver": [(2.0, X_85, "self"), (6.0, X_70, "self")]})
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    r = df.set_index("arm")
+    g = round(1.5 / 8.5, 6)                                 # reference 7.0 (best of study), GAMS's rounding
+    assert r.loc["A6m", "pt_gams"] == pytest.approx((2 * 2 + 4 * g) / 10, abs=1e-12)
+    assert r.loc["A6m", "startup_offset_s"] == 4.0
+    assert r.loc["A6m", "pt_gams_launch"] == pytest.approx((6 * 2 + 4 * g) / 10, abs=1e-12)   # 7.0 at 10 s = T: out
+    assert r.loc["A6m", "pt_mf"] == pytest.approx((2 * 2 + 4 * (1.5 / 8.5)) / 10)            # unchanged beside it
+    assert r.loc["A6", "pt_gams"] == r.loc["A6m", "pt_gams"]
+    assert np.isnan(r.loc["A6", "startup_offset_s"]) and np.isnan(r.loc["A6", "pt_gams_launch"])
+    assert bool(r.loc["A6m", "gpu_arm"]) and r.loc["A6m", "t_first"] == 2.0 and bool(r.loc["A6m", "t_first_event"])
+    assert {"pt_gams", "pt_gams_launch", "startup_offset_s"} <= set(B.RUN_COLUMNS)
+
+
+def test_block_void_stays_inside_its_set(tmp_path):
+    """A void run voids its block = set × instance × seed × budget: the same instance, seed and budget in another set
+    (the MIPfeas calibration beside a development set, say) keeps its runs (review 2026-10-11)."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    make_run(raw, p, mps, "A6", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="setx",
+             gpu_health={"verdict": "void", "median_sm_mhz": 800.0, "foreign_share": 0.0})
+    make_run(raw, p, mps, "A2", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="setx")
+    make_run(raw, p, mps, "A6m", 0, 10, {"solver": [(1.0, X_70, "self")]}, set_name="sety")
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    v = df.set_index("arm")["block_void"]
+    assert bool(v["A6"]) and bool(v["A2"]) and not bool(v["A6m"])
+
+
+def test_a_job_rerun_in_another_set_gets_a_qualified_id(tmp_path):
+    """The same job run again in another set has the same run id (issue #33; the D-018 stage-1 A6 reruns): the earliest
+    keeps the bare id, the later one becomes `<run_id>#<set>` with `run_id_base` = the bare id, and each keeps its
+    own incumbents. The same id twice inside one set is still refused."""
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    make_run(raw, p, mps, "A6", 0, 10, {"cuopt": [(1.0, X_85, "self")]}, set_name="later",
+             run_json_extra={"created_epoch": 200.0})
+    make_run(raw, p, mps, "A6", 0, 10, {"cuopt": [(2.0, X_70, "self")]}, set_name="early",
+             run_json_extra={"created_epoch": 100.0})
+    df, inc = B.build(raw, out, log=lambda *a: None)
+    bare = "mixed__A6__s0__10s__cfg000000000"
+    assert sorted(df["run_id"]) == [bare, bare + "#later"]
+    assert set(df["run_id_base"]) == {bare}
+    r = df.set_index("run_id")
+    assert r.loc[bare, "set"] == "early" and r.loc[bare + "#later", "set"] == "later"
+    assert sorted(inc[inc["run_id"] == bare]["t"]) == [2.0]
+    assert sorted(inc[inc["run_id"] == bare + "#later"]["t"]) == [1.0]
+    assert B.parse_run_id(bare + "#later")["config_hash"] == "cfg000000000"
+    runs = [B.load_run(d, raw) for d in B.discover(raw)]
+    for r_ in runs:
+        r_.set = "same"
+    with pytest.raises(ValueError, match="inside one set"):
+        B.qualify_reused_ids(runs, log=lambda *a: None)

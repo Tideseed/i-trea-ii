@@ -1,6 +1,6 @@
 """NVIDIA cuOpt process (control arm and race partner): `python -m itrea.solvers.cuopt_run --instance P --seed S
 --budget T --run-dir D [--mailbox M] [--run-id R] [--role-name N] [--no-barrier] [--sol-out F] [--cpu-threads N]
-[--gpu-mem-gb G] [--send] [--no-warmup] [--arm A]`.
+[--gpu-mem-gb G] [--mip-gap-zero] [--send] [--no-warmup] [--arm A]`.
 
 cuOpt 26.08 (installed in this venv; `--cuopt-python` in the runner can point at another interpreter). cuOpt NEVER
 receives solutions: registering a `SetSolutionCallback` disables cuOpt's presolve (optopt X1, and cuOpt's own
@@ -19,7 +19,10 @@ Before the barrier (start-up, recorded, never on the clock):
 - warm the CUDA context and cuOpt's kernels with a tiny synthetic knapsack solve (1 s limit) — the clock rule allows
   context creation and warm-up on a synthetic problem only. If the warm-up fails (for example the RMM limit is too
   small) the process exits 1 BEFORE reporting ready, so the runner sees a dead process, not a stuck barrier.
-After the barrier: `Solve` with time_limit = remaining budget, num_cpu_threads = --cpu-threads, random_seed = seed.
+After the barrier: `Solve` with time_limit = remaining budget, num_cpu_threads = --cpu-threads, random_seed = seed,
+and with --mip-gap-zero mip_absolute_gap = mip_relative_gap = 0 (GAMS's MIPfeas settings, arm A6m, D-020; otherwise
+cuOpt's default gaps, relative 1e-4). Those parameters are recorded in the summary as `settings` (`solver_params`).
+--cpu-threads has no upper limit: GAMS ran num_cpu_threads 24 on the 20-core GB10, and A6m does the same.
 
 Measured 2026-10-06 (this venv, cuOpt 26.08.00, a 400-variable set-cover toy): cuOpt's MIP solve requests two fixed
 2.4 GB device buffers (2,399,998,904 bytes each) whatever the instance size, so it needs more than about 4.8 GB under
@@ -68,6 +71,9 @@ def build_parser():
                      exchange=False)
     ap.add_argument("--cpu-threads", type=int, default=3, help="cuOpt num_cpu_threads (>= 2; partner footprint)")
     ap.add_argument("--gpu-mem-gb", type=float, default=4.0, help="RMM LimitingResourceAdaptor limit (GB)")
+    ap.add_argument("--mip-gap-zero", action="store_true",
+                    help="mip_absolute_gap = mip_relative_gap = 0, as GAMS ran cuOpt for MIPfeas (arm A6m, D-020); "
+                         "default: cuOpt's own gaps")
     ap.add_argument("--send", action="store_true",
                     help="post every new incumbent (and bound) to the EA on to_ea_cuopt / info_cuopt (arm A9)")
     ap.add_argument("--no-warmup", action="store_true", help="skip the synthetic warm-up solve (tests only)")
@@ -105,13 +111,20 @@ def _rmm_stats(lim, stats) -> dict:
     return out
 
 
-def _settings(time_limit: float, threads: int, seed: int):
+def solver_params(time_limit: float, threads: int, seed: int, gap_zero: bool = False) -> dict:
+    """cuOpt's parameters for one solve (the summary records them as `settings`); every other parameter keeps cuOpt's
+    default. gap_zero: GAMS's mip_absolute_gap = mip_relative_gap = 0 (D-020)."""
+    d = dict(time_limit=float(time_limit), log_to_console=False, num_cpu_threads=int(threads), random_seed=int(seed))
+    if gap_zero:
+        d.update(mip_absolute_gap=0.0, mip_relative_gap=0.0)
+    return d
+
+
+def _settings(params: dict):
     from cuopt.linear_programming import SolverSettings
     s = SolverSettings()
-    s.set_parameter("time_limit", float(time_limit))
-    s.set_parameter("log_to_console", False)
-    s.set_parameter("num_cpu_threads", int(threads))
-    s.set_parameter("random_seed", int(seed))
+    for k, v in params.items():
+        s.set_parameter(k, v)
     return s
 
 
@@ -123,7 +136,7 @@ def _warmup(threads: int, seed: int) -> dict:
     with tempfile.TemporaryDirectory(prefix="itrea-cuopt-warm-") as td:
         p = write_mps(knapsack(12, seed=0), Path(td) / "warm.mps")
         dm = ParseMps(str(p))
-        sol = Solve(dm, _settings(1.0, threads, seed))
+        sol = Solve(dm, _settings(solver_params(1.0, threads, seed)))
     err = int(sol.get_error_status())
     st = int(sol.get_termination_status())
     return dict(error_status=err, error_message=str(sol.get_error_message()) if err else "",
@@ -150,7 +163,7 @@ def body(proc):
     if args.send:
         proc.map_order()
     proc.trace.set(versions=versions(cuopt=cuopt.__version__), n=n, sense=sense, cpu_threads=args.cpu_threads,
-                   gpu_mem_gb=args.gpu_mem_gb)
+                   gpu_mem_gb=args.gpu_mem_gb, mip_gap_zero=bool(args.mip_gap_zero))
     if not args.no_warmup:
         tw = time.monotonic()
         w = _warmup(args.cpu_threads, args.seed)
@@ -211,7 +224,9 @@ def body(proc):
     if proc.should_stop():
         return "stop", dict(status="not started", **_rmm_stats(lim, stats))
     limit = max(0.001, proc.remaining())
-    s = _settings(limit, args.cpu_threads, args.seed)
+    params = solver_params(limit, args.cpu_threads, args.seed, args.mip_gap_zero)
+    proc.trace.set(settings=params)
+    s = _settings(params)
     cb = Recorder()
     s.set_mip_callback(cb, None)                     # GetSolutionCallback only — never a SetSolutionCallback
     proc.timing.update(time_limit_s=limit, optimize_at_s=time.monotonic() - t0)

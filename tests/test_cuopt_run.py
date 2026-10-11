@@ -191,3 +191,20 @@ def test_cuopt_bad_arguments_exit_2(tmp_path, cover, extra):
     rc, out, _ = _launch(["--instance", str(path), "--seed", "0", "--budget", "5", "--run-dir", str(tmp_path / "run"),
                           "--no-barrier"] + extra)
     assert rc == 2, out
+
+
+def test_cuopt_parameters_gap_zero_and_24_threads(cover):
+    """GAMS's MIPfeas settings (D-020, arm A6m): --mip-gap-zero sets both MIP gaps to 0 and is recorded; --cpu-threads
+    24 passes validation (num_cpu_threads may exceed the GB10's 20 cores, as GAMS ran it). No cuOpt import needed."""
+    from itrea.solvers import cuopt_run as C
+    path, _ = cover
+    d = C.solver_params(600.0, 3, 0)
+    assert d == dict(time_limit=600.0, log_to_console=False, num_cpu_threads=3, random_seed=0)   # cuOpt's own gaps
+    g = C.solver_params(600.0, 24, 0, gap_zero=True)
+    assert g["mip_absolute_gap"] == 0.0 and g["mip_relative_gap"] == 0.0 and g["num_cpu_threads"] == 24
+    args = C.build_parser().parse_args(["--instance", str(path), "--seed", "0", "--budget", "600", "--run-dir", "x",
+                                        "--no-barrier", "--cpu-threads", "24", "--mip-gap-zero", "--gpu-mem-gb", "36"])
+    C.validate(args)
+    assert args.cpu_threads == 24 and args.mip_gap_zero
+    assert not C.build_parser().parse_args(["--instance", str(path), "--seed", "0", "--budget", "1", "--run-dir", "x",
+                                            "--no-barrier"]).mip_gap_zero

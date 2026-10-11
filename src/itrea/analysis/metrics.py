@@ -25,6 +25,13 @@ changed for I-TREA II, and why:
   |v − r| / max(|v|, |r|, 1) with no sign clamp (so it lies in [0, 2]), 0 when v equals or beats r; aggregated with
   the shifted geometric mean, s = 0.001 (`shifted_geomean` takes the shift as a REQUIRED keyword, so the
   conventional s = 1 cannot be used by accident).
+- **GAMS's MIPfeas integral, exactly** (D-020; `gams_integral`, column `pt_gams`): a port of
+  `calculate_primal_integral` from GAMS's published scoring script (`create_primalintegral.py`, 2026-09-15, in
+  data/mipfeas/gams-2026-09-16/). It differs from `pt_mf` on purpose: γ = 1 for opposite signs, the ratio rounded to 6
+  decimals, T = 600 s, every time capped at T. Their script assumes minimisation (it raises on an incumbent better
+  than z*); here the difference is taken in the objective's sense, so a maximisation instance scores as its
+  minimisation mirror (none of the 233 MIPfeas instances maximises: no MPS file has an OBJSENSE section). An
+  incumbent that beats z* by their own rounded test gets γ = 0 and the flag `beats_ref` (theirs raises).
 - **Censoring is explicit.** A time to target is a `Censored(t, event)` pair with t = T when the target was not reached
   by T (Type I censoring at a common T), never `inf`, so tables and the censored-data tests downstream stay typed.
 
@@ -53,6 +60,8 @@ IMPROVE_TOL = 1e-12              # a new step needs a relative improvement above
 SIGN_CROSSING_MIN_SHARE = 0.05   # a run is sign-crossing (P-degenerate) if it held a crossing incumbent >= 5 % of T
 MIPFEAS_SHIFT = 0.001            # D-002 §4: shifted geometric mean of the MIPfeas-style integral, s = 0.001
 MIPFEAS_NONE = 2.0               # MIPfeas-style gap with no incumbent
+GAMS_T = 600.0                   # D-020: MIPfeas's time limit (GAMS's max_time)
+GAMS_DIGITS = 6                  # GAMS rounds the relative gap to 6 decimals
 
 
 class Censored(NamedTuple):
@@ -249,6 +258,50 @@ def mipfeas_integral(steps: Sequence[Step], ref: float | None, sense: int, T: fl
     return area / T
 
 
+class GamsIntegral(NamedTuple):
+    value: float                  # GAMS's MIPfeas integral in [0, 2] (NaN with an incumbent but no reference)
+    beats_ref: bool               # an incumbent beat the reference by GAMS's rounded test (theirs raises)
+    beats_ref_t: float | None     # its first time (capped at T)
+
+
+def gams_gap(v: float, ref: float, sense: int = 1) -> tuple[float, bool]:
+    """γ of one incumbent in GAMS's `calculate_primal_integral` (D-020), in their order of tests: (0, True) if the
+    rounded relative difference is negative (v beats z*: theirs raises), 1 for opposite signs (v·z* < 0), else
+    round((v − z*)/max(|v|, |z*|, 1), 6). The difference is taken in the objective's sense (`sense` −1: maximise);
+    Python's round on Python floats, as in their loop (pandas' iterrows hands them Python floats)."""
+    v, ref = float(v), float(ref)
+    rel = round(sense * (v - ref) / max(abs(v), abs(ref), 1), GAMS_DIGITS)
+    if rel < 0:
+        return 0.0, True
+    if v * ref < 0:
+        return 1.0, False
+    return rel, False
+
+
+def gams_integral(steps: Sequence[Step], ref: float | None, sense: int = 1, T: float = GAMS_T) -> GamsIntegral:
+    """GAMS's MIPfeas primal integral (D-020) on best-so-far steps (t, obj in the user's sense): γ = 2 before the first
+    incumbent, `gams_gap` after it; every time capped at T (a step at or after T adds nothing), the last γ held to T;
+    the area divided by T. Their trace rows that do not improve the incumbent change nothing in their sum, so the
+    best-so-far steps give the same value (tested on every GB10 26.08 trace of their archive). Without a reference:
+    2 if there is no incumbent before T, else NaN. Times below 0 are clamped to 0."""
+    if T <= 0:
+        raise ValueError("T must be positive")
+    if ref is None:
+        return GamsIntegral(MIPFEAS_NONE if not any(t < T for t, _ in steps) else math.nan, False, None)
+    area, t_last, g, beats_t = 0.0, 0.0, MIPFEAS_NONE, None
+    for t, v in steps:
+        t = min(max(0.0, float(t)), T)
+        if t < t_last:
+            raise ValueError(f"steps not in time order: {t} after {t_last}")
+        area += (t - t_last) * g
+        t_last = t
+        g, beats = gams_gap(v, ref, sense)
+        if beats and beats_t is None:
+            beats_t = t
+    area += (T - t_last) * g
+    return GamsIntegral(area / T, beats_t is not None, beats_t)
+
+
 def primal_dual_integral(primal: Sequence[Step], dual: Sequence[Step], T: float) -> float:
     """Normalised primal-dual integral in [0, 1]: Berthold's gap between the held incumbent and the held dual bound,
     integrated over [0, T]. Primal and dual changes at the same instant are applied together (optopt fix)."""
@@ -314,6 +367,7 @@ def summarize(steps: Sequence[Step], ref: float | None, sense: int, T: float,
         "beats_ref": BEATS_REF in P.flags,
         "beats_ref_t": math.nan if P.beats_ref_t is None else P.beats_ref_t,
         "pt_mf": mipfeas_integral(steps, ref, sense, T),
+        "pt_gams": gams_integral(steps, ref, sense, T).value,            # D-020, with T = the run's budget
         "t_first": first.t, "t_first_event": first.event,
         "final_gap": gap_at(held, ref, sense, T),
         "best_obj": math.nan if best is None else best,

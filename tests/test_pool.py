@@ -27,7 +27,7 @@ for a in ("--instance", "--seed", "--budget", "--run-dir", "--mailbox", "--sol-o
           "--role-name", "--config", "--cpu-threads", "--inject-band", "--inject-k", "--emphasis", "--run-id",
           "--gpu-mem-gb"):
     ap.add_argument(a)
-for f in ("--recv", "--send", "--inert", "--no-barrier"):
+for f in ("--recv", "--send", "--inert", "--no-barrier", "--mip-gap-zero"):
     ap.add_argument(f, action="store_true")
 a = ap.parse_args()
 role = a.role_name or os.environ.get("ITREA_ROLE", "solver")
@@ -311,6 +311,62 @@ def test_screen_layout_rejects_partner_arms(env):
     assert p.run() == 2
 
 
+def _full(tmp_path, fake, rmm=36.0, host=24.0, **kw) -> pool.PoolOptions:
+    o = popts(tmp_path, fake, layout="full", **kw)
+    o.pair_opts.cuopt_mem_gb, o.pair_opts.gpu_mem_gb = host, rmm
+    return o
+
+
+def test_full_layout_runs_a6m_on_every_core(env, monkeypatch):
+    """--layout full (D-020): one lane with all 20 cores; A6m pinned to all of them with 24 threads and zero gaps, the
+    memory record at D-020's 81 GB; the serving check is part of the layout (stubbed here)."""
+    tmp_path, fake, insts = env
+    seen = []
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: seen.append(1))
+    p = pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake))
+    assert p.run() == 0 and p.counts["completed"] == 1 and seen        # preflight and the per-run gate
+    (r,) = _records(tmp_path)
+    assert r["lane"]["name"] == "full" and r["lane"]["whole_box"] and "runner_cores" in r
+    (pr,) = r["processes"]
+    assert pr["cores"] == list(range(20)) and pr["memory_max_gb"] == 24.0 and pr["gpu_limit_gb"] == 36.0
+    assert "--mip-gap-zero" in pr["cmd"] and pr["cmd"][pr["cmd"].index("--cpu-threads") + 1] == "24"
+    assert r["memory_budget"]["need_gb"] == 81.0
+
+
+def test_full_layout_refusals(env, monkeypatch):
+    tmp_path, fake, insts = env
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert pool.Pool(_jobs(insts[:1], ["A6"]), _full(tmp_path, fake)).run() == 2          # another arm on the box
+    o = popts(tmp_path, fake)
+    o.pair_opts.cuopt_mem_gb, o.pair_opts.gpu_mem_gb = 24.0, 36.0
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), o).run() == 2                             # A6m on the pair layout
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, allow_serving=True)).run() == 2
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, rmm=12.0)).run() == 2   # D-020's memory only
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake, host=12.0)).run() == 2
+    with pytest.raises(pool.PoolError, match="only under --layout full"):
+        pool.check_layout(_jobs(insts[:1], ["A6m"]), "pair")
+    with pytest.raises(pool.PoolError, match="runs only A6m"):
+        pool.check_layout(_jobs(insts[:1], ["A6m", "A6"]), "full")
+    with pytest.raises(pool.PoolError, match="cpu-lanes"):
+        pool.Pool([], _full(tmp_path, fake, cpu_lanes=1))._lanes()
+
+    def up(*a, **k):
+        raise gates.GateError("ornith-vllm is active")
+    monkeypatch.setattr(gates, "check_serving_stopped", up)                              # servers up: refused
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake)).run() == 2
+    assert not (tmp_path / "traces" / "raw").exists()
+
+
+def test_full_layout_dry_run_prints_the_need(env, capsys, monkeypatch):
+    tmp_path, fake, insts = env
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert pool.Pool(_jobs(insts, ["A6m"]), _full(tmp_path, fake, dry_run=True)).run() == 0
+    out = capsys.readouterr().out
+    assert "2 blocks, 2 runs" in out and "full(x925=(5, 6, 7, 8, 9, 15, 16, 17, 18, 19)" in out
+    assert "need up to 81.0 GB" in out and "preflight: passes" in out
+    assert not (tmp_path / "traces").exists()
+
+
 def _fake_run_pair(tmp_path, script):
     """A stand-in for pair.run_pair: writes a run directory and returns a record whose status the script chooses."""
     calls = []
@@ -387,3 +443,94 @@ def test_dry_run_prints_the_plan(env, capsys):
     out = capsys.readouterr().out
     assert "2 blocks, 6 runs" in out and "g0" in out
     assert not (tmp_path / "traces").exists()
+
+
+def test_full_layout_refuses_redis_and_a_measured_peak(env, monkeypatch):
+    """Under --layout full: no Redis mailbox (its container's core 0 is inside the lane) and no --cuopt-gpu-peak-gb
+    (it would admit A6m below D-020's 81 GB) — refused before anything runs (review 2026-10-11)."""
+    tmp_path, fake, insts = env
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    o = _full(tmp_path, fake)
+    o.pair_opts.mailbox = "redis"
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), o).run() == 2
+    o = _full(tmp_path, fake)
+    o.pair_opts.cuopt_gpu_peak_gb = 20.0
+    assert pool.Pool(_jobs(insts[:1], ["A6m"]), o).run() == 2
+    with pytest.raises(gates.GateError, match="redis"):
+        pool.check_full_options(pair.PairOptions(mailbox="redis"))
+    with pytest.raises(gates.GateError, match="peak"):
+        pool.check_full_options(pair.PairOptions(cuopt_gpu_peak_gb=20.0))
+    with pytest.raises(pair.RunError, match="Redis"):
+        pair.job_budget(_jobs(insts[:1], ["A6m"])[0], pair.PairOptions(lane=pair.FULL_LANE, mailbox="redis"))
+    assert not (tmp_path / "traces" / "raw").exists()
+
+
+def test_thermal_requeue_is_capped(env, monkeypatch):
+    """A block voided by the thermal pause is rerun first, but only --max-thermal-requeues times (default 1): a further
+    thermal void skips it — recorded with its run ids — and the pool moves on (review 2026-10-11; there was no cap)."""
+    tmp_path, fake, insts = env
+    jobs = _jobs(insts, ["A0"])
+    holder, first = {}, {}
+
+    def script(i, job):
+        first.setdefault("block", job["block"])
+        if job["block"] == first["block"]:      # this block overheats the box every time
+            return "void", "abort", lambda: holder["pool"]._on_breach("thermal", "thermal: 93 °C >= 92 °C")
+        return "completed", None, None
+    run_pair, calls = _fake_run_pair(tmp_path, script)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    p = pool.Pool(jobs, popts(tmp_path, fake))
+    holder["pool"] = p
+    assert p.run() == 0 and p.halt_reason is None
+    assert [c[0] for c in calls].count(first["block"]) == 2                     # two attempts, then skipped
+    assert p.counts["blocks_skipped_thermal"] == 1 and p.counts["completed"] == 1 and p.counts["blocks_void"] == 2
+    (sk,) = json.loads((tmp_path / "logs" / "pool-status.json").read_text())["skipped"]
+    assert sk["block"] == first["block"] and sk["reason"] == "thermal" and sk["thermal_voids"] == 2
+    assert len(sk["run_ids"]) == 1 and "__A0__" in sk["run_ids"][0]
+    first.clear()
+    import shutil
+    shutil.rmtree(tmp_path / "traces")
+    run_pair, calls = _fake_run_pair(tmp_path, script)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    p = pool.Pool(jobs, popts(tmp_path, fake, max_thermal_requeues=0))          # no rerun at all
+    holder["pool"] = p
+    assert p.run() == 0 and [c[0] for c in calls].count(first["block"]) == 1
+    assert p.counts["blocks_skipped_thermal"] == 1
+
+
+def test_a_first_run_too_late_after_its_gate_wait_does_not_start(env, monkeypatch):
+    """A gate wait (here the fan-governor's rest flag, 40 min on a fake clock) can push a run past the deadline: the
+    check just before it starts keeps it from starting, and since it is its block's first run the block counts as
+    never opened and the pool stops as at a deadline (review 2026-10-11)."""
+    tmp_path, fake, insts = env
+    base = datetime.now().astimezone()
+    clock = [base]
+    monkeypatch.setattr(pool.Pool, "_now", lambda self: clock[0])
+
+    def rest_40_min():
+        clock[0] += timedelta(minutes=40)
+        return False
+    monkeypatch.setattr(gates, "rest_due", rest_40_min)
+    p = pool.Pool(_jobs(insts, ["A0"]), popts(tmp_path, fake, deadline=base + timedelta(minutes=30)))
+    assert p.run() == 0 and p.opened == 0 and "deadline" in p.stopping and p.counts["completed"] == 0
+    assert all(b.state == "unstarted" for b in p.blocks) and not (tmp_path / "traces" / "raw").exists()
+    assert json.loads((tmp_path / "logs" / "pool-status.json").read_text())["state"] == "stopped"
+
+
+def test_a_partly_run_block_keeps_running_past_a_late_check(env, monkeypatch):
+    """The same check on the second run of an open block does not split the block: it runs (a stop only prevents new
+    blocks), and the next block is not opened."""
+    tmp_path, fake, insts = env
+    base = datetime.now().astimezone()
+    clock, n = [base], [0]
+    monkeypatch.setattr(pool.Pool, "_now", lambda self: clock[0])
+
+    def rest():
+        n[0] += 1
+        if n[0] == 2:                       # the block's second run waits 40 min at its gate
+            clock[0] += timedelta(minutes=40)
+        return False
+    monkeypatch.setattr(gates, "rest_due", rest)
+    p = pool.Pool(_jobs(insts, ["A0", "A1"]), popts(tmp_path, fake, deadline=base + timedelta(minutes=30)))
+    assert p.run() == 0 and p.opened == 1 and p.counts["completed"] == 2 and "deadline" in p.stopping
+    assert len(_records(tmp_path)) == 2 and {r["status"] for r in _records(tmp_path)} == {"completed"}
