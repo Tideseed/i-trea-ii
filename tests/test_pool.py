@@ -534,3 +534,125 @@ def test_a_partly_run_block_keeps_running_past_a_late_check(env, monkeypatch):
     p = pool.Pool(_jobs(insts, ["A0", "A1"]), popts(tmp_path, fake, deadline=base + timedelta(minutes=30)))
     assert p.run() == 0 and p.opened == 1 and p.counts["completed"] == 2 and "deadline" in p.stopping
     assert len(_records(tmp_path)) == 2 and {r["status"] for r in _records(tmp_path)} == {"completed"}
+
+
+# ================================================================================================ D-021 (ITX-1)
+def _state(cap=0, state="auto", age=1.0):
+    return dict(gates.parse_fan_state(f"2026-10-11T13:30:19+02:00 state={state} for=60s zone=50 gpu=5W rest=no "
+                                      f"cap={cap}"), raw=f"state={state} cap={cap}", age_s=age)
+
+
+def test_governor_gate_holds_gpu_runs_only(env, monkeypatch):
+    """D-021 R24: a GPU run starts only with the fan governor alive (state < 30 s old) and its cap off; a CPU-only run
+    does not wait for it; a governor that stays gone halts the run set; --no-governor skips the check."""
+    tmp_path, fake, insts = env
+    states = iter([_state(cap=1), _state(cap=1), _state()] + [_state()] * 50)
+    monkeypatch.setattr(gates, "fan_state", lambda *a, **k: next(states))
+    p = pool.Pool(_jobs(insts[:1], ["A0", "A6F"]), popts(tmp_path, fake, thermal_poll_s=0.01))
+    assert p.run() == 0 and p.counts["completed"] == 2
+    monkeypatch.setattr(gates, "fan_state", lambda *a, **k: _state(age=45.0))          # stale: the governor is gone
+    p = pool.Pool(_jobs(insts[1:], ["A6F"]), popts(tmp_path, fake, thermal_poll_s=0.01, governor_timeout_s=0.05))
+    assert p.run() == 3 and "not running" in p.halt_reason
+    p = pool.Pool(_jobs(insts[1:], ["A0"]), popts(tmp_path, fake, governor_timeout_s=0.05))
+    assert p.run() == 0                                                               # CPU-only: no governor check
+    p = pool.Pool(_jobs(insts[1:], ["A6F"]), popts(tmp_path, fake, governor=False))
+    assert p.run() == 0 and p.counts["completed"] == 1
+
+
+@pytest.mark.parametrize("cause", ["gpu_cap", "compiled_on_clock", "cuopt_memory"])
+def test_d021_voids_requeue_once_then_skip(env, monkeypatch, cause):
+    """A block voided by gpu_cap / compiled_on_clock / cuopt_memory is rerun once (first, whole), then skipped and
+    listed; the reruns are counted by cause; after a cap void the rerun waits for the fan on AUTO."""
+    tmp_path, fake, insts = env
+    jobs = _jobs(insts, ["A6F", "A9"])
+    first, auto_waits = {}, []
+
+    def script(i, job):
+        first.setdefault("block", job["block"])
+        if job["block"] == first["block"] and job["arm"] == "A6F":
+            return "void", cause, None
+        return "completed", None, None
+    run_pair, calls = _fake_run_pair(tmp_path, script)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    real_block = gates.governor_block
+    monkeypatch.setattr(gates, "governor_block", lambda st, max_age_s=30.0, need_auto=False:
+                        (auto_waits.append(need_auto), real_block(st, max_age_s, need_auto))[1])
+    p = pool.Pool(jobs, popts(tmp_path, fake))
+    assert p.run() == 0 and p.halt_reason is None
+    assert [c[0] for c in calls if c[1] == "A6F"].count(first["block"]) == 2           # two attempts, then skipped
+    assert p.counts["requeues"] == {cause: 1} and p.counts["blocks_skipped_cause"] == {cause: 1}
+    (sk,) = json.loads((tmp_path / "logs" / "pool-status.json").read_text())["skipped"]
+    assert sk["reason"] == cause and sk["voids"] == 2 and len(sk["run_ids"]) == 2
+    assert any(auto_waits) == (cause == "gpu_cap")
+
+
+def test_thermal_watch_void_requeues_as_thermal(env, monkeypatch):
+    tmp_path, fake, insts = env
+    run_pair, calls = _fake_run_pair(tmp_path, lambda i, j: ("void", "thermal_watch", None) if i == 0
+                                     else ("completed", None, None))
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    p = pool.Pool(_jobs(insts, ["A6F"]), popts(tmp_path, fake))
+    assert p.run() == 0 and p.counts["requeues"] == {"thermal": 1} and p.counts["completed"] == 2
+    assert calls[1][0] == calls[0][0]                                                 # rerun first
+
+
+def test_pause_c_bounds_and_the_watchdog(env, monkeypatch):
+    """--pause-c (D-021 M2: 90 for the soak) is handed to the watchdog; never above 92 °C, never at or below 80."""
+    tmp_path, fake, insts = env
+    seen = {}
+    real = gates.Watchdog
+
+    def wd(*a, **k):
+        seen.update(k)
+        return real(*a, **k)
+    monkeypatch.setattr(gates, "Watchdog", wd)
+    assert pool.Pool(_jobs(insts[:1], ["A0"]), popts(tmp_path, fake, watchdog=True, pause_c=90.0)).run() == 0
+    assert seen["pause_c"] == 90.0
+    for bad in (93.0, 80.0):
+        assert pool.Pool(_jobs(insts[1:], ["A0"]), popts(tmp_path, fake, pause_c=bad)).run() == 2
+    assert pool.main([str(tmp_path / "none.jsonl"), "--pause-c", "90"]) == 2            # parses; the file is missing
+
+
+def test_explicit_positions_fix_a_blocks_order():
+    """A block whose every job carries `position` keeps that order (M2's AB / BA); partial or invalid positions are
+    refused; blocks without positions keep the Williams order."""
+    jobs = _jobs(["/x/a.mps", "/x/b.mps"], ["A9", "A6F"])
+    for j in jobs:
+        j["position"] = (0 if j["arm"] == "A9" else 1) if j["name"] == "a" else (1 if j["arm"] == "A9" else 0)
+    got = {b.name: [r.label for r in b.runs] for b in pool.make_blocks(jobs)}
+    assert got == {"a": ["A9", "A6F"], "b": ["A6F", "A9"]}
+    jobs[0].pop("position")
+    with pytest.raises(pool.PoolError, match="positions"):
+        pool.make_blocks(jobs)
+    jobs[0]["position"] = 5
+    with pytest.raises(pool.PoolError, match="permutation"):
+        pool.make_blocks(jobs)
+    plain = _jobs(["/x/a.mps"], ["A9", "A6F"])
+    (b,) = pool.make_blocks(plain)
+    assert [r.label for r in b.runs] == pool.williams_order(["A9", "A6F"], "a", 1)
+
+
+def test_harness_refusals_and_dry_run_arithmetic(env, capsys):
+    """A bad harness is refused before anything runs; a harness on a test or screening job is refused (a prereg-v2
+    item); --dry-run prints D-003's arithmetic per treatment, the thermal lines and the governor's state."""
+    tmp_path, fake, insts = env
+    bad = _jobs(insts[:1], ["A6F"])
+    bad[0]["harness"] = "nope"
+    with pytest.raises(pool.PoolError, match="unknown harness"):
+        pool.make_blocks(bad)
+    test = _jobs(insts[:1], ["A6F"], split="test")
+    test[0]["harness"] = "ext"
+    with pytest.raises(gates.GateError, match="prereg-v2"):
+        pool.check_registered_harness(test, pair.PairOptions())
+    jobs = _jobs(insts[:1], ["A6F", "A9"])
+    for j in jobs:
+        j["harness"] = "ext"
+        j["config"] = "configs/itrea2-dev-rc-3way.yaml" if j["arm"] == "A9" else None
+    o = popts(tmp_path, fake, dry_run=True)
+    o.pair_opts.solver_mem_gb, o.pair_opts.ea_mem_gb, o.pair_opts.cuopt_mem_gb = 9.0, 6.0, 12.0
+    assert pool.Pool(jobs, o).run() == 0
+    out = capsys.readouterr().out
+    assert "memory per run: A9 on g0 (harness \"ext\"): host [solver 9 + ea 6 + cuopt 24] + GPU [ea 12 + cuopt 24] + " \
+           "2 CUDA x 1 + Redis 0 + reserve 20 = 97.0 GB" in out
+    assert "memory per run: A6F on g0 (harness \"ext\"): host [cuopt 24] + GPU [cuopt 24] + 1 CUDA x 1" in out
+    assert "pause / void at 92" in out and "fan governor: (test)" in out
