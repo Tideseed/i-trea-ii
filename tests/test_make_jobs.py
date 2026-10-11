@@ -248,10 +248,16 @@ def test_itx_writers(tmp_path):
         {j["seed"] for j in sets["r13"]} == {0, 1}
     assert all(j["config"] == mj.ITX_A9_CONFIG for v in sets.values() for j in v if j["arm"] == "A9")
     assert all(j["split"] == "dev" for v in sets.values() for j in v)
-    assert all(pair.resolve_harness(j["harness"])["cuopt_rmm_gb"] == 40.0 for j in sets["m3"])
+    assert all(pair.resolve_harness(j["harness"])["cuopt_rmm_gb"] == 40.0 and
+               pair.resolve_harness(j["harness"])["cuopt_memory_void"] is False for j in sets["m3"])
     env = [j for j in sets["m1"] if j.get("variant") == "m1env"]
     assert all(pair.resolve_harness(j["harness"])["cuopt_env_unset"] is False for j in env)
-    assert all("harness" not in j for j in sets["r13"] if j["variant"] == "r13")
+    # R13's control: the ext harness with R13 and R14 off, so only they differ from A9@r13x (same caps, cache, voids)
+    ctl = [pair.resolve_harness(j["harness"]) for j in sets["r13"] if j["variant"] == "r13"]
+    ext = pair.resolve_harness("ext")
+    assert len(ctl) == 34 and all({k for k in ext if c[k] != ext[k]} == {"cuopt_gap_zero", "cuopt_env_unset"}
+                                  for c in ctl)
+    assert all(j.get("harness") is not None for v in sets.values() for j in v)
     m2 = {b.name: [r.label for r in b.runs] for b in make_blocks(sets["m2"])}
     assert m2 == {"comp21-2idx": ["A9@m2", "A6F@m2"], "neos-4763324-toguru": ["A6F@m2", "A9@m2"]}
     assert len({j["name"] for j in sets["m5"]}) == 15 and "ca__Scenario400_reserves_1" not in \

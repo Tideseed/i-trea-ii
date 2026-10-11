@@ -47,14 +47,15 @@ replaced this calibration by M4's (A6F at A9's footprint); the A6m file is no lo
 
 `itx-*` write D-021's (ITX-1) phase-1 job files, all split `dev`, seed 0 unless stated, the A9 jobs on
 `configs/itrea2-dev-rc-3way.yaml` (the A9 development default), every GPU arm on the GPU lane g0 (F), a job-level
-`harness` on every job but R13's control: `itx-m1` (`jobs/itx-m1.jsonl`, set itx-m1: fhnw-binpack4-48, glass4,
+`harness` on every job: `itx-m1` (`jobs/itx-m1.jsonl`, set itx-m1: fhnw-binpack4-48, glass4,
 radiationm18-12-05 x {A9@m1, A6F@m1, A2F@m1} under the ext harness + A6F@m1env with the thread variables kept, 120 s;
 12 runs), `itx-m2` (itx-m2: comp21-2idx, neos-4763324-toguru x {A9@m2, A6F@m2} ext, 600 s, AB / BA by `position`; 4),
-`itx-m3` (itx-m3: the 8 instances of R29 x A6F@m3 at cuOpt RMM 40 / host 40 GB, 600 s; 8), `itx-m4` (set mipfeas:
+`itx-m3` (itx-m3: the 8 instances of R29 x A6F@m3 at cuOpt RMM 40 / host 40 GB, a cap hit recorded and not voided,
+600 s; 8), `itx-m4` (set mipfeas:
 D-020's 30 x A6F ext — the plain label, for `itrea mipfeas-report --arm A6F` —, 600 s, strata "0"–"5"; 30), `itx-m5`
 (itx-m5: the 15 development / class-probe instances among MIPfeas's 233 x A9@m5 ext, 600 s; 15) and `itx-r13` (itx-r13:
-the 17 x seeds 0–1 x {A9@r13 without a harness, A9@r13x and A6F@r13x under ext}, 120 s, one block per instance x
-seed; 102). Each set's own variant keeps every run id distinct from every other set's (run ids carry no set).
+the 17 x seeds 0–1 x {A9@r13 = ext with R13 and R14 off, A9@r13x and A6F@r13x under ext}, 120 s, one block per
+instance x seed; 102). Each set's own variant keeps every run id distinct from every other set's (run ids carry no set).
 """
 from __future__ import annotations
 
@@ -107,7 +108,9 @@ ITX_SEED = 0
 ITX_A9_CONFIG = "configs/itrea2-dev-rc-3way.yaml"   # the A9 development default (D-015 / D-018: back-off not adopted)
 ITX_EXT = "ext"                                      # pair.HARNESS_PRESETS: gaps 0, env unset, RMM / host 24, CUDA cache
 ITX_ENV_KEPT = {"preset": "ext", "cuopt_env_unset": False}     # M1's env-only contrast (R14)
-ITX_M3_HARNESS = {"preset": "ext", "cuopt_rmm_gb": 40.0, "cuopt_host_gb": 40.0}   # uncensored memory probe (R29)
+ITX_M3_HARNESS = {"preset": "ext", "cuopt_rmm_gb": 40.0, "cuopt_host_gb": 40.0,  # uncensored memory probe (R29):
+                  "cuopt_memory_void": False}                                     # a cap hit is recorded, not voided
+ITX_R13_CONTROL = {"preset": "ext", "cuopt_gap_zero": False, "cuopt_env_unset": False}   # R13 + R14 off, R15 / R29 on
 # M1: fast development instances with continuous variables, one of them an easy one cuOpt proves quickly
 ITX_M1_INSTANCES = ("fhnw-binpack4-48", "glass4", "radiationm18-12-05")
 ITX_M2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru")
@@ -585,7 +588,8 @@ def itx_m2(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m2", ta
 
 def itx_m3(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m3", data: Path | None = None) -> list[dict]:
     """M3 memory probe (D-021 R29): the 8 instances whose RSS exceeded 14.4 GiB in GAMS's run x A6F alone at cuOpt RMM
-    40 / host 40 GB (memory gate 101 GB), 600 s, seed 0, one block each (8 runs)."""
+    40 / host 40 GB (memory gate 101 GB), 600 s, seed 0, one block each (8 runs). `cuopt_memory_void: false`: a cap hit
+    is the measurement — recorded in run.json (`void_info.cuopt_memory`), the run stays failed / completed."""
     where = _miplib_paths(ITX_M3_INSTANCES, data)
     return _sorted([_itx(where[n], n, set_, "A6F", seed, budget, "m3", ITX_M3_HARNESS) for n in ITX_M3_INSTANCES])
 
@@ -614,14 +618,16 @@ def itx_m5(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m5", ta
 
 def itx_r13(budget: float = 120.0, seeds=(0, 1), set_: str = "itx-r13", tables=INSTANCE_TABLES) -> list[dict]:
     """The A9 + R13 + R14 development test (D-021 R14): the 17 development + class-probe instances x seeds 0–1 x {A9
-    (`A9@r13`, the development default, no harness), A9 under the ext harness (`A9@r13x`), A6F under it
-    (`A6F@r13x`)}, 120 s, one block per instance x seed (102 runs). Its decision record fixes the rules first."""
+    (`A9@r13`: the development default under the ext harness with R13 and R14 switched off — cuOpt's default gaps and
+    its thread variables kept — so it shares R29's caps, R15's CUDA cache and the void rules with the treatment), A9
+    under the ext harness (`A9@r13x`), A6F under it (`A6F@r13x`)}, 120 s, one block per instance x seed (102 runs):
+    only R13 + R14 differ between the two A9 arms. Its decision record fixes the rules first."""
     names = development_names(tables)
     where = instance_paths(names, tables)
     out = []
     for n in names:
         for seed in seeds:
-            out.append(_itx(where[n], n, set_, "A9", seed, budget, "r13", None))
+            out.append(_itx(where[n], n, set_, "A9", seed, budget, "r13", ITX_R13_CONTROL))
             out.append(_itx(where[n], n, set_, "A9", seed, budget, "r13x", ITX_EXT))
             out.append(_itx(where[n], n, set_, "A6F", seed, budget, "r13x", ITX_EXT))
     return _sorted(out)
@@ -689,7 +695,8 @@ def main(argv=None) -> int:
                 "m3": "D-021 M3 memory probe: 8 instances x A6F at cuOpt RMM 40 / host 40, 600 s (8 runs)",
                 "m4": "D-021 M4 calibration: D-020's 30 x A6F ext, 600 s, set mipfeas (30 runs)",
                 "m5": "D-021 M5 A9 preview: the 15 dev / class-probe instances in the 233 x A9 ext, 600 s (15 runs)",
-                "r13": "D-021 R13 + R14 test: 17 x seeds 0-1 x {A9, A9 ext, A6F ext}, 120 s (102 runs)"}
+                "r13": "D-021 R13 + R14 test: 17 x seeds 0-1 x {A9 ext without R13/R14, A9 ext, A6F ext}, 120 s "
+                       "(102 runs)"}
     itx = {k: sub.add_parser(f"itx-{k}", help=h) for k, h in itx_help.items()}
     for k, p in itx.items():
         p.add_argument("--out", type=Path, default=paths.ROOT / ITX_OUT[k])
