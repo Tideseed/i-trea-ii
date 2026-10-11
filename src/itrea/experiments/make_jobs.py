@@ -27,6 +27,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs smoke --instance /tmp/toy.mps --arms A0,A1 --out /tmp/smoke.jsonl
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
     python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
+    python -m itrea.experiments.make_jobs mipfeas-cal [--out jobs/mipfeas-cal-26.08.jsonl]
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -34,6 +35,13 @@ and glass4 x A9@bo0, and sing44 x A2 (SCIP || cuOpt, zero EA duty: rule (b)'s sa
 18 runs, one block per instance (the pool interleaves a block's arms in Williams order). The A9 variants run the
 configuration files configs/itrea2-dev-rc-3way-<variant>.yaml (the runner adds exchange.from_cuopt); A6 and A2 run no
 EA (config null). Instance paths come from datasets/dev_set.csv and datasets/classprobe_set.csv.
+
+`mipfeas-cal` writes D-020's calibration of the MIPfeas harness against GAMS's published cuOpt 26.08 GB10 row: the 30
+sampled MIPLIB 2017 instances (`itrea.analysis.mipfeas.STRATA`, in D-020's order) x arm A6m (cuOpt as GAMS ran it),
+seed 0, 600 s, set `mipfeas`, one block per instance, stratum = D-020's stratum index "0"–"5", instance paths
+data/miplib/inst/<name>.mps.gz (each checked on disk). Split `dev`: development (D-010), never `test` — so no frozen
+configuration is asked for and the pool's --gpu-mem-gb is allowed (D-020: --gpu-mem-gb 36 --cuopt-mem-gb 24, under
+--layout full); 29 of the 30 are screening candidates, so the pool needs `prereg-v1` as an ancestor of HEAD.
 """
 from __future__ import annotations
 
@@ -76,6 +84,9 @@ BACKOFF_BASE = "configs/itrea2-dev-rc-3way"
 BACKOFF1_SET, BACKOFF1_BUDGET = "backoff1", 120.0
 BACKOFF1_VARIANTS = ("bo1s", "bo1")        # control bo1s = bo1's values in shadow mode (M6 reads its would-be timeline)
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
+# D-020: the MIPfeas harness's calibration (arm A6m on D-020's 30-instance sample)
+MIPFEAS_SET, MIPFEAS_ARM, MIPFEAS_SEED, MIPFEAS_BUDGET = "mipfeas", "A6m", 0, 600.0
+MIPFEAS_CAL_OUT = "jobs/mipfeas-cal-26.08.jsonl"
 OPTIONAL = ("emphasis", "ablation", "variant")
 
 
@@ -459,6 +470,20 @@ def backoff_stage1(seeds=(0, 1), budget: float = BACKOFF1_BUDGET, set_: str = BA
     return _sorted(out)
 
 
+def mipfeas_calibration(budget: float = MIPFEAS_BUDGET, seed: int = MIPFEAS_SEED, set_: str = MIPFEAS_SET,
+                        data: Path | None = None) -> list[dict]:
+    """D-020's calibration jobs (module docstring), in D-020's order. The stratum is written as a string: the pool and
+    build_runs read a falsy stratum (0) as none. A missing instance file is an error."""
+    from itrea.analysis.mipfeas import STRATA
+    inst = Path(data or paths.DATA) / "miplib" / "inst"
+    missing = [n for s in STRATA for n in s if not (inst / f"{n}.mps.gz").is_file()]
+    if missing:
+        raise JobError(f"instance files missing under {inst}: {missing}")
+    return [job(_rel(inst / f"{n}.mps.gz"), set_, MIPFEAS_ARM, seed, budget, name=n, config=None, stratum=str(k),
+                split="dev", block=f"{n}__s{int(seed)}__{set_}")
+            for k, s in enumerate(STRATA) for n in s]
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -511,6 +536,11 @@ def main(argv=None) -> int:
     b1.add_argument("--seeds", default="0,1", help="comma-separated (one window per seed: 0, then 1)")
     for p in (s1, s2, e1, e4, cf, sm, b0, b1):
         p.add_argument("--out", required=True, type=Path)
+    mf = sub.add_parser("mipfeas-cal", help="D-020: the MIPfeas calibration, A6m on 30 sampled MIPLIB instances (30 runs)")
+    mf.add_argument("--budget", type=float, default=MIPFEAS_BUDGET)
+    mf.add_argument("--seed", type=int, default=MIPFEAS_SEED)
+    mf.add_argument("--data", type=Path, default=paths.DATA)
+    mf.add_argument("--out", type=Path, default=paths.ROOT / MIPFEAS_CAL_OUT)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -533,6 +563,8 @@ def main(argv=None) -> int:
             jobs = backoff_stage0(a.budget, a.seed)
         elif a.cmd == "backoff1":
             jobs = backoff_stage1(tuple(int(x) for x in a.seeds.split(",") if x), a.budget)
+        elif a.cmd == "mipfeas-cal":
+            jobs = mipfeas_calibration(a.budget, a.seed, data=a.data)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:

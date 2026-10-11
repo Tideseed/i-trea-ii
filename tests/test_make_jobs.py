@@ -165,3 +165,41 @@ def test_backoff_stage1_jobs():
         blocks.setdefault(j["block"], set()).add((j["arm"], j.get("variant")))
     assert len(blocks) == 28 and all(len(v) == 3 for v in blocks.values())
     assert len(MJ.backoff_stage1(seeds=(0,))) == 42
+
+
+def _mipfeas_data(root):
+    from itrea.analysis.mipfeas import SAMPLE
+    inst = root / "miplib" / "inst"
+    inst.mkdir(parents=True)
+    for n in SAMPLE:
+        (inst / f"{n}.mps.gz").write_bytes(b"")
+    return root
+
+
+def test_mipfeas_calibration_jobs(tmp_path):
+    """D-020's calibration: the 30 sampled instances in D-020's order x A6m, seed 0, 600 s, one block each, stratum
+    "0"–"5" (a string: 0 would read as no stratum), split dev (development, never test)."""
+    from itrea.analysis.mipfeas import SAMPLE, STRATA
+    jobs = mj.mipfeas_calibration(data=_mipfeas_data(tmp_path / "data"))
+    assert [j["name"] for j in jobs] == list(SAMPLE) and len(jobs) == 30
+    assert all(j["arm"] == "A6m" and j["seed"] == 0 and j["budget"] == 600.0 and j["set"] == "mipfeas" and
+               j["split"] == "dev" and j["config"] is None and j["instance"].endswith(f"inst/{j['name']}.mps.gz")
+               for j in jobs)
+    assert [j["stratum"] for j in jobs] == [str(k) for k, s in enumerate(STRATA) for _ in s]
+    blocks = make_blocks(jobs)
+    assert len(blocks) == 30 and {b.stratum for b in blocks} == {"0", "1", "2", "3", "4", "5"}
+    (tmp_path / "data" / "miplib" / "inst" / "sing44.mps.gz").unlink()
+    with pytest.raises(mj.JobError, match="sing44"):
+        mj.mipfeas_calibration(data=tmp_path / "data")
+
+
+def test_mipfeas_job_file_is_the_writers_output(tmp_path):
+    """jobs/mipfeas-cal-26.08.jsonl is exactly what `make-jobs mipfeas-cal` writes (skipped without the instances)."""
+    from itrea import paths
+    from itrea.analysis.mipfeas import SAMPLE
+    if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in SAMPLE):
+        pytest.skip("the MIPLIB 2017 instances are not under data/")
+    out = tmp_path / "cal.jsonl"
+    assert mj.main(["mipfeas-cal", "--out", str(out)]) == 0
+    assert out.read_bytes() == (paths.ROOT / mj.MIPFEAS_CAL_OUT).read_bytes()
+    assert all(json.loads(line)["instance"].startswith("data/miplib/inst/") for line in out.read_text().splitlines())
