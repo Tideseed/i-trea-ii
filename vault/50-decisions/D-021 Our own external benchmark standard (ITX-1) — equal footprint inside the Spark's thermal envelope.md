@@ -393,3 +393,23 @@ the −0.06 s selection named; R13 + R14 bundled as a stated deviation with an e
 
   **R23 holds on every run → F (X925 5–6, A725 1–3, GPU) is accepted for v1** (p95 ≤ 85 °C, no sample ≥ 90 °C, no cap,
   SM ≥ 2,350 MHz). The whole box never exceeded 76 °C in 600-s runs at F, 16 °C below the void line.
+
+## M3 result (2026-10-11 16:34–18:13) — the fixed "does not fit F" list: eilA101-2, nw04, supportcase6
+Pool 20261011-163415-1522373 (A6F, cuOpt RMM 40 / host 40 GB, `cuopt_memory_void: false`): 6 completed, 2 failed — both
+recorded as cap hits, not voided (scope Result oom-kill, confirmed):
+
+| instance | status | cuOpt host maxrss | RMM peak | GAMS RSS | on the list? |
+|---|---|---|---|---|---|
+| eilA101-2 | killed at the 40-GB host cap, 124 s | 40.2 GiB | — | 42.8 GiB | yes (cap hit) |
+| nw04 | killed at the 40-GB host cap, 141 s | 40.3 GiB | — | 46.9 GiB | yes (cap hit) |
+| supportcase6 | completed (optimal, 336 s) | 22.6 GiB | 17.4 GB | 27.9 GiB | yes (> 0.8 × 24 = 19.2 GiB) |
+| square47 | completed (600 s) | 17.9 GiB | 14.9 GB | 20.8 GiB | no |
+| irp | completed (optimal, 70 s) | 17.6 GiB | 8.3 GB | 17.6 GiB | no |
+| snp-02-004-104 | completed | 8.5 GiB | 6.6 GB | 22.6 GiB | no |
+| proteindesign121hz512p9 | completed | 10.0 GiB | 7.0 GB | 15.3 GiB | no |
+| proteindesign122trx11p8 | completed | 10.0 GiB | 6.7 GB | 15.8 GiB | no |
+
+(The 24-GB caps are GiB: MemoryMax 24576M, RMM 24 × 2³⁰ bytes.) The list is fixed now, before any v1 run: **eilA101-2
+(in H_cu: GAMS cuOpt P 0.230), nw04 and supportcase6 (both in E)** are excluded from both arms of the external set.
+Decision sets: H_cu-unseen 65 → **64**, the unseen set 218 → **215**. The M0 shape-only plan of A9 on the rest is still
+owed.
