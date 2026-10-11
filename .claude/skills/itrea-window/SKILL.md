@@ -30,7 +30,13 @@ Berk usually does not coordinate the sessions — the lease does.
    `--until` covers the whole run set plus the restore (restore time + 20 min); a block is never split across windows.
    `--mem` = the memory gate's requirement, which the pool's `--dry-run` prints (`memory: … need up to N GB`): 48 GB
    for an A3 pool (host caps 15 + GPU caps 12 + 1 CUDA × 1 + reserve 20), 73 GB for an A9 pool (27 + 24 + 2 CUDA × 1
-   + 20), as claimed on 2026-10-08/09.
+   + 20), as claimed on 2026-10-08/09. **A6m pool (D-020, the MIPfeas calibration, `jobs/mipfeas-cal-26.08.jsonl`):
+   `--mem 81`**, both servers in `--stops`, and the pool run as
+   `python -m itrea.experiments.pool jobs/mipfeas-cal-26.08.jsonl --layout full --cuopt-mem-gb 24 --gpu-mem-gb 36`
+   (host cap 24 + RMM 36 + 1 CUDA × 1 + reserve 20 = 81 GB with the file mailbox; `--cuopt-gpu-peak-gb` would lower
+   it). `--layout full` is one lane with all 20 cores, A6m only; it refuses `--allow-serving` and checks that both
+   servers are stopped before every run, and A6m refuses other memory values (the RMM limit is part of its run id).
+   Expected ≈ 4.1 h of solving + ≈ 1 min per run + the governor's rests: one daytime window.
 4. Confirmatory runs (and the screening pass) need **both LLM servers stopped** (vLLM serving Ornith-1.5-35B-A3B on
    :8094, llama.cpp serving Qwen3.8-27B on :8092; Berk's yes of 2026-10-05). Schedule the restore **first**, then stop:
    ```bash

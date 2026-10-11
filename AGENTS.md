@@ -172,22 +172,23 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `src/itrea/solvers/common.py` | what the solver processes share: arguments, barrier, recorder, exchange accounting, exit codes | built |
 | `src/itrea/solvers/scip_run.py` | SCIP process; injection through a heuristic plugin (`trySol`) | built |
 | `src/itrea/solvers/highs_run.py` | HiGHS process; user-solution callback | built |
-| `src/itrea/solvers/cuopt_run.py` | cuOpt process; never receives solutions; RMM limit; in A9 (`--send`) it posts its incumbents and bound on its own channels (`to_ea_cuopt` / `info_cuopt`) | built |
+| `src/itrea/solvers/cuopt_run.py` | cuOpt process; never receives solutions; RMM limit; in A9 (`--send`) it posts its incumbents and bound on its own channels (`to_ea_cuopt` / `info_cuopt`); `--mip-gap-zero` (both MIP gaps 0, GAMS's MIPfeas settings, arm A6m, D-020); the solve's parameters recorded as the summary's `settings` | built |
 | `src/itrea/experiments/gates.py` | lease, memory gate, thermal gate, run lock, watchdog | core |
 | `src/itrea/experiments/gpu_health.py` | per-second SM clock, temperature and foreign-GPU sampling; block voiding | built |
 | `src/itrea/experiments/exchange_ctl.py` | the `itrea-redis` container: up, status, flush one run's keys, down | built |
 | `src/itrea/experiments/record_env.py` | versions, hardware, git state for every run record | built |
-| `src/itrea/experiments/pair.py` | one run: launch the arm's processes, start barrier, stop, every exit code checked, `run.json`; A9's three processes and its matched control A3x (D-015) | built |
-| `src/itrea/experiments/pool.py` | a job file under every D-002/D-003 control: Williams arm order per block, blocks never split, gates per run | built |
-| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke`, `backoff0` / `backoff1` (D-018 stages 0 / 1) (`itrea make-jobs …`) | built |
+| `src/itrea/experiments/pair.py` | one run: launch the arm's processes, start barrier, stop, every exit code checked, `run.json`; A9's three processes and its matched control A3x (D-015); arm A6m (cuOpt as GAMS ran it for MIPfeas: 24 threads, MIP gaps 0, all 20 cores on the whole-box lane `full`; D-020) | built |
+| `src/itrea/experiments/pool.py` | a job file under every D-002/D-003 control: Williams arm order per block, blocks never split, gates per run; layouts `pair` (GPU lane g0 + `--cpu-lanes`), `screen` (nine X925 lanes), `full` (one lane, the whole box: A6m only, serving check implied, D-020's `--cuopt-mem-gb 24 --gpu-mem-gb 36`) | built |
+| `src/itrea/experiments/make_jobs.py` | job files: `screen1`, `screen2`, `e1`, `e4`, `confirm`, `smoke`, `backoff0` / `backoff1` (D-018 stages 0 / 1), `mipfeas-cal` (D-020: A6m on the 30-instance sample → `jobs/mipfeas-cal-26.08.jsonl`) (`itrea make-jobs …`) | built |
 | `src/itrea/benchmarks/hardset.py` | the hard pool: screening candidates, the stage-2 rule, strata, family split, freeze (`itrea screen-candidates`, `screen-stage2`, `pool-freeze`) | built |
-| `src/itrea/analysis/metrics.py` | primal gap, P(T), primal-dual integral, times to target (adapted from optopt) | built |
+| `src/itrea/analysis/metrics.py` | primal gap, P(T), primal-dual integral, times to target (adapted from optopt); GAMS's MIPfeas integral exactly (`gams_integral`, D-020: equals GAMS's own function on all 3,495 traces of their archive) | built |
 | `src/itrea/analysis/check_solutions.py` | independent exact check of every stored incumbent (adapted from optopt) | built |
-| `src/itrea/analysis/build_runs.py` | run directories → `datasets/runs.parquet`, `datasets/incumbents_checked.parquet` | built |
+| `src/itrea/analysis/build_runs.py` | run directories → `datasets/runs.parquet`, `datasets/incumbents_checked.parquet`; MIPfeas columns `pt_gams` (call clock), `pt_gams_launch` (launch clock) and `startup_offset_s` (D-020) | built |
 | `src/itrea/analysis/stats.py` | d_i, Wilcoxon, bootstrap, decision rule, censored endpoints | built |
 | `src/itrea/analysis/lineage.py` | depth-1 matched Rank 0 odds ratio, Mantel–Haenszel (descriptive) | built |
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
+| `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row — paired R with a bootstrap interval on the call and launch clocks, feasible counts, strata, first-incumbent differences, GAMS's own GB10 26.04 / B200 rows, verdict PASS / FAIL / INCOMPLETE; the GAMS archive's readers (`read_gams_trc`, z*, published P) and D-020's sample | built |
 | `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria (M1–M5, outcome, fallbacks) applied to the run table and run directories, with a verdict (`itrea backoff-report --stage 0\|1`); the sanity rule gates on the measured duty only and reports the lane-steps ratio (D-018's second stated deviation; `--steps-gate` = the rule as first written); stage-1 control `A9@bo1s` — stage 0 read 2026-10-09 | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
 | `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b`; `tests/test_configs.py` keeps it equal to the code). **Current development defaults** (D-010; never a confirmatory configuration): **A3** — `itrea2-dev-rc-ld.yaml` (`itrea2-dev-rc-3way` + `repair.continuous: lp_decode`, hash `f030e23909ad`, D-017); **A9 / A3x** — `itrea2-dev-rc-3way.yaml` (repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair; hash `1d12ad490dd0`; the runner adds `exchange.from_cuopt` for A9 and refuses lp_decode there); **D-018 stage 1** — `itrea2-dev-rc-3way-bo1.yaml` (back-off active with the stage-0 values: D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40; run hash `f67354be775d`) against `-bo1s.yaml` (the same values in shadow mode = the control; run hash `62bf82b236f6`). History: `-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms: shadow, forced duty ½ / ¼ / ⅛), `itrea2-adaptive.yaml`, `-adaptive-lps.yaml`, `-adaptive-lps-rc.yaml` (earlier development steps, D-010–D-012), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml` (D-002's E3) | core |
@@ -227,8 +228,11 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   cores + the same GPU memory limit, **12 GB**: the EA's CuPy pool = cuOpt's RMM limit, `EAConfig.gpu_mem_gb`, set by
   cuOpt's measured need of ~10.5 GB, D-003) is identical for cuOpt and the EA. In A9, SCIP runs on X925 5, the EA on
   X925 6 and cuOpt on A725 1–3 (two CUDA processes, 12 GB each); its matched control A3x has the same EA footprint
-  without cuOpt (D-015). `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process.
-  Never run analysis with default thread counts beside timed runs.
+  without cuOpt (D-015). The exception is A6m (D-020, the MIPfeas calibration: cuOpt as GAMS ran it, 24 threads, MIP
+  gaps 0): it has the whole box to itself — the pool's `--layout full`, one lane with all 20 cores, the serving check
+  implied, `--cuopt-mem-gb 24 --gpu-mem-gb 36` (81 GB) — and runs nowhere else; no other arm runs on that lane.
+  `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1` in every process. Never run analysis with default thread
+  counts beside timed runs.
 - **Thermal.** GPU arms start only below 80 °C (ACPI maximum), CPU-only arms below 88 °C (D-008); pause the run set at
   ≥ 92 °C, resume below 80 °C.
 - **GPU health.** A GPU run with a median SM clock below 2,000 MHz or foreign GPU activity above 2 % of its budget
@@ -301,6 +305,7 @@ pytest -q                     # toy-scale correctness tests (GPU tests skip with
 ```
 Once runs exist: `itrea build-runs`, `itrea prereg`, then `itrea reproduce` re-derives every table in `datasets/` and
 `paper/generated/` from the traces and lists any difference (skill `itrea-reproduce`). Development reports (after
-`itrea build-runs`, with `OMP_NUM_THREADS=1`): `itrea backoff-report --stage 0|1`, `tools/d016_report.py`,
-`tools/d017_report.py`. Re-running experiments needs the public instances in `data/` and the job files in `jobs/`;
-wall-clock numbers depend on the machine (`vault/10-design/Compute resources.md`).
+`itrea build-runs`, with `OMP_NUM_THREADS=1`): `itrea backoff-report --stage 0|1`, `itrea mipfeas-report` (D-020's
+calibration; GAMS's archive in `data/mipfeas/gams-2026-09-16/`), `tools/d016_report.py`, `tools/d017_report.py`.
+Re-running experiments needs the public instances in `data/` and the job files in `jobs/`; wall-clock numbers depend on
+the machine (`vault/10-design/Compute resources.md`).

@@ -35,6 +35,10 @@ only in runs whose EA runs the governor. With it the repair clock's `t_dec`, `ge
 BUSY seconds (wall minus the governor's sleeps).
 2026-10-10 (documentation pass, no code change): the back-off's `t_due`, `dup_lead` and `n_assist_dup`, the summary's
 `cupy_cache.new_after_t0`, and the EA start-up record's `warmup` block, which this note had not listed.
+2026-10-11: the MIPfeas harness ([[D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt
+26.08]]): the call and launch clocks, GAMS's integral exactly (`metrics.gams_integral`) and
+`runs.parquet`'s `pt_gams`, `pt_gams_launch` and `startup_offset_s`; the cuOpt summary's `settings` and `mip_gap_zero`;
+`run.json`'s `runner_cores`.
 
 ## Clock
 All times are seconds since the shared start `t0`, read from `time.monotonic()` (CLOCK_MONOTONIC is system-wide on
@@ -42,8 +46,16 @@ Linux, so every process of a run shares it and NTP steps cannot shift events). T
 `t0`; each process records how long it spent before `t0` (start-up record). **Clock rule (D-002 v3):** before the
 barrier only process start, imports, instance parse, CUDA context creation and kernel warm-up on a synthetic problem;
 any LP, presolve, or evaluation of the instance's own population happens after `t0`, in every arm. Epoch time is
-stored next to `t0` (`t0_epoch`) for humans only. Every trajectory is truncated at the budget T in the analysis, so an
-overrun earns nothing.
+stored next to `t0` (`t0_epoch`), for humans and for the launch clock below. Every trajectory is truncated at the
+budget T in the analysis, so an overrun earns nothing.
+
+**Two clocks for MIPfeas (D-020).** The **call clock** is the one above: seconds since `t0`, after the barrier (parse,
+CUDA context, RMM set-up and warm-up before it). It is the clock comparable with GAMS's MIPfeas traces, whose clock
+starts at the GAMS↔solver link after model generation (GB10 cuOpt 26.08: glass4's first incumbent at 0.119 s), and
+D-020's calibration passes or fails on it. The **launch clock** starts at the first process's launch: every time plus
+`startup_offset_s` = run.json `t0_epoch` − min(`processes[*].launch_epoch`), so the parse and our warm-up count; it is
+the strict clock for comparing our own arms (A9's start-up is longer than cuOpt's). Both are in `runs.parquet`
+(`pt_gams`, `pt_gams_launch`); the stated handicaps either way are in D-020.
 
 ## Files of one run
 A run = one (instance, arm, seed, budget); its directory is `traces/raw/<set>/<run_id>/` with
@@ -230,7 +242,10 @@ statistics: `status`, `wall_s`, `overrun_s`, `final_dual`, `nodes`, `lp_iteratio
 `cutoff` skipped (LP value ≥ the cutoff bound), `integral` skipped, `reads` = `early` + `quality` + `patience`, `bad`,
 `read_s`, `post_s`, `spent_s` (the stream's whole cost: every decision as well as the reads and posts), `points`; else
 null). cuOpt adds `rmm_limit_bytes`, `rmm_peak_bytes`,
-`rmm_total_bytes`, `rmm_current_bytes`, `rmm_peak_count`.
+`rmm_total_bytes`, `rmm_current_bytes`, `rmm_peak_count`, `cpu_threads`, `gpu_mem_gb`, `mip_gap_zero` and `settings`
+(the parameters of the timed solve: `time_limit`, `log_to_console`, `num_cpu_threads`, `random_seed`, and with
+`--mip-gap-zero` — arm A6m, D-020 — `mip_absolute_gap` = `mip_relative_gap` = 0; every other parameter is cuOpt's
+default).
 
 ### Incumbent vectors (`<role>.incumbents.npz`)
 `t`, `obj` (user sense), `source` (unicode), `names` (the process's own variable order, unicode), and the vectors in CSR
@@ -263,11 +278,14 @@ Identity: `run_id`, `arm` (with `~<ablation>`), `base_arm`, `ablation`, `arm_doc
 `set`, `instance`, `name`, `seed`, `budget`, `grace_s`, `block`, `position` (Williams position of the arm in its block),
 `window`, `stratum`, `split`; `config` {`path`, `overrides`, `base_hash` (the file alone — the freeze check compares
 it with `frozen-e2`), `ea_hash` (the effective configuration), `run_hash`, `solver_settings` (arms without an EA)};
-`problem` (shape, `load_s`); `mailbox` {kind, spec}; `lane`, `systemd`, `pinned`; `memory_budget` (the D-003 gate
-terms and `need_gb`); `env` (versions, hardware, git state: `itrea.experiments.record_env`).
+`problem` (shape, `load_s`); `mailbox` {kind, spec}; `lane` (with `whole_box`), `systemd`, `pinned`; `memory_budget`
+(the D-003 gate terms and `need_gb`); `env` (versions, hardware, git state: `itrea.experiments.record_env`); `t0`,
+`t0_epoch` (at the barrier's release).
 Processes: one record per process — `role`, `kind`, `backend`, `cmd`, `cores`, `memory_max_gb`, `gpu_limit_gb` (CuPy
-pool or RMM limit), `env`, `pid`, `startup_s`, `exit_code`, `killed`, `exit_t`, `cpu_user_s`, `cpu_sys_s`,
-`maxrss_mb`; `exit_codes` {role: code} — **every one is checked** (optopt X1 logged "ok" for dead SCIP processes).
+pool or RMM limit), `env`, `pid`, `launch_epoch` (the launch clock's origin, D-020), `startup_s`, `exit_code`,
+`killed`, `exit_t`, `cpu_user_s`, `cpu_sys_s`, `maxrss_mb`; `exit_codes` {role: code} — **every one is checked**
+(optopt X1 logged "ok" for dead SCIP processes). `runner_cores`: the runner's own affinity (the GPU-health sampler and
+the stop loop run there; on the whole-box lane `full` of arm A6m they share the run's cores, D-020).
 Gates and health: `gates_before` / `gates_after` (MemAvailable, the hottest ACPI zone, the box-window lease, the local
 model servers' state, other large processes; `gates_before` also the GPU compute apps), `gpu_health` (per-second samples summarised: median busy SM clock, foreign GPU share, `verdict`,
 `reasons`), `cupy_cache` (`compiled_on_clock`).
@@ -299,7 +317,10 @@ time unless `--recheck`.
   instances on `pt_screen`, so the pool does not move when `reference.csv` is frozen later; D-002 orders the pool
   before the reference), `ref_zero_screen`, `sign_crossing_screen`, `ref_zero`, `sign_crossing`, `beats_ref`,
   `beats_ref_t`, `t_first`, `t_gap5`, `t_gap1` (each with an `_event` flag: false = censored at T), `final_gap`,
-  `best_obj`, `n_steps`, `pdi`;
+  `best_obj`, `n_steps`, `pdi`; `pt_mf` (the MIPfeas-style integral, D-002 §4); **`pt_gams`** (GAMS's MIPfeas
+  integral exactly, call clock, T = the budget; D-020), **`pt_gams_launch`** (the same on the launch clock) and
+  **`startup_offset_s`** (NaN, and so `pt_gams_launch`, when the run record lacks `t0_epoch` or the launch epochs,
+  and for synthetic rows); `t_first` is the portfolio's first checked incumbent on the call clock;
 - per role (`solver_*`, `ea_*`, `cuopt_*`): the same trajectory metrics for what that process held (`solver_pt` =
   SCIP-held P, `ea_pt` = the EA's own P for H1b and H6);
 - integrity: `n_inc`, `n_inc_ok`, `n_inc_failed`, `n_inc_unchecked`, `n_obj_mismatch`, `incumbents_missing`,
@@ -378,7 +399,21 @@ are flagged in the pool file and analysed on time to target only.
 **MIPfeas-style integral** (secondary, D-002 §4; Bussieck and Dirkse 2026): the same relative gap but 2 with no
 incumbent and the denominator max(|z(t)|, |z*|, 1), aggregated by the shifted geometric mean (s = 0.001). Reported
 beside Berthold's P(T) because a published GB10 cuOpt baseline exists under it (0.0393 at 600 s on the 233 MIPLIB
-benchmark instances).
+benchmark instances). Column `pt_mf`, unchanged by D-020.
+
+**GAMS's MIPfeas integral, exactly** (D-020; `itrea.analysis.metrics.gams_integral`, column `pt_gams`): a port of
+`calculate_primal_integral` from GAMS's scoring script (`create_primalintegral.py`, 2026-09-15, in
+`data/mipfeas/gams-2026-09-16/`), on the checked best-so-far steps and our reference: γ = 2 before the first incumbent;
+then, in their order, γ = 0 if round((v − z*)/max(|v|, |z*|, 1), 6) < 0 (v beats z*: their script raises, ours flags
+`beats_ref`), γ = 1 if v·z* < 0, else that rounded ratio; every time capped at T (a step at or after T adds nothing),
+the last γ held to T; P = Σ γ·Δt / T ∈ [0, 2]; T = the run's budget (600 s in MIPfeas). It differs from `pt_mf` in the
+sign rule (1 instead of up to 2), the rounding and the cap. Their script assumes minimisation; the port takes the
+difference in the objective's sense, so a maximisation instance scores as its minimisation mirror (none of the 233
+maximises: no MPS file has an OBJSENSE section). Acceptance (2026-10-11): on GAMS's own traces read by
+`itrea.analysis.mipfeas.read_gams_trc` (their exact `read_csv`), the port equals their function to ≤ 2.3e-16 on all
+3,495 traces of the archive, every solver and machine (`tests/test_mipfeas.py` checks the 233 GB10 cuOpt 26.08 ones,
+and that they equal `primalintegral.csv`). Aggregation: shifted geometric mean, s = 0.001; "feasible found" = P < 2.
+`pt_gams_launch` is the same integral on the launch clock (every step time + `startup_offset_s`, T unchanged).
 
 **Time to target**: first time γ ≤ 5 %, γ ≤ 1 %, and time to first feasible; censored at T (Type I). Analysed per
 instance on seed medians.
