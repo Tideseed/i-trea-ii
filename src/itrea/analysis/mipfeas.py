@@ -35,9 +35,13 @@ Statistics (D-020 § Calibration):
   `pt_gams` is scored against our reference; and the instances where a checked incumbent beat that reference
   (`beats_ref`: γ = 0 in the port, where GAMS's script raises; supportcase22's reference is only the best known, 110).
 Late-clock check (D-021 § Calibration, reported for every arm): the median first-incumbent offset ours − GAMS on the
-call clock, per stratum; it passes when the median of EACH of strata 0 and 1 is at most +0.3 s (one-sided: a late
-clock is the fault it looks for; stratum 2 and the others are thread-sensitive and only reported; the pooled median of
-strata 0–1 is printed beside); a stratum without a paired first incumbent fails it.
+call clock over the instances of strata 0–1 where both found one; it passes when that one median exists and is at most
++0.3 s (one-sided: a late clock is the fault it looks for); the median of every stratum is reported beside (stratum 2
+and the others are thread-sensitive and only reported).
+Calibration settings (D-021 reading only): every chosen run must carry the ext harness exactly (MIP gaps 0, thread
+variables unset, RMM 24 / host 24 GB, the CUDA cache, cap hits voiding) and cuOpt's thread count |F| (and, when the
+run table records it, F's cores), else it is listed under missing with the reason; the configuration hash(es) of the
+chosen runs are printed.
 Verdict for A6m (D-020's rule): PASS iff every instance of the sample has a run, 0.870 ≤ R ≤ 1.150 on the call clock
 and our feasible count is within ±1 of GAMS's on the sample (27 for D-020's sample, computed here); FAIL otherwise;
 INCOMPLETE (no verdict) while an instance is missing.
@@ -209,8 +213,34 @@ def integrity_flags(row) -> list[str]:
     return out
 
 
+def calibration_faults(row) -> list[str]:
+    """Why a run is not D-021's calibration configuration (A6F at F under the ext harness): its harness differs from
+    the ext preset, cuOpt's thread count is not |F|, or (when recorded) F's cores differ. [] if it is."""
+    from itrea.experiments.pair import GPU_LANE, resolve_harness
+    want = resolve_harness("ext")
+    try:
+        got = json.loads(row["harness"]) if str(row.get("harness") or "") else None
+    except (TypeError, ValueError):
+        got = None
+    try:
+        ss = json.loads(row["solver_settings"]) if str(row.get("solver_settings") or "") else {}
+    except (TypeError, ValueError):
+        ss = {}
+    out = []
+    if got != want:
+        out.append(f"harness {json.dumps(got, sort_keys=True) if got else 'none'} is not the ext preset")
+    nf = len(GPU_LANE.x925) + len(GPU_LANE.a725)
+    if ss.get("cuopt_threads") != nf:
+        out.append(f"cuOpt threads {ss.get('cuopt_threads')} != |F| = {nf}")
+    cores = (ss.get("footprint") or {}).get("cores")
+    want_cores = dict(x925=sorted(GPU_LANE.x925), a725=sorted(GPU_LANE.a725))
+    if cores is not None and cores != want_cores:
+        out.append(f"cores {cores} are not F {want_cores}")
+    return out
+
+
 def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int = SEED,
-                budget: float = BUDGET) -> tuple[dict[str, pd.Series], dict[str, list[str]]]:
+                budget: float = BUDGET, settings=None) -> tuple[dict[str, pd.Series], dict[str, list[str]]]:
     """The calibration's run per instance (module docstring) and, per instance, why every other run of the arm in the
     set was not taken (status, seed, budget, void, integrity) — or, for an instance with several valid runs, that it
     was refused. The run table needs build_runs' integrity columns (INTEGRITY_COLUMNS); without them nothing can be
@@ -233,8 +263,11 @@ def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int =
                                              f"budget {row['budget']:g}" + (", block void" if void.loc[idx] else ""))
             continue
         faults = integrity_faults(row)
+        wrong = settings(row) if settings is not None else []
         if faults:
             why_not.setdefault(n, []).append(f"{row['run_id']}: not intact ({'; '.join(faults)})")
+        elif wrong:
+            why_not.setdefault(n, []).append(f"{row['run_id']}: not D-021's calibration settings ({'; '.join(wrong)})")
         else:
             valid.setdefault(n, []).append(row)
     chosen = {}
@@ -248,22 +281,20 @@ def select_runs(runs: pd.DataFrame, arm: str = ARM, set_: str = SET, seed: int =
 
 
 def late_clock(have: pd.DataFrame, checked=LATE_CLOCK_STRATA, limit_s: float = LATE_CLOCK_MAX_S) -> dict:
-    """D-021's late-clock check on the valid runs (`t_first`, `t_first_gams`, `stratum`): per stratum the quartiles of
-    ours − GAMS where both found a first incumbent; `ok` iff every stratum in `checked` has one and its median is at
-    most +limit_s; the pooled quartiles over the checked strata beside."""
+    """D-021's late-clock check on the valid runs (`t_first`, `t_first_gams`, `stratum`): the median of ours − GAMS
+    over the instances of strata 0–1 (`checked`) where both found a first incumbent DECIDES — `ok` iff there is at
+    least one and that median is at most +limit_s (one median, as D-021 states it); the per-stratum quartiles of every
+    stratum are reported beside (`checked` marks the strata the median pools; the others are thread-sensitive and only
+    reported)."""
     both = have[have["t_first"].notna() & have["t_first_gams"].notna()]
     d = both["t_first"] - both["t_first_gams"]
     strata = sorted({int(k) for k in have["stratum"]} | set(checked))
-    per = []
-    for k in strata:
-        q = _quartiles(d[both["stratum"] == k])
-        ok = (q["n"] > 0 and q["median"] <= limit_s) if k in checked else None
-        per.append(dict(stratum=k, checked=k in checked, ok=ok, **q))
+    per = [dict(stratum=k, checked=k in checked, **_quartiles(d[both["stratum"] == k])) for k in strata]
     pooled = _quartiles(d[both["stratum"].isin(list(checked))])
-    ok = all(p["ok"] for p in per if p["checked"])
+    ok = pooled["n"] > 0 and pooled["median"] <= limit_s
     return dict(limit_s=limit_s, checked=list(checked), strata=per, pooled=pooled, ok=bool(ok),
-                rule=f"median first incumbent ours − GAMS <= +{limit_s:g} s in each of strata "
-                     f"{', '.join(map(str, checked))} (call clock)")
+                rule=f"median first incumbent ours − GAMS over strata {'–'.join(map(str, checked))} <= +{limit_s:g} s "
+                     f"(call clock; per stratum reported)")
 
 
 def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, set_: str = SET, seed: int = SEED,
@@ -275,7 +306,8 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
     absent = [n for n in sample if n not in pi.index or n not in z]
     if absent:
         raise ValueError(f"{gams_dir}: no published P or z* for {absent}")
-    chosen, others = select_runs(runs, arm, set_, seed, budget)
+    chosen, others = select_runs(runs, arm, set_, seed, budget,
+                                 settings=None if arm in D020_ARMS else calibration_faults)
     rows, missing = [], []
     for k, s in enumerate(strata):
         for n in s:
@@ -290,7 +322,7 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
                 missing.append(dict(instance=n, stratum=k, why=why))
                 rows.append(dict(row, run_id=None, p_call=math.nan, p_launch=math.nan, t_first=math.nan,
                                  startup_offset_s=math.nan, ref=math.nan, ref_rel_diff=math.nan, flags="",
-                                 beats_ref=False))
+                                 beats_ref=False, config_hash="", run_hash=""))
                 continue
             off = float(r.get("startup_offset_s", math.nan))
             t_first = float(r["t_first"]) if bool(r.get("t_first_event", False)) else math.nan
@@ -298,7 +330,8 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
             rows.append(dict(row, run_id=str(r["run_id"]), p_call=pc, p_launch=float(r.get("pt_gams_launch", math.nan)),
                              t_first=t_first, startup_offset_s=off, ref=ref,
                              ref_rel_diff=abs(ref - z[n]) / max(1.0, abs(z[n])) if math.isfinite(ref) else math.nan,
-                             flags="; ".join(integrity_flags(r)), beats_ref=bool(r.get("beats_ref", False))))
+                             flags="; ".join(integrity_flags(r)), beats_ref=bool(r.get("beats_ref", False)),
+                             config_hash=str(r.get("config_hash", "") or ""), run_hash=str(r.get("run_hash", "") or "")))
     df = pd.DataFrame(rows)
     have = df[df["run_id"].notna()]
     feas = lambda p: int((np.asarray(p, dtype=float) < M.MIPFEAS_NONE).sum())      # noqa: E731
@@ -334,6 +367,8 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
                         for _, x in have.iterrows() if bool(x["beats_ref"])]
     lc = out["late_clock"] = late_clock(have)
     d020 = arm in D020_ARMS
+    hcol = "run_hash" if len(have) and have["run_hash"].astype(str).ne("").all() else "config_hash"
+    out["config_hashes"] = sorted({str(x) for x in have[hcol] if str(x)}) if len(have) else []
     out["rule"] = dict(R_lo=R_LO, R_hi=R_HI, feasible_tol=FEASIBLE_TOL, clock="call", decision="D-020" if d020
                        else "D-021", late_clock=lc["rule"])
     if missing:
@@ -349,9 +384,9 @@ def report(runs: pd.DataFrame, gams_dir: str | Path = GAMS_DIR, arm: str = ARM, 
     if d020:
         out["verdict"], out["verdict_reason"] = (PASS if (r_ok and f_ok) else FAIL), band
     elif not lc["ok"]:
-        bad = "; ".join(f"stratum {p['stratum']}: " + ("no paired first incumbent" if not p["n"] else
-                                                      f"median {p['median']:+.3f} s")
-                        for p in lc["strata"] if p["checked"] and not p["ok"])
+        pq = lc["pooled"]
+        bad = ("no paired first incumbent in strata " + "–".join(map(str, lc["checked"])) if not pq["n"] else
+               f"median {pq['median']:+.3f} s over strata {'–'.join(map(str, lc['checked']))}, n {pq['n']}")
         out["verdict"] = CLOCK_FAIL
         out["verdict_reason"] = (f"late-clock check failed ({bad}; the limit is +{lc['limit_s']:g} s): the "
                                  f"calibration's reading stops — the barrier and the clock are diagnosed before any v1 "
@@ -410,9 +445,13 @@ def markdown(res: dict) -> str:
     if lc:
         per = "; ".join(f"{p['stratum']}{'*' if p['checked'] else ''}: {_f(p['median'], 3)} (n {p['n']})"
                         for p in lc["strata"])
-        lines.append(f"Late-clock check (D-021: {lc['rule']}; * = checked, the others only reported): per stratum "
-                     f"median ours − GAMS (s) {per}; pooled over the checked strata {_f(lc['pooled']['median'], 3)} "
-                     f"(n {lc['pooled']['n']}) — {'passed' if lc['ok'] else 'FAILED'}.")
+        lines.append(f"Late-clock check (D-021: {lc['rule']}): median ours − GAMS over the strata marked * "
+                     f"{_f(lc['pooled']['median'], 3)} s (n {lc['pooled']['n']}) — {'passed' if lc['ok'] else 'FAILED'};"
+                     f" per stratum (s) {per}.")
+    if res.get("config_hashes"):
+        hs = res["config_hashes"]
+        lines.append("Configuration hash of the chosen runs: " + (f"{hs[0]} (all {res['n_runs']})" if len(hs) == 1
+                                                                 else ", ".join(hs) + " (NOT one configuration)") + ".")
     for run, g in res["gams_rows"].items():
         lines.append(f"GAMS {g['label']} vs GB10 26.08 on the sample (port): R {_f(g['R'], 3)} "
                      f"[{_f(g.get('lo'), 3)}, {_f(g.get('hi'), 3)}], feasible {g['feasible']}, "
