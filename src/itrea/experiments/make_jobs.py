@@ -28,6 +28,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
     python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
     python -m itrea.experiments.make_jobs mipfeas-cal [--out jobs/mipfeas-cal-26.08.jsonl]
+    python -m itrea.experiments.make_jobs itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13   [--out jobs/itx-<k>.jsonl]
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -41,7 +42,19 @@ sampled MIPLIB 2017 instances (`itrea.analysis.mipfeas.STRATA`, in D-020's order
 seed 0, 600 s, set `mipfeas`, one block per instance, stratum = D-020's stratum index "0"–"5", instance paths
 data/miplib/inst/<name>.mps.gz (each checked on disk). Split `dev`: development (D-010), never `test` — so no frozen
 configuration is asked for and the pool's --gpu-mem-gb is allowed (D-020: --gpu-mem-gb 36 --cuopt-mem-gb 24, under
---layout full); 29 of the 30 are screening candidates, so the pool needs `prereg-v1` as an ancestor of HEAD.
+--layout full); 29 of the 30 are screening candidates, so the pool needs `prereg-v1` as an ancestor of HEAD. D-021
+replaced this calibration by M4's (A6F at A9's footprint); the A6m file is no longer in jobs/, its writer stays.
+
+`itx-*` write D-021's (ITX-1) phase-1 job files, all split `dev`, seed 0 unless stated, the A9 jobs on
+`configs/itrea2-dev-rc-3way.yaml` (the A9 development default), every GPU arm on the GPU lane g0 (F), a job-level
+`harness` on every job but R13's control: `itx-m1` (`jobs/itx-m1.jsonl`, set itx-m1: fhnw-binpack4-48, glass4,
+radiationm18-12-05 x {A9@m1, A6F@m1, A2F@m1} under the ext harness + A6F@m1env with the thread variables kept, 120 s;
+12 runs), `itx-m2` (itx-m2: comp21-2idx, neos-4763324-toguru x {A9@m2, A6F@m2} ext, 600 s, AB / BA by `position`; 4),
+`itx-m3` (itx-m3: the 8 instances of R29 x A6F@m3 at cuOpt RMM 40 / host 40 GB, 600 s; 8), `itx-m4` (set mipfeas:
+D-020's 30 x A6F ext — the plain label, for `itrea mipfeas-report --arm A6F` —, 600 s, strata "0"–"5"; 30), `itx-m5`
+(itx-m5: the 15 development / class-probe instances among MIPfeas's 233 x A9@m5 ext, 600 s; 15) and `itx-r13` (itx-r13:
+the 17 x seeds 0–1 x {A9@r13 without a harness, A9@r13x and A6F@r13x under ext}, 120 s, one block per instance x
+seed; 102). Each set's own variant keeps every run id distinct from every other set's (run ids carry no set).
 """
 from __future__ import annotations
 
@@ -55,7 +68,7 @@ import sys
 from pathlib import Path
 
 from itrea import paths
-from itrea.experiments.pair import ARMS, stem
+from itrea.experiments.pair import ARMS, RunError, resolve_harness, stem
 from itrea.experiments.pool import MASTER_SEED, canonical_arms
 
 SCREEN_SEEDS = (900, 901)
@@ -87,7 +100,22 @@ INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
 # D-020: the MIPfeas harness's calibration (arm A6m on D-020's 30-instance sample)
 MIPFEAS_SET, MIPFEAS_ARM, MIPFEAS_SEED, MIPFEAS_BUDGET = "mipfeas", "A6m", 0, 600.0
 MIPFEAS_CAL_OUT = "jobs/mipfeas-cal-26.08.jsonl"
-OPTIONAL = ("emphasis", "ablation", "variant")
+# D-021 (ITX-1) phase 1: the measurements before C1 (M1 smoke, M2 soak, M3 memory probe, M4 calibration, M5 A9
+# preview) and the R13 + R14 development test. Every set's labels carry a variant of its own (m1, m2, …), so no run id
+# of one set equals one of another set or of an earlier set; M4 keeps the plain label A6F (`mipfeas-report --arm A6F`)
+ITX_SEED = 0
+ITX_A9_CONFIG = "configs/itrea2-dev-rc-3way.yaml"   # the A9 development default (D-015 / D-018: back-off not adopted)
+ITX_EXT = "ext"                                      # pair.HARNESS_PRESETS: gaps 0, env unset, RMM / host 24, CUDA cache
+ITX_ENV_KEPT = {"preset": "ext", "cuopt_env_unset": False}     # M1's env-only contrast (R14)
+ITX_M3_HARNESS = {"preset": "ext", "cuopt_rmm_gb": 40.0, "cuopt_host_gb": 40.0}   # uncensored memory probe (R29)
+# M1: fast development instances with continuous variables, one of them an easy one cuOpt proves quickly
+ITX_M1_INSTANCES = ("fhnw-binpack4-48", "glass4", "radiationm18-12-05")
+ITX_M2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru")
+# R29: the 8 instances whose RSS exceeded 14.4 GiB in GAMS's cuOpt run
+ITX_M3_INSTANCES = ("eilA101-2", "irp", "nw04", "proteindesign121hz512p9", "proteindesign122trx11p8",
+                    "snp-02-004-104", "square47", "supportcase6")
+ITX_OUT = {k: f"jobs/itx-{k}.jsonl" for k in ("m1", "m2", "m3", "m4", "m5", "r13")}
+OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position")
 
 
 class JobError(ValueError):
@@ -110,6 +138,10 @@ def job(instance: str, set_: str, arm: str, seed: int, budget: float, *, name: s
     unknown = set(extra) - set(OPTIONAL)
     if unknown:
         raise JobError(f"unknown job fields {sorted(unknown)}")
+    try:
+        resolve_harness(d.get("harness"))
+    except RunError as e:
+        raise JobError(str(e)) from None
     return d
 
 
@@ -484,6 +516,117 @@ def mipfeas_calibration(budget: float = MIPFEAS_BUDGET, seed: int = MIPFEAS_SEED
             for k, s in enumerate(STRATA) for n in s]
 
 
+# ------------------------------------------------------------------------------------------- D-021 (ITX-1) phase 1
+def mipfeas_233(data: Path | None = None) -> list[str]:
+    """MIPfeas's 233 instances: `data/miplib/benchmark-v2.test` minus its `=inf=` instances in solu.txt (D-020; not
+    `candidates()`, which also drops the open supportcase22). Anything but 233 names is an error."""
+    mip = Path(data or paths.DATA) / "miplib"
+    test = mip / "benchmark-v2.test"
+    if not test.is_file():
+        raise JobError(f"{test} does not exist")
+    names = {stem(x) for x in test.read_text().split()} - miplib_infeasible(mip / "solu.txt")
+    if len(names) != 233:
+        raise JobError(f"{test} minus the =inf= instances gives {len(names)} names, not MIPfeas's 233")
+    return sorted(names)
+
+
+def development_names(tables=INSTANCE_TABLES) -> list[str]:
+    """The 17 development + class-probe instances (datasets/dev_set.csv, datasets/classprobe_set.csv), in table order."""
+    out: list[str] = []
+    for t in tables:
+        p = paths.resolve(t)
+        for r in read_rows(p):
+            n = r.get("name") or stem(r["instance"])
+            if n not in out:
+                out.append(n)
+    return out
+
+
+def _miplib_paths(names, data: Path | None = None) -> dict[str, str]:
+    inst = Path(data or paths.DATA) / "miplib" / "inst"
+    missing = [n for n in names if not (inst / f"{n}.mps.gz").is_file()]
+    if missing:
+        raise JobError(f"instance files missing under {inst}: {missing}")
+    return {n: _rel(inst / f"{n}.mps.gz") for n in names}
+
+
+def _itx(where: str, name: str, set_: str, arm: str, seed: int, budget: float, variant: str | None, harness,
+         **kw) -> dict:
+    return job(where, set_, arm, seed, budget, name=name, config=ITX_A9_CONFIG if arm == "A9" else None,
+               split="dev", block=kw.pop("block", f"{name}__s{int(seed)}__{set_}"),
+               stratum=kw.pop("stratum", set_), variant=variant, harness=harness, **kw)
+
+
+def itx_m1(budget: float = 120.0, seed: int = ITX_SEED, set_: str = "itx-m1", tables=INSTANCE_TABLES) -> list[dict]:
+    """M1 smoke (D-021): 3 development instances x {A9, A6F, A2F} under the ext harness, plus the env-only contrast
+    A6F with the thread variables kept (`A6F@m1env`, ext otherwise) beside A6F under ext; 120 s, seed 0, one block per
+    instance (12 runs)."""
+    where = instance_paths(ITX_M1_INSTANCES, tables)
+    out = []
+    for n in ITX_M1_INSTANCES:
+        for arm in ("A9", "A6F", "A2F"):
+            out.append(_itx(where[n], n, set_, arm, seed, budget, "m1", ITX_EXT))
+        out.append(_itx(where[n], n, set_, "A6F", seed, budget, "m1env", ITX_ENV_KEPT))
+    return _sorted(out)
+
+
+def itx_m2(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m2", tables=INSTANCE_TABLES) -> list[dict]:
+    """M2 soak at F (D-021): comp21-2idx and neos-4763324-toguru x {A9, A6F} under the ext harness, 600 s, seed 0, in
+    AB / BA order (`position`: A9 first on comp21-2idx, A6F first on toguru — the Williams row is the same for both
+    blocks, so the order is written into the jobs); 4 runs. The first from fan AUTO; run with `--pause-c 90`."""
+    where = instance_paths(ITX_M2_INSTANCES, tables)
+    out = []
+    for k, n in enumerate(ITX_M2_INSTANCES):
+        order = ("A9", "A6F") if k % 2 == 0 else ("A6F", "A9")
+        for arm in ("A9", "A6F"):
+            out.append(_itx(where[n], n, set_, arm, seed, budget, "m2", ITX_EXT, position=order.index(arm)))
+    return _sorted(out)
+
+
+def itx_m3(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m3", data: Path | None = None) -> list[dict]:
+    """M3 memory probe (D-021 R29): the 8 instances whose RSS exceeded 14.4 GiB in GAMS's run x A6F alone at cuOpt RMM
+    40 / host 40 GB (memory gate 101 GB), 600 s, seed 0, one block each (8 runs)."""
+    where = _miplib_paths(ITX_M3_INSTANCES, data)
+    return _sorted([_itx(where[n], n, set_, "A6F", seed, budget, "m3", ITX_M3_HARNESS) for n in ITX_M3_INSTANCES])
+
+
+def itx_m4(budget: float = MIPFEAS_BUDGET, seed: int = MIPFEAS_SEED, set_: str = MIPFEAS_SET,
+           data: Path | None = None) -> list[dict]:
+    """M4 calibration (D-021, replaces D-020's A6m file): D-020's 30-instance sample x A6F under the ext harness
+    (plain label `A6F`, for `itrea mipfeas-report --arm A6F`), 600 s, seed 0, set `mipfeas`, stratum "0"–"5", one block
+    each, in D-020's order (30 runs)."""
+    from itrea.analysis.mipfeas import STRATA
+    names = [n for s in STRATA for n in s]
+    where = _miplib_paths(names, data)
+    return [_itx(where[n], n, set_, "A6F", seed, budget, None, ITX_EXT, stratum=str(k))
+            for k, s in enumerate(STRATA) for n in s]
+
+
+def itx_m5(budget: float = 600.0, seed: int = ITX_SEED, set_: str = "itx-m5", tables=INSTANCE_TABLES,
+           data: Path | None = None) -> list[dict]:
+    """M5 A9 preview (D-021): the development / class-probe instances that are among MIPfeas's 233 (15) x A9 under the
+    ext harness, 600 s, seed 0, one block each (15 runs)."""
+    the233 = set(mipfeas_233(data))
+    names = [n for n in development_names(tables) if n in the233]
+    where = instance_paths(names, tables)
+    return _sorted([_itx(where[n], n, set_, "A9", seed, budget, "m5", ITX_EXT) for n in names])
+
+
+def itx_r13(budget: float = 120.0, seeds=(0, 1), set_: str = "itx-r13", tables=INSTANCE_TABLES) -> list[dict]:
+    """The A9 + R13 + R14 development test (D-021 R14): the 17 development + class-probe instances x seeds 0–1 x {A9
+    (`A9@r13`, the development default, no harness), A9 under the ext harness (`A9@r13x`), A6F under it
+    (`A6F@r13x`)}, 120 s, one block per instance x seed (102 runs). Its decision record fixes the rules first."""
+    names = development_names(tables)
+    where = instance_paths(names, tables)
+    out = []
+    for n in names:
+        for seed in seeds:
+            out.append(_itx(where[n], n, set_, "A9", seed, budget, "r13", None))
+            out.append(_itx(where[n], n, set_, "A9", seed, budget, "r13x", ITX_EXT))
+            out.append(_itx(where[n], n, set_, "A6F", seed, budget, "r13x", ITX_EXT))
+    return _sorted(out)
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -541,6 +684,17 @@ def main(argv=None) -> int:
     mf.add_argument("--seed", type=int, default=MIPFEAS_SEED)
     mf.add_argument("--data", type=Path, default=paths.DATA)
     mf.add_argument("--out", type=Path, default=paths.ROOT / MIPFEAS_CAL_OUT)
+    itx_help = {"m1": "D-021 M1 smoke: 3 dev instances x {A9, A6F, A2F} ext + A6F env kept, 120 s (12 runs)",
+                "m2": "D-021 M2 soak: comp21-2idx, neos-4763324-toguru x {A9, A6F} ext, 600 s, AB / BA (4 runs)",
+                "m3": "D-021 M3 memory probe: 8 instances x A6F at cuOpt RMM 40 / host 40, 600 s (8 runs)",
+                "m4": "D-021 M4 calibration: D-020's 30 x A6F ext, 600 s, set mipfeas (30 runs)",
+                "m5": "D-021 M5 A9 preview: the 15 dev / class-probe instances in the 233 x A9 ext, 600 s (15 runs)",
+                "r13": "D-021 R13 + R14 test: 17 x seeds 0-1 x {A9, A9 ext, A6F ext}, 120 s (102 runs)"}
+    itx = {k: sub.add_parser(f"itx-{k}", help=h) for k, h in itx_help.items()}
+    for k, p in itx.items():
+        p.add_argument("--out", type=Path, default=paths.ROOT / ITX_OUT[k])
+        if k in ("m3", "m4", "m5"):
+            p.add_argument("--data", type=Path, default=paths.DATA)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -565,6 +719,18 @@ def main(argv=None) -> int:
             jobs = backoff_stage1(tuple(int(x) for x in a.seeds.split(",") if x), a.budget)
         elif a.cmd == "mipfeas-cal":
             jobs = mipfeas_calibration(a.budget, a.seed, data=a.data)
+        elif a.cmd == "itx-m1":
+            jobs = itx_m1()
+        elif a.cmd == "itx-m2":
+            jobs = itx_m2()
+        elif a.cmd == "itx-m3":
+            jobs = itx_m3(data=a.data)
+        elif a.cmd == "itx-m4":
+            jobs = itx_m4(data=a.data)
+        elif a.cmd == "itx-m5":
+            jobs = itx_m5(data=a.data)
+        elif a.cmd == "itx-r13":
+            jobs = itx_r13()
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:

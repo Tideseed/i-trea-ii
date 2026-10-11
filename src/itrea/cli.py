@@ -15,7 +15,7 @@ the only place the mapping lives.
     itrea pair …               one run (smoke tests; the pool runs job files)
     itrea pool JOBS …          a job file under every D-002 / D-003 control
     itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0 | backoff1 |
-                               mipfeas-cal
+                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -46,7 +46,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pair": ("itrea.experiments.pair", (), "one run: launch, barrier, stop, exit codes, run.json"),
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
-                  "backoff0, backoff1, mipfeas-cal)"),
+                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
