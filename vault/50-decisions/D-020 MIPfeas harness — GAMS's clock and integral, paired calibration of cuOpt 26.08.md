@@ -88,3 +88,24 @@ error of roughly 30 % or more would show. The pass rule (0.870 ≤ R ≤ 1.150, 
 this one. Other builder notes recorded: none of the 233 is a maximisation problem; `primalintegral.csv` has no GB10 26.04
 column (scored from its traces by the port); the port matches GAMS's function on all 3,495 traces of the archive
 (≤ 2.2e-16) and `primalintegral.csv` on the 233 GB10 26.08 traces.
+
+## Addendum before any calibration run (2026-10-11 11:1x) — after two reviews of the build
+Two independent reviews (Claude Code subagents; report path and runner path) of `dev-mipfeas`: the integral, the clocks,
+the references and every existing arm's runs (65,744 old-vs-new plan comparisons, byte-identical) are correct. Changes
+made before any run:
+- **Report validity:** a run with missing / unchecked incumbents, a count mismatch or a pre-t0 incumbent is not a
+  calibration run (listed; verdict INCOMPLETE); two valid runs of one instance are refused; incumbents better than z*
+  are listed (GAMS's script raises on them). R's wording: R = (SGM_ours + 0.001)/(SGM_GAMS + 0.001).
+- **A second deliberate difference to GAMS, removed:** every process of ours ran with OMP_NUM_THREADS =
+  OPENBLAS_NUM_THREADS = MKL_NUM_THREADS = 1; libcuopt links OpenMP, GAMS's environment set none. A6m's cuOpt process
+  gets none of the three (every other arm unchanged). The job's seed as `random_seed` remains the only stated difference.
+- **Heat is the operational risk.** A6m loads all 20 cores and the GPU for 600 s; the screening pass (8–9 X925 cores,
+  no GPU, 300 s) ended at a median ACPI maximum of 87 °C and peaked at 92.7 °C, and the runner voids a run at ≥ 92 °C
+  (D-008). A thermal void is now requeued at most once per block (`--max-thermal-requeues 1`; then the block is skipped
+  and recorded), and no run starts after a gate wait unless it still ends before the deadline and the lease.
+- **Measurement first:** the pool runs ONE block (`--max-blocks 1`) and stops. Read from it: the ACPI maximum and its
+  time, the GPU's busy SM clock median (the GPU-health floor is 2,000 MHz — never measured with all 20 cores busy), and
+  cuOpt's CPU time / wall (≈ 20 expected). Continue the pool only if that run is valid. If the box cannot hold 600 s of
+  whole-box load under 92 °C, or the SM clock falls below the floor under it, the calibration as specified is not
+  possible here: stop, record it, and decide the next step with Berk (a reduced footprint is not GAMS's setup; the
+  thermal and GPU-health rules are not changed to make a run count).
