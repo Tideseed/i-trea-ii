@@ -39,19 +39,26 @@ run id with A6. Its RMM limit and MemoryMax come from the runner's options (D-02
 ITX-1 (D-021), on the GPU lane g0 whose cores are F (X925 5–6 + A725 1–3 + the GPU today, taken from the lane):
 - **A6F** = cuOpt alone pinned to all of F, num_cpu_threads = |F| (`ProcSpec.f_share`); **A2F** = SCIP on F's first
   X925 core, cuOpt on the other |F| - 1 cores with |F| - 1 threads, no exchange (as A2). F's size is part of their
-  run hash (a changed F is another configuration, R5);
+  run hash; with a harness F's cores themselves are (`harness_footprint`: a changed F is another configuration, R5);
 - the job-level **harness** (`resolve_harness`; preset "ext" or a dict of overrides): every cuOpt process gets MIP gaps
   0 (R13), the thread variables removed (R14), its own RMM limit and host MemoryMax (R29: 24 / 24 GB, separate from the
   EA's 12-GB pool, which the EA keeps); every process gets the project's CUDA JIT cache (`CUDA_CACHE_PATH`,
-  `CUDA_CACHE_MAXSIZE`, R15). The resolved dict enters the run hash only when the field is present, so every run id
-  without it is unchanged; it is refused on A6m and (pool) on test / screening jobs;
-- **named scopes** `itrea-run-<run-hash>-<role>-<epoch>` (R27; never part of a hash or of argv);
-- **void causes** (`void_checks`, after the run, in this order): `thermal_watch` (thermal-watch's 98 °C stop line
-  inside the run, R27), `gpu_cap` (a GPU run with a busy SM median below `cap_floor_mhz` = 2,300 MHz, or overlapping a
-  fan-governor clock-cap interval, R25), `cuopt_memory` (harness: cuOpt's RMM allocation error or a kill at its cap,
-  R29), `compiled_on_clock` (harness: an entry of the CUDA cache — or the EA's CuPy cache — written after t0, R15).
-  A failure of SCIP or the EA stays an arm outcome. run.json also records the fan governor's state at the start and
-  the end (`fan_state_start` / `fan_state_end`) and the start temperature (`acpi_start_c`, R28).
+  `CUDA_CACHE_MAXSIZE`, R15); `cuopt_memory_void` (default true; M3: false) says whether a confirmed cap hit of cuOpt
+  voids the run. The resolved dict and its footprint (F's cores, SCIP's and the EA's host caps) enter the run hash only
+  when the field is present, so every run id without it is unchanged; it is refused on A6m and (pool) on test /
+  screening jobs;
+- **named scopes** `itrea-run-<sha1(run directory name)[:12]>-<role>-<epoch_ms>` (R27; unique per launch; never part
+  of a hash or of argv), each with `TimeoutStopSec=5s`, cuOpt's also `KillSignal=SIGKILL` (no interrupt API);
+- **void causes** (`void_checks`, after the run, in this order): `thermal_watch` (a thermal-watch 98 °C stop line that
+  names one of this run's scopes, R27), `gpu_cap` (a GPU run with a busy SM median below `cap_floor_mhz` = 2,300 MHz,
+  overlapping a fan-governor clock-cap interval, or with a fan state stamped inside the timed window that reads cap=1,
+  R25), `cuopt_memory` (harness: cuOpt's cap CONFIRMED — an RMM allocation error with the peak at >= 0.8 x the limit,
+  or a SIGKILL with the scope's Result oom-kill or maxrss >= 0.95 x MemoryMax, R29), `external_kill` (any arm: a
+  SIGKILL of any process the runner did not send that is neither a cap kill nor thermal-watch's), `compiled_on_clock`
+  (harness: an entry of the CUDA cache — or the EA's CuPy cache — written after t0, R15). A failure of SCIP or the EA,
+  their caps included, stays an arm outcome; what decides nothing is recorded in `void_info`. run.json also records
+  the fan governor's state at the start and the end (`fan_state_start` / `fan_state_end`) and the start temperature
+  (`acpi_start_c`, R28).
 
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
@@ -117,13 +124,20 @@ REDIS_URL = "redis://127.0.0.1:6390/0"
 # D-021 (ITX-1) harness settings: a job-level field `harness` = a preset name or {"preset": name, <key>: value, ...}.
 # Absent = the runner as before (no key enters the hash); present = the resolved dict (every key below) enters the run
 # hash. cuOpt keys act on every cuOpt process of the arm (A9, A6F, A2F, A6, A2, H2); cuda_cache on every process.
-HARNESS_KEYS = ("cuopt_gap_zero", "cuopt_env_unset", "cuopt_rmm_gb", "cuopt_host_gb", "cuda_cache")
+HARNESS_KEYS = ("cuopt_gap_zero", "cuopt_env_unset", "cuopt_rmm_gb", "cuopt_host_gb", "cuda_cache", "cuopt_memory_void")
 HARNESS_PRESETS: dict[str, dict] = {
     # R13 gaps 0, R14 cuOpt's thread variables unset, R29 cuOpt RMM 24 GB separate from the EA's pool and host
-    # MemoryMax 24 GB, R15 the project-own CUDA JIT cache for every process
-    "ext": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True),
+    # MemoryMax 24 GB, R15 the project-own CUDA JIT cache for every process; a confirmed cap hit of cuOpt voids the run
+    # (R29; M3's memory probe sets cuopt_memory_void false: the cap hit is its measurement, recorded, not voided)
+    "ext": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
+                cuopt_memory_void=True),
 }
-_HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache")
+_HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache", "cuopt_memory_void")
+SCOPE_STOP_TIMEOUT = "5s"   # every run scope: systemd's stop (thermal-watch's `systemctl stop`) kills within 5 s, not 90
+RMM_CAP_SHARE = 0.8         # an RMM allocation error counts as cuOpt's cap only when its peak reached this share of the
+                            # limit (R29's 0.8 x cap reading)
+HOST_CAP_SHARE = 0.95       # a SIGKILL counts as a host-cap kill when maxrss reached this share of MemoryMax (or the
+                            # scope's Result says oom-kill)
 _HARNESS_GB = ("cuopt_rmm_gb", "cuopt_host_gb")
 
 
@@ -468,10 +482,24 @@ def cuopt_rmm_gb(cfg: EAConfig, harness: dict | None) -> float:
     return float(harness["cuopt_rmm_gb"]) if harness is not None else float(cfg.gpu_mem_gb)
 
 
+def harness_footprint(arm: ArmSpec, opts: PairOptions) -> dict:
+    """What a harness job's identity adds beyond the harness itself (D-021 R5 / R29): F's cores — the lane's sorted
+    X925 and A725 cores — for an arm on the GPU lane (a re-laid F of the same size is another configuration), and the
+    host caps of the arm's other processes (SCIP's `solver_mem_gb`, the EA's `ea_mem_gb`); cuOpt's caps are in the
+    harness. Only jobs with a harness carry it, so no earlier run id moves."""
+    d: dict = {"cores": (dict(x925=sorted(opts.lane.x925), a725=sorted(opts.lane.a725)) if arm.lane == "partner"
+                         else None)}
+    if any(p.kind in SOLVER_KINDS for p in arm.procs):
+        d["solver_mem_gb"] = float(opts.solver_mem_gb)
+    if arm.has_ea:
+        d["ea_mem_gb"] = float(opts.ea_mem_gb)
+    return d
+
+
 def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
     """What identifies a run of an arm without an EA (its <cfg-hash>). Only A6m's dict carries `mip_gap_zero` and only
-    a job with a harness carries `harness` (D-021), so every other arm's dict — and hash — is what it was before A6m
-    existed (tests pin them). `gpu_mem_gb` is cuOpt's RMM limit (the harness's when there is one)."""
+    a job with a harness carries `harness` and `footprint` (D-021), so every other arm's dict — and hash — is what it
+    was before A6m existed (tests pin them). `gpu_mem_gb` is cuOpt's RMM limit (the harness's when there is one)."""
     arm = arm_spec(job)
     h = job_harness(job)
     d: dict = {"arm": arm.name, "emphasis": job.get("emphasis") if any(p.emphasis for p in arm.procs) else None}
@@ -483,6 +511,7 @@ def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
             d["mip_gap_zero"] = True
     if h is not None:
         d["harness"] = h
+        d["footprint"] = harness_footprint(arm, opts)
     return d
 
 
@@ -491,7 +520,7 @@ def run_hash(job: dict, opts: PairOptions | None = None) -> str:
     config_hash); a hash of the solver-side settings otherwise. An arm with an EA AND cuOpt (A9) folds in cuOpt's
     thread count when it is not the default PARTNER_THREADS, so a thread-count variant gets its own run id (the default
     id stays the EA configuration hash; build_runs reads the EA hash from `run.json["config"]["ea_hash"]`). A job's
-    harness (D-021) is folded in the same way, only when the job has one."""
+    harness (D-021) and its footprint (`harness_footprint`) are folded in the same way, only when the job has one."""
     opts = opts or PairOptions()
     cfg, _ = effective_config(job, opts)
     arm = arm_spec(job)
@@ -504,6 +533,7 @@ def run_hash(job: dict, opts: PairOptions | None = None) -> str:
         hz = job_harness(job)
         if hz is not None:
             extra["harness"] = hz
+            extra["footprint"] = harness_footprint(arm, opts)
         if extra:
             h = hashlib.sha256(json.dumps({"ea": h, **extra}, sort_keys=True).encode()).hexdigest()[:12]
         return h
@@ -563,7 +593,7 @@ class Proc:
     log_path: Path
     env_unset: tuple[str, ...] = ()    # removed from the inherited environment before env_extra applies (A6m's cuOpt;
                                        # every cuOpt process under a harness with cuopt_env_unset, D-021 R14)
-    scope_unit: str | None = None      # the systemd scope's unit name (itrea-run-<run-hash>-<role>-<epoch>.scope)
+    scope_unit: str | None = None      # the systemd scope's unit name (itrea-run-<sha1(run)>-<role>-<epoch_ms>.scope)
     popen: subprocess.Popen | None = None
     launch_mono: float | None = None
     launch_epoch: float | None = None
@@ -655,20 +685,22 @@ def solver_flags(spec: ProcSpec, cfg: EAConfig | None) -> list[str]:
     return out or ["--inert"]
 
 
-def scope_unit(run_id: str, role: str, epoch: int) -> str:
-    """The run scope's unit name `itrea-run-<run-hash>-<role>-<epoch>` (D-021 R27: host tools such as thermal-watch
-    find the project's processes by it; never part of a hash). <run-hash> is the run id's last field."""
-    h = str(run_id).rsplit("__", 1)[-1]
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", f"itrea-run-{h}-{role}-{int(epoch)}")
+def scope_unit(run_name: str, role: str, epoch_ms: int) -> str:
+    """The run scope's unit name `itrea-run-<sha1(run directory name)[:12]>-<role>-<epoch_ms>` (D-021 R27: host tools
+    such as thermal-watch find the project's processes by the prefix; never part of a hash or of argv). The run
+    directory's name (= the run id: instance, arm, seed, budget, configuration) and the plan's millisecond make it
+    unique per launch, so concurrent lanes never ask systemd for one name twice."""
+    h = hashlib.sha1(str(run_name).encode()).hexdigest()[:12]
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", f"itrea-run-{h}-{role}-{int(epoch_ms)}")[:200]
 
 
 def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EAConfig,
-         epoch: int | None = None) -> list[Proc]:
-    """The processes of a run (nothing is launched). `epoch` names the scopes (default: now)."""
+         epoch_ms: int | None = None) -> list[Proc]:
+    """The processes of a run (nothing is launched). `epoch_ms` names the scopes (default: now, in milliseconds)."""
     arm = arm_spec(job)
     lane = opts.lane
     hz = job_harness(job)
-    epoch = int(time.time()) if epoch is None else int(epoch)
+    epoch_ms = int(time.time() * 1000) if epoch_ms is None else int(epoch_ms)
     if hz is not None and opts.cuopt_gpu_peak_gb is not None and any(p.kind == "cuopt" for p in arm.procs):
         raise RunError("a job with a harness is budgeted on its caps (D-021 R29): a measured cuOpt peak "
                        "(--cuopt-gpu-peak-gb) is refused")
@@ -764,10 +796,15 @@ def plan(job: dict, opts: PairOptions, run_dir: Path, mailbox_spec: str, cfg: EA
             cmd = ["taskset", "-c", ",".join(map(str, cores))] + cmd
         unit = None
         if opts.use_systemd:
-            unit = scope_unit(run_dir.name, spec.role, epoch)
+            # D-021 R27: a named scope; a stop (thermal-watch's `systemctl --user stop`) kills within 5 s instead of
+            # systemd's 90 s, and cuOpt — which has no interrupt API and ignores SIGTERM while it solves — is stopped
+            # with SIGKILL, as the runner's own abort path does
+            unit = scope_unit(run_dir.name, spec.role, epoch_ms)
+            props = ["-p", f"TimeoutStopSec={SCOPE_STOP_TIMEOUT}"] + \
+                (["-p", "KillSignal=SIGKILL"] if spec.kind == "cuopt" else [])
             cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
                    f"--description=itrea {run_dir.name} {spec.role}",
-                   "-p", f"MemoryMax={int(round(mem * 1024))}M", "-p", "MemorySwapMax=0"] + cmd
+                   "-p", f"MemoryMax={int(round(mem * 1024))}M", "-p", "MemorySwapMax=0"] + props + cmd
         procs.append(Proc(spec=spec, argv=argv, cmd=cmd, cores=cores, mem_gb=mem, gpu_gb=g, env_extra=env,
                           log_path=run_dir / f"{spec.role}.log", env_unset=unset, scope_unit=unit))
     return procs
@@ -1233,9 +1270,10 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             reasons += ["gpu health: " + r for r in rec["gpu_health"]["reasons"]]
             status = "void"
             rec["void_cause"] = "gpu_health"
-        # D-021's external causes (R15, R25, R27, R29), each recorded whether or not it decides the status; the first in
-        # VOID_ORDER voids a run that is not void already (a failure of SCIP or the EA stays an arm outcome)
-        checks = void_checks(job, arm, harness, procs, run_dir, rec, opts, t0)
+        # D-021's external causes (R15, R25, R27, R29 and unexplained kills), each recorded whether or not it decides
+        # the status; the first in VOID_ORDER voids a run that is not void already (a failure of SCIP or the EA,
+        # their caps included, stays an arm outcome); what decides nothing is in void_info
+        checks, rec["void_info"] = void_checks(job, arm, harness, procs, run_dir, rec, opts, t0)
         rec["void_checks"] = {c: why for c, why in checks}
         if status != "void" and checks:
             cause, why = checks[0]
@@ -1253,7 +1291,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     return rec
 
 
-VOID_ORDER = ("thermal_watch", "gpu_cap", "cuopt_memory", "compiled_on_clock")   # D-021's void causes, by precedence
+VOID_ORDER = ("thermal_watch", "gpu_cap", "cuopt_memory", "external_kill", "compiled_on_clock")   # by precedence
 
 
 def cuda_cache_on_clock(d: Path, t0_epoch: float | None) -> dict:
@@ -1286,22 +1324,60 @@ def _summary(run_dir: Path, role: str) -> dict:
         return {}
 
 
-def cuopt_memory_fault(p: Proc, run_dir: Path) -> str | None:
-    """D-021 R29: cuOpt failed at its own cap — an RMM allocation error (cuOpt's error status 6 "Memory allocation
-    failed", or an RMM out-of-memory exception; the warm-up's included) or a SIGKILL the runner did not send (the scope's
-    OOM kill at MemoryMax). None otherwise."""
+def _exit_epoch(p: Proc) -> float | None:
+    if p.launch_epoch is None or p.launch_mono is None or p.exit_mono is None:
+        return None
+    return p.launch_epoch + (p.exit_mono - p.launch_mono)
+
+
+def _maxrss_gb(p: Proc) -> float | None:
+    return round(p.rusage.ru_maxrss / 1048576, 3) if p.rusage is not None else None
+
+
+def _unsent_sigkill(p: Proc) -> bool:
+    """A SIGKILL the runner did not send (its own kills set `killed`)."""
+    return p.exit_code == -signal.SIGKILL and p.killed is None
+
+
+def cap_kill(p: Proc, scope_result: Callable[[str], str | None] | None = None) -> str | None:
+    """A SIGKILL the runner did not send that was the process's own host cap (D-021 R29): its scope's Result is
+    `oom-kill`, or its peak RSS reached HOST_CAP_SHARE of its MemoryMax. None otherwise (also for any other exit)."""
+    if not _unsent_sigkill(p):
+        return None
+    res = (scope_result or gates.scope_result)(p.scope_unit) if p.scope_unit else None
+    rss = _maxrss_gb(p)
+    if res == "oom-kill" or (rss is not None and rss >= HOST_CAP_SHARE * p.mem_gb):
+        return f"{p.role}: killed at its {p.mem_gb:g} GB host cap (scope Result {res}, maxrss {rss} GB)"
+    return None
+
+
+def rmm_error(p: Proc, run_dir: Path) -> dict | None:
+    """cuOpt's RMM allocation error from its summary (error status 6 "Memory allocation failed", or an RMM / cuOpt
+    out-of-memory exception; the warm-up's included): {reason, peak, limit, at_cap}; at_cap = the peak reached
+    RMM_CAP_SHARE of the limit (R29's 0.8 x cap reading). None when there is none."""
     if p.spec.kind != "cuopt":
         return None
     s = _summary(run_dir, p.role)
     err = " ".join(str(s.get(k) or "") for k in ("error", "error_message"))
     low = err.lower()
-    if (s.get("error_status") == 6 and "memory allocation failed" in low) or \
-            any(k in low for k in ("out_of_memory", "outofmemory", "std::bad_alloc")):
-        return f"{p.role}: RMM allocation error at its {p.gpu_gb:g} GB limit ({err.strip()[:200]})"
-    if p.exit_code == -signal.SIGKILL and p.killed is None:
-        rss = round(p.rusage.ru_maxrss / 1048576, 2) if p.rusage is not None else None
-        return f"{p.role}: SIGKILL not sent by the runner at its {p.mem_gb:g} GB host cap (maxrss {rss} GB)"
-    return None
+    if not ((s.get("error_status") == 6 and "memory allocation failed" in low) or
+            any(k in low for k in ("out_of_memory", "outofmemory", "std::bad_alloc"))):
+        return None
+    peak, lim = s.get("rmm_peak_bytes"), s.get("rmm_limit_bytes")
+    at_cap = bool(peak and lim and float(peak) >= RMM_CAP_SHARE * float(lim))
+    return dict(reason=f"{p.role}: RMM allocation error, peak {peak} of limit {lim} bytes ({err.strip()[:160]})",
+                peak=peak, limit=lim, at_cap=at_cap)
+
+
+def cuopt_memory_fault(p: Proc, run_dir: Path, scope_result: Callable[[str], str | None] | None = None) -> str | None:
+    """D-021 R29: cuOpt failed at its own cap, CONFIRMED — an RMM allocation error whose peak reached 0.8 x the limit,
+    or a SIGKILL at its host cap (`cap_kill`). None otherwise."""
+    if p.spec.kind != "cuopt":
+        return None
+    r = rmm_error(p, run_dir)
+    if r is not None and r["at_cap"]:
+        return r["reason"]
+    return cap_kill(p, scope_result)
 
 
 def _external_stop(p: Proc, run_dir: Path) -> bool:
@@ -1312,58 +1388,117 @@ def _external_stop(p: Proc, run_dir: Path) -> bool:
     return p.exit_code in (-signal.SIGTERM, -signal.SIGKILL) or _summary(run_dir, p.role).get("exit_reason") == "sigterm"
 
 
+def thermal_watch_hits(lines: list[str], procs: list[Proc]) -> tuple[list[str], set[str]]:
+    """thermal-watch's HOT lines that name one of the run's scope units in their stopped list, and the roles they
+    stopped."""
+    units = {p.scope_unit: p.role for p in procs if p.scope_unit}
+    hits, roles = [], set()
+    for line in lines:
+        named = {u for u in gates.parse_hot_line(line)["units"] if u in units}
+        if named:
+            hits.append(line)
+            roles |= {units[u] for u in named}
+    return hits, roles
+
+
 def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc], run_dir: Path, rec: dict,
-                opts: PairOptions, t0: float | None) -> list[tuple[str, str]]:
-    """D-021's external void causes found in a finished run, in VOID_ORDER: [(cause, reason)].
-    - thermal_watch (R27): thermal-watch's 98 °C stop line between the first launch and now (after an external stop
-      of a process, waited for up to opts.thermal_watch_wait_s: the line is written after the units are stopped);
+                opts: PairOptions, t0: float | None) -> tuple[list[tuple[str, str]], dict]:
+    """D-021's external void causes of a finished run, in VOID_ORDER: ([(cause, reason)], info). `info` records what
+    was seen but decides nothing (HOT lines that name none of our scopes, a fan state with cap=1 stamped outside the
+    timed window, an RMM error below the cap, a cap hit of cuOpt under `cuopt_memory_void: false`, the gpu_cap
+    details the pool reads: `gpu_cap.unknown_lock`).
+    - thermal_watch (R27): a thermal-watch HOT line (>= 98 °C) whose stopped list names one of this run's scope units,
+      stamped between the first launch and the last exit + opts.thermal_watch_wait_s (after an external stop the
+      runner waits that long for it: the line is written after the units are stopped);
     - gpu_cap (R25, GPU arms, opts.cap_floor_mhz set): busy SM median < cap_floor_mhz, or the timed window overlaps a
-      governor clock-cap interval (its log), or the governor's state read cap=1 at the start or the end;
-    - cuopt_memory (R29, with a harness): `cuopt_memory_fault`;
+      governor clock-cap interval (its log), or a fan state read cap=1 with its own timestamp inside the timed window;
+    - cuopt_memory (R29, with a harness whose cuopt_memory_void is on): `cuopt_memory_fault` (a confirmed cap hit);
+    - external_kill (every arm): a SIGKILL of any process that the runner did not send and that is neither its own
+      host cap (`cap_kill`: an arm outcome for SCIP / the EA, cuopt_memory or an arm outcome for cuOpt) nor
+      thermal-watch's stop;
     - compiled_on_clock (R15, with a harness whose cuda_cache is on): an entry of the project's CUDA cache, or of the
       EA's CuPy cache, written after t0 (the same terms for both GPU codes)."""
     out: list[tuple[str, str]] = []
+    info: dict = {}
     launched = [p.launch_epoch for p in procs if p.launch_epoch is not None]
+    tw_roles: set[str] = set()
     if launched:
         t_from = min(launched)
-        hot = gates.thermal_watch_stops(t_from, time.time())
-        if not hot and any(_external_stop(p, run_dir) for p in procs):
-            end = time.monotonic() + opts.thermal_watch_wait_s
-            while not hot and time.monotonic() < end:
-                time.sleep(2.0)
-                hot = gates.thermal_watch_stops(t_from, time.time())
-        if hot:
-            out.append(("thermal_watch", f"thermal-watch stopped units at >= {gates.THERMAL_WATCH_C:g} °C: {hot[0]}"))
+        exits = [e for e in (_exit_epoch(p) for p in procs) if e is not None]
+        t_to = (max(exits) if exits else time.time()) + opts.thermal_watch_wait_s
+        lines = gates.thermal_watch_stops(t_from, min(time.time(), t_to))
+        hits, tw_roles = thermal_watch_hits(lines, procs)
+        if not hits and any(_external_stop(p, run_dir) for p in procs):
+            while not hits and time.time() < t_to:
+                time.sleep(min(2.0, max(0.05, t_to - time.time())))
+                lines = gates.thermal_watch_stops(t_from, min(time.time(), t_to))
+                hits, tw_roles = thermal_watch_hits(lines, procs)
+        if hits:
+            out.append(("thermal_watch", f"thermal-watch stopped {sorted(tw_roles)} at >= "
+                                         f"{gates.THERMAL_WATCH_C:g} °C: {hits[0]}"))
+        other = [x for x in lines if x not in hits]
+        if other:
+            info["thermal_watch_lines"] = other[:5]       # the box was >= 98 °C, our scopes not named
+    t0e = rec.get("t0_epoch")
     if arm.gpu and t0 is not None and opts.cap_floor_mhz is not None:
         why = []
         med = (rec.get("gpu_health") or {}).get("median_sm_mhz")
-        if med is not None and med < opts.cap_floor_mhz:
+        low = med is not None and med < opts.cap_floor_mhz
+        if low:
             why.append(f"busy SM median {med:.0f} MHz < {opts.cap_floor_mhz:.0f} MHz")
-        t0e = rec.get("t0_epoch")
+        ov: list = []
+        span = min(float(job["budget"]), float(rec.get("wall_s") or 0.0))
         if t0e is not None:
-            span = min(float(job["budget"]), float(rec.get("wall_s") or 0.0))
             ov = gates.cap_overlaps(t0e, t0e + span)
             if ov:
                 why.append(f"overlaps the governor's clock cap ({len(ov)} interval(s) from {ov[0]['on']:.0f})")
+        caps = {}
         for k in ("fan_state_start", "fan_state_end"):
-            if (rec.get(k) or {}).get("cap") == 1:
-                why.append(f"{k}: cap=1")
+            st = rec.get(k) or {}
+            caps[k] = st.get("cap")
+            if st.get("cap") == 1:
+                inside = t0e is not None and st.get("epoch") is not None and t0e <= st["epoch"] <= t0e + span
+                if inside:
+                    why.append(f"{k}: cap=1 at {st.get('iso')}, inside the timed window")
+                else:
+                    info.setdefault("fan_cap_outside_window", []).append(f"{k}: cap=1 at {st.get('iso')}")
+        info["gpu_cap"] = dict(median_sm_mhz=med, floor_mhz=opts.cap_floor_mhz, overlaps=ov,
+                               fan_cap_start=caps["fan_state_start"], fan_cap_end=caps["fan_state_end"],
+                               unknown_lock=bool(low and not ov and caps["fan_state_start"] == 0
+                                                 and caps["fan_state_end"] == 0))
         if why:
             out.append(("gpu_cap", "; ".join(why)))
+    capped: dict[str, str] = {}
+    for p in procs:
+        r = rmm_error(p, run_dir)
+        if r is not None and not r["at_cap"]:
+            info.setdefault("rmm_error_below_cap", []).append(r["reason"])
+        ck = cap_kill(p)
+        if ck:
+            capped[p.role] = ck
+    if capped:
+        info["cap_kills"] = capped                       # SCIP / EA at their caps: arm outcomes (R29)
     if harness is not None:
         mem = [r for r in (cuopt_memory_fault(p, run_dir) for p in procs) if r]
         if mem:
-            out.append(("cuopt_memory", "; ".join(mem)))
-        if harness["cuda_cache"]:
-            cc, cp = rec.get("cuda_cache") or {}, rec.get("cupy_cache") or {}
-            why = []
-            if cc.get("compiled_on_clock"):
-                why.append(f"{cc['n_on_clock']} CUDA cache entries after t0 ({', '.join(cc['entries_on_clock'][:3])})")
-            if cp.get("compiled_on_clock") and any(p.spec.kind == "ea" and p.spec.gpu for p in procs):
-                why.append(f"CuPy cache grew after t0 ({cp.get('files_at_t0')} -> {cp.get('files_at_end')} files)")
-            if why:
-                out.append(("compiled_on_clock", "; ".join(why)))
-    return sorted(out, key=lambda x: VOID_ORDER.index(x[0]))
+            if harness.get("cuopt_memory_void", True):
+                out.append(("cuopt_memory", "; ".join(mem)))
+            else:                                        # M3: the cap hit is the measurement
+                info["cuopt_memory"] = "; ".join(mem)
+    ext = [p for p in procs if _unsent_sigkill(p) and p.role not in capped and p.role not in tw_roles]
+    if ext:
+        out.append(("external_kill", "; ".join(f"{p.role}: SIGKILL not sent by the runner, not at its "
+                                               f"{p.mem_gb:g} GB cap (maxrss {_maxrss_gb(p)} GB)" for p in ext)))
+    if harness is not None and harness["cuda_cache"]:
+        cc, cp = rec.get("cuda_cache") or {}, rec.get("cupy_cache") or {}
+        why = []
+        if cc.get("compiled_on_clock"):
+            why.append(f"{cc['n_on_clock']} CUDA cache entries after t0 ({', '.join(cc['entries_on_clock'][:3])})")
+        if cp.get("compiled_on_clock") and any(p.spec.kind == "ea" and p.spec.gpu for p in procs):
+            why.append(f"CuPy cache grew after t0 ({cp.get('files_at_t0')} -> {cp.get('files_at_end')} files)")
+        if why:
+            out.append(("compiled_on_clock", "; ".join(why)))
+    return sorted(out, key=lambda x: VOID_ORDER.index(x[0])), info
 
 
 def launch_env(p: Proc, base: dict | None = None) -> dict:

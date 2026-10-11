@@ -36,9 +36,10 @@ GPU_OVERHEAD_GB = 1.0      # non-pool GPU memory per CUDA process (context, cuSP
 REDIS_CAP_GB = 2.0         # the itrea-redis container's memory cap (D-006)
 WATCHDOG_FLOOR_GB = 18.0   # live: below this, stop the run set
 THERMAL_WAIT_C = 80.0      # do not START a run at or above this (D-003: start only below 80 °C)
-THERMAL_WAIT_C_CPU = 88.0  # CPU-only runs (no GPU process) may start below this (D-008: the X925 cores ran at their full
+THERMAL_WAIT_C_CPU = 86.0  # CPU-only runs (no GPU process) may start below this (D-008: the X925 cores ran at their full
                            # 3.9 GHz at 88–89 °C with 8 SCIP lanes, 2026-10-06 02:54; the 80 °C start rule protects the
-                           # GPU arms' clock state and only idled CPU lanes). Pause/resume (92/80 °C) are unchanged.
+                           # GPU arms' clock state and only idled CPU lanes). 88 until 2026-10-11; 86 since D-008's
+                           # 10-06 addendum (88 gave 8 pauses in 24 min) and D-021 R24. Pause/resume (92/80 °C) unchanged.
 THERMAL_PAUSE_C = 92.0     # pause the run set at or above this ...
 THERMAL_RESUME_C = 80.0    # ... until below this
 SERVING_UNITS = ("ornith-vllm", "llama-qwen38")
@@ -242,6 +243,39 @@ def thermal_watch_stops(t_from: float, t_to: float, root: str | os.PathLike | No
             if ts is not None and t_from <= ts <= t_to:
                 out.append(line)
     return out
+
+
+def parse_hot_line(line: str) -> dict:
+    """thermal-watch's stop line `<iso> HOT <n>C stopped:<units>` -> {epoch, c, units} (unit names without `.scope`;
+    `stopped: none` gives no units)."""
+    iso, _, msg = (line or "").partition(" ")
+    c, units = None, []
+    if msg.startswith("HOT "):
+        head, _, rest = msg.partition("stopped:")
+        try:
+            c = float(head.split()[1].rstrip("C"))
+        except (IndexError, ValueError):
+            c = None
+        units = [u[: -len(".scope")] if u.endswith(".scope") else u for u in rest.split() if u != "none"]
+    return dict(epoch=_iso_epoch(iso), c=c, units=units)
+
+
+def scope_result(unit: str) -> str | None:
+    """The `Result` of a run's transient scope after its process ended (`oom-kill` for a kill at MemoryMax), or None
+    when it cannot be read; a failed scope is reset afterwards so it does not linger in the user manager."""
+    name = unit if unit.endswith(".scope") else unit + ".scope"
+    try:
+        r = subprocess.run(["systemctl", "--user", "show", "-p", "Result", "--value", name], capture_output=True,
+                           text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    res = r.stdout.strip() or None
+    if res and res != "success":
+        try:
+            subprocess.run(["systemctl", "--user", "reset-failed", name], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return res
 
 
 def wait_cool(start_below: float = THERMAL_WAIT_C, timeout_s: float = 3600.0, poll_s: float = 30.0,

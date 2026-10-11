@@ -486,9 +486,15 @@ def test_launcher_failure_before_ready_is_void_and_halts_the_pool(toy, fake, tmp
     rec = pair.run_pair(_jobs([toy], ["A0"])[0], popts(tmp_path, fake))
     assert rec["status"] == "void" and rec["void_cause"] == "runner_error"
     monkeypatch.delenv("FAKE_EXIT_EARLY_SOLVER")
-    monkeypatch.setenv("FAKE_SIGKILL_EARLY_SOLVER", "1")                # a signal (OOM kill, segfault): the arm's
-    rec = pair.run_pair(_jobs([toy], ["A0"], seeds=(2,))[0], popts(tmp_path, fake))
-    assert rec["status"] == "failed"
+    monkeypatch.setenv("FAKE_SIGKILL_EARLY_SOLVER", "1")                # a signal: an OOM kill at the process's
+    real_cap_kill = pair.cap_kill                                       # own cap is the arm's failure ...
+    monkeypatch.setattr(pair, "cap_kill", lambda p, scope_result=None:
+                        f"{p.role}: killed at its cap" if p.exit_code == -9 else None)
+    rec = pair.run_pair(_jobs([toy], ["A0"], seeds=(2,))[0], popts(tmp_path, fake, thermal_watch_wait_s=0.2))
+    assert rec["status"] == "failed" and rec["void_info"]["cap_kills"]
+    monkeypatch.setattr(pair, "cap_kill", real_cap_kill)                # ... an unexplained SIGKILL (no cap, not
+    rec = pair.run_pair(_jobs([toy], ["A0"], seeds=(3,))[0], popts(tmp_path, fake, thermal_watch_wait_s=0.2))
+    assert rec["status"] == "void" and rec["void_cause"] == "external_kill"   # thermal-watch's) is external
     monkeypatch.delenv("FAKE_SIGKILL_EARLY_SOLVER")
     monkeypatch.setenv("FAKE_EXIT_EARLY_SOLVER", "1")
     p = pool.Pool(_jobs(_toys(tmp_path, 2), ["A0"]), poolopts(tmp_path, po=popts(tmp_path / "p", fake)))
@@ -645,9 +651,10 @@ def test_screen2_from_the_run_table(tmp_path, monkeypatch):
 
 
 def test_thermal_start_gate_depends_on_gpu_use():
-    """D-008: CPU-only arms start below 88 °C, GPU arms below 80 °C."""
+    """D-008: CPU-only arms start below 86 °C (88 until D-021 R24 took D-008's 10-06 addendum), GPU arms below 80 °C."""
     from itrea.experiments import gates, pool
-    assert gates.THERMAL_WAIT_C == 80.0 and gates.THERMAL_WAIT_C_CPU == 88.0
+    assert gates.THERMAL_WAIT_C == 80.0 and gates.THERMAL_WAIT_C_CPU == 86.0
+    assert pool.PoolOptions().thermal_start_c_cpu == 86.0
     assert pool._arm_uses_gpu({"arm": "SCREEN"}) is False
     assert pool._arm_uses_gpu({"arm": "A0"}) is False
     assert pool._arm_uses_gpu({"arm": "A3"}) is True

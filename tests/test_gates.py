@@ -357,3 +357,13 @@ def test_thermal_watch_stop_lines_across_midnight(tmp_path):
     assert len(got) == 2 and "itrea-run-ab-cuopt-1.scope" in got[0]
     assert gates.thermal_watch_stops(a, _ep("2026-10-11T23:59:35+02:00"), tmp_path) == []
     assert gates.THERMAL_DIR / "fan-state" == gates.FAN_STATE and gates.REST_FLAG == gates.THERMAL_DIR / "rest"
+
+
+def test_thermal_watch_hot_line_parsing():
+    """thermal-watch's stop line names the units it stopped (`.scope` dropped); `stopped: none` names none."""
+    d = gates.parse_hot_line("2026-10-11T23:59:40+02:00 HOT 98C stopped: itrea-run-ab12-cuopt-1791716000123.scope "
+                             "issue7.service")
+    assert d["c"] == 98.0 and d["units"] == ["itrea-run-ab12-cuopt-1791716000123", "issue7.service"]
+    assert d["epoch"] == _ep("2026-10-11T23:59:40+02:00")
+    assert gates.parse_hot_line("2026-10-11T23:59:40+02:00 HOT 99C stopped: none")["units"] == []
+    assert gates.parse_hot_line("2026-10-11T23:59:40+02:00 acpi_max=97C gpu=1")["units"] == []
