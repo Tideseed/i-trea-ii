@@ -375,3 +375,21 @@ the −0.06 s selection named; R13 + R14 bundled as a stated deviation with an e
 3. **Calendar: "We'll cross that bridge when we come to it."** — no near-daily schedule or 26.08 insurance runs are
    planned now; the question returns when 26.10's date (or Fri 11-06) is known.
 4. **Time limit: "Keep 600 s"** (R11 unchanged).
+
+## M1 and M2 results (2026-10-11) — F accepted
+- **M1 smoke** (15:12–15:33, 12/12, 0 void): every harness setting as specified (A6F cuOpt on 5 cores / 5 threads, A2F
+  4 / 4, A9's cuOpt 3; gaps 0; env unset; RMM 24 / host 24; named scopes; no compile on the clock; SM 2,392–2,405 MHz;
+  in-run maximum ≤ 78.5 °C). **R14 measured inert:** cuOpt CPU-s per wall-s 5.02 / 4.99 / 5.03 unset vs 5.02 / 4.98 /
+  5.03 set.
+- **M2 soak** (15:35–16:34, pool 20261011-153534-1276706, `--pause-c 90`; one 20-min governor rest between the comp21
+  arms): 4/4 completed, 0 void. Per run, from the 5-s fine log, steady state = from t0 + 120 s or fan MAX + 60 s:
+
+  | run | start °C | steady p95 | steady max | first 60 s max | ≥ 90 °C | caps | busy SM | GPU W (median) | cuOpt CPU-s / wall-s |
+  |---|---|---|---|---|---|---|---|---|---|
+  | comp21-2idx A6F | 43.7 (fan auto) | 70 | 70 | 68 | 0 | 0 | 2,392 | 18.9 | 4.97 |
+  | comp21-2idx A9 | 38.5 | 68 | 68 | 64 | 0 | 0 | 2,392 | 21.8 | 2.99 |
+  | toguru A6F | 52.7 | 73 | 76 | 70 | 0 | 0 | 2,392 | 24.8 | 4.88 |
+  | toguru A9 | 53.8 | 66 | 67 | 67 | 0 | 0 | 2,392 | 15.3 | 2.97 |
+
+  **R23 holds on every run → F (X925 5–6, A725 1–3, GPU) is accepted for v1** (p95 ≤ 85 °C, no sample ≥ 90 °C, no cap,
+  SM ≥ 2,350 MHz). The whole box never exceeded 76 °C in 600-s runs at F, 16 °C below the void line.
