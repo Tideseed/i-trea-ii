@@ -24,8 +24,11 @@ the only place the mapping lives.
     itrea prereg …             the pre-registered analysis (D-002 v3.1)
     itrea lineage ROOT …       the descriptive Rank 0 lineage metric
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
-    itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict
+    itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict;
+                               --stage 1y = D-023 (phase Y only: A9@boY vs A9@bo1s + A6F, set backoff2)
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
+    itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
+    (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off, from D-022's outcome)
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)
@@ -55,9 +58,12 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "prereg": ("itrea.analysis.prereg", (), "the pre-registered analysis (D-002 v3.1)"),
     "lineage": ("itrea.analysis.lineage", (), "descriptive Rank 0 lineage metric"),
     "reproduce": ("itrea.analysis.reproduce", (), "re-derive datasets/ and paper/generated/ and compare"),
-    "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off (D-018): stage-0 / stage-1 rules, verdict"),
+    "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off: D-018 stage 0 / 1 and D-023's stage 1y "
+                       "(phase Y only), rules applied, verdict"),
     "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas calibration vs GAMS's cuOpt GB10 row: --arm A6F "
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
+    "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "
+                    "outcome rule, C1's interim A9 result"),
     "exchange": ("itrea.experiments.exchange_ctl", (), "the itrea-redis container: up | down | status | flush RUN_ID"),
     "bench-ls": ("path:tools/bench_ls.py", (), "local-search benchmark"),
     "env": ("itrea.experiments.record_env", (), "environment record (versions, hardware, git state)"),
