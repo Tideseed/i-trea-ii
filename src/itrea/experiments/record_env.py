@@ -101,6 +101,13 @@ def is_ancestor(tag: str, rev: str = "HEAD", root: Path | None = None) -> bool:
     return _git("merge-base", "--is-ancestor", tag, rev, root=root).returncode == 0
 
 
+def file_at(rev: str, path: str, root: Path | None = None) -> bytes | None:
+    """The bytes of `path` (relative to the repository root) in commit `rev` (`git show rev:path`); None if the
+    revision or the file does not exist there."""
+    r = subprocess.run(["git", "-C", str(root or ROOT), "show", f"{rev}:{path}"], capture_output=True, timeout=30)
+    return r.stdout if r.returncode == 0 else None
+
+
 def dirty_paths(paths: tuple[str, ...] = ("src", "configs"), root: Path | None = None) -> list[str] | None:
     """Uncommitted changes (tracked or untracked) under `paths`; None if not a git checkout."""
     r = _git("status", "--porcelain", "--", *paths, root=root)

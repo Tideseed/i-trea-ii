@@ -15,7 +15,8 @@ the only place the mapping lives.
     itrea pair …               one run (smoke tests; the pool runs job files)
     itrea pool JOBS …          a job file under every D-002 / D-003 control
     itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0 | backoff1 |
-                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1)
+                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1) |
+                               itx-v1 --tier T1..T5 | itx-a0 | itx-m6 | itx-m6a (D-021 phase 2)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -30,6 +31,8 @@ the only place the mapping lives.
     itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
     (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off, from D-022's outcome — the A9 arms' harness;
      D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
+    itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
+    itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)
@@ -50,7 +53,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pair": ("itrea.experiments.pair", (), "one run: launch, barrier, stop, exit codes, run.json"),
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
-                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13)"),
+                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13, itx-v1, itx-a0, itx-m6, itx-m6a)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
@@ -65,6 +68,9 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
     "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "
                     "outcome rule, C1's interim A9 result"),
+    "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
+    "itx-report": ("itrea.analysis.itx_report", (), "D-021 (ITX-1) v1 analysis: target, minimum, stratified estimates, "
+                   "race and A0 secondaries, geo-means, D-019 literal, published rows; --m6 lanes"),
     "exchange": ("itrea.experiments.exchange_ctl", (), "the itrea-redis container: up | down | status | flush RUN_ID"),
     "bench-ls": ("path:tools/bench_ls.py", (), "local-search benchmark"),
     "env": ("itrea.experiments.record_env", (), "environment record (versions, hardware, git state)"),

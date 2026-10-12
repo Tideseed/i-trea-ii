@@ -176,6 +176,76 @@ def test_freeze_check_tag_must_be_an_ancestor(repo):
         pool.check_frozen([_tjob(repo)], root=repo)
 
 
+def test_external_a9_jobs_are_sealed_until_prereg_v2(repo):
+    """D-021 R33: an external job (split ext) of an arm with the EA needs the tag prereg-v2 as an ancestor of HEAD AND
+    the configuration registered with it (configs/frozen-v2.yaml in the tagged commit, unchanged since; every A9 job's
+    config hash equal to it, no overrides): an A9 tier written on the development default is refused even after the
+    tag. A0 and A6F's external jobs need prereg-v1 only; every external job needs a clean tree under src/ and
+    configs/."""
+    _git(repo, "tag", "prereg-v1")
+    a9 = dict(_tjob(repo, split="ext"), arm="A9")
+    a6f, a0 = dict(a9, arm="A6F", config=None), dict(a9, arm="A0", config=None)
+    out = pool.check_frozen([a6f, a0], root=repo)
+    assert "prereg_v2" not in out and out["ext_jobs"] == 2
+    with pytest.raises(gates.GateError, match="R33.*prereg-v2"):
+        pool.check_frozen([a6f, a9], root=repo)
+    with pytest.raises(gates.GateError, match="prereg-v2"):
+        pool.check_frozen([a9], allow_unfrozen=True, root=repo)                 # never bypassed
+    _git(repo, "tag", "prereg-v2")                                              # tagged without a registered config
+    with pytest.raises(gates.GateError, match="frozen-v2.yaml does not exist"):
+        pool.check_frozen([a6f, a9], root=repo)
+    # the C1 freeze, registered with the tag (another configuration than the development one the job carries)
+    v2 = EAConfig().with_overrides({"population.size": 96})
+    (repo / "configs" / "frozen-v2.yaml").write_text(yaml.safe_dump(v2.to_dict()))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "C1 freeze")
+    with pytest.raises(gates.GateError, match="not in the commit tagged prereg-v2"):
+        pool.check_frozen([a9], root=repo)
+    _git(repo, "tag", "-f", "prereg-v2")
+    with pytest.raises(gates.GateError, match="config hash .* != prereg-v2's"):     # the development default
+        pool.check_frozen([a6f, a9], root=repo)
+    good = dict(a9, config=str(repo / "configs" / "frozen-v2.yaml"))
+    out = pool.check_frozen([a6f, good], root=repo)
+    assert out["prereg_v2"] and out["frozen_v2_hash"] == v2.hash()
+    with pytest.raises(gates.GateError, match="overrides"):
+        pool.check_frozen([dict(good, overrides={"population.size": 64})], root=repo)
+    # the file changed after the tag
+    (repo / "configs" / "frozen-v2.yaml").write_text(yaml.safe_dump(EAConfig().to_dict()))
+    _git(repo, "commit", "-q", "-am", "edit after the tag")
+    with pytest.raises(gates.GateError, match="differs from the file registered"):
+        pool.check_frozen([good], root=repo)
+    _git(repo, "revert", "--no-edit", "HEAD")
+    assert pool.check_frozen([good], root=repo)["frozen_v2_hash"] == v2.hash()
+    # a dirty tree: refused for every external job, A0's and A6F's too
+    (repo / "src" / "x.py").write_text("x = 3\n")
+    with pytest.raises(gates.GateError, match="external .* clean"):
+        pool.check_frozen([a0], root=repo)
+
+
+def test_block_priority_groups():
+    """D-021 phase 2: when every job carries `priority`, the groups run in increasing priority, each in the usual
+    seeded order with strata interleaved; mixed (some with, some without) and two priorities in one block are refused;
+    files without the field keep their order."""
+    jobs = []
+    for s, n, pr in (("a", 6, 1), ("b", 6, 0), ("c", 4, 2)):
+        jobs += [dict(j, priority=pr) for j in _jobs([f"/x/{s}{i}.mps" for i in range(n)], ["A0"], stratum=s)]
+    order = pool.order_blocks(pool.make_blocks(jobs), seed=7)
+    assert [b.priority for b in order] == [0] * 6 + [1] * 6 + [2] * 4
+    assert [b.key for b in order[:6]] == [b.key for b in pool.order_blocks(pool.make_blocks(
+        [j for j in jobs if j["priority"] == 0]), seed=7)]
+    plain = [{k: v for k, v in j.items() if k != "priority"} for j in jobs]
+    assert [b.key for b in pool.order_blocks(pool.make_blocks(plain), seed=7)] == \
+        [b.key for b in pool._order_group(pool.make_blocks(plain), 7)]
+    with pytest.raises(pool.PoolError, match="some blocks carry a priority"):
+        pool.order_blocks(pool.make_blocks(plain[:3] + jobs[3:]), seed=7)
+    two = _jobs(["/x/z.mps"], ["A0", "A1"])
+    two[1]["priority"] = 1
+    with pytest.raises(pool.PoolError, match="different priorities"):
+        pool.make_blocks(two)
+    with pytest.raises(pool.PoolError, match="integer"):
+        pool.make_blocks([dict(jobs[0], priority="1")])
+
+
 def test_freeze_check_needs_frozen_file(repo):
     _git(repo, "rm", "-q", "configs/frozen-e2.yaml")
     _git(repo, "commit", "-q", "-m", "drop")
@@ -584,6 +654,44 @@ def test_d021_voids_requeue_once_then_skip(env, monkeypatch, cause):
     (sk,) = json.loads((tmp_path / "logs" / "pool-status.json").read_text())["skipped"]
     assert sk["reason"] == cause and sk["voids"] == 2 and len(sk["run_ids"]) == 2
     assert any(auto_waits) == (cause == "gpu_cap")
+
+
+def test_ref_rejected_reruns_the_block_once_with_the_stop_off(env, monkeypatch):
+    """D-021 R12: a block voided by ref_rejected (the stop's incumbent not confirmed) is rerun first and whole with
+    `ref_stop_off` in every job of the rerun — the same run ids —, once; a resumed pool finds the earlier void in the
+    set's void.jsonl and keeps the stop off."""
+    tmp_path, fake, insts = env
+    jobs = [dict(j, harness="itx1") for j in _jobs(insts, ["A6F", "A9"])]
+    first: dict = {}
+    seen = []
+
+    def script(i, job):
+        first.setdefault("block", job["block"])
+        seen.append((job["block"], job["arm"], job.get("ref_stop_off")))
+        if job["block"] == first["block"] and job["arm"] == "A6F" and not job.get("ref_stop_off"):
+            return "void", "ref_rejected", None
+        return "completed", None, None
+    run_pair, calls = _fake_run_pair(tmp_path, script)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    p = pool.Pool(jobs, popts(tmp_path, fake, governor=False, max_heat_voids=0))
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert p.run() == 0 and p.halt_reason is None
+    assert p.counts["requeues"] == {"ref_rejected": 1} and not p.counts["blocks_skipped_cause"]
+    reruns = [s for s in seen if s[0] == first["block"] and s[2]]
+    assert len(reruns) == 2 and all("rerun after ref_rejected" in s[2] for s in reruns)       # the whole block
+    assert all(s[2] is None for s in seen if s[0] != first["block"])
+    po = popts(tmp_path, fake).pair_opts
+    j0 = next(j for j in jobs if j["block"] == first["block"])
+    assert pair.run_id_for(dict(j0, ref_stop_off="x"), po) == pair.run_id_for(j0, po)
+    # resume: the rerun's directories are gone (interrupted), the void.jsonl line remains
+    import shutil
+    for d in (tmp_path / "traces" / "raw" / "pytest").iterdir():
+        if d.is_dir() and d.name != "void" and d.name.startswith(Path(j0["instance"]).stem):
+            shutil.rmtree(d)
+    seen.clear()
+    p = pool.Pool(jobs, popts(tmp_path, fake, governor=False, max_heat_voids=0))
+    assert p.run() == 0
+    assert seen and all(s[2] and "void.jsonl, resume" in s[2] for s in seen if s[0] == first["block"])
 
 
 def test_thermal_watch_void_requeues_as_thermal(env, monkeypatch):

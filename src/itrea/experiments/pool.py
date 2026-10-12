@@ -61,6 +61,15 @@ validated before anything runs and refused on test and screening jobs (a prereg-
 carries `position` keeps that order (M2's AB / BA) instead of the Williams row; `--dry-run` prints D-003's arithmetic
 per treatment (e.g. A9 under the ext harness: 9 + 6 + 24 host + 12 + 24 GPU + 2 + 20 = 97 GB) and the governor's state.
 
+D-021 phase 2 (2026-10-12): a job may carry an integer `priority` — when every job of the file does, the block groups
+run in increasing priority, each group in the seeded stratified order (`order_blocks`; A0's H_cu ∪ W_SCIP unseen first,
+M6's loads before its measured runs); a block voided by `ref_rejected` (R12's stop at the proven optimum not confirmed
+by the exact checker) is rerun once, whole and first, with the stop off (`ref_stop_off` in its jobs, outside the run
+id; a resumed pool reads it from the set's void.jsonl); external jobs (split `ext`) of an arm with the EA need the tag
+`prereg-v2` as an ancestor of HEAD and the configuration registered with it (`configs/frozen-v2.yaml`, unchanged since
+the tag; every A9 job's config hash equal to it, no overrides), and every external job needs a clean tree under src/
+and configs/ (R33, `check_frozen`).
+
 Resumable: run directories whose run.json says completed (or failed: a crash is kept, D-002 §6) are skipped. One pool
 at a time (RunLock). Log: logs/pool-<date>.log; status: logs/pool-status.json; voided runs: traces/raw/<set>/void/ and
 void.jsonl (rerun counts per arm are reported from it).
@@ -106,6 +115,9 @@ WHO = "i-trea-ii (Claude Code)"
 FROZEN_CONFIG = "configs/frozen-e2.yaml"
 E0_FLAG = "configs/e0-calibration.yaml"
 CONFIRM_SPLITS = ("test",)
+EXT_SPLIT = "ext"                         # D-021's external (ITX-1) v1 runs: the tiers and A0 (`make-jobs itx-v1`, `itx-a0`)
+PREREG_V2_TAG = "prereg-v2"               # D-021 R33: no A9 outcome on an unseen instance before this tag
+FROZEN_V2_CONFIG = "configs/frozen-v2.yaml"   # A9's v1 configuration (the C1 freeze), committed in the prereg-v2 commit
 QUIET_SPLITS = ("test", "screen")         # both local model servers must be stopped (D-002 §1, D-003)
 
 
@@ -122,8 +134,8 @@ PAIR_CPU_LANES = (pair.Lane("c1", (7, 8)), pair.Lane("c2", (9, 15)), pair.Lane("
 # nine, not ten: D-003's gate (Σ 9 GiB caps + 20 GB reserve) must fit MemAvailable (~108 GB, both servers stopped)
 SCREEN_LANES = tuple(pair.Lane(f"x{c}", (c,)) for c in (5, 6, 7, 8, 9, 15, 16, 17, 18))
 FULL_ARMS = tuple(a for a, spec in pair.ARMS.items() if spec.lane == "full")     # ("A6m",): the whole-box lane's arms
-REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory", "external_kill")   # rerun once (thermal_watch:
-                                                                                      # as a thermal void)
+# rerun once (thermal_watch: as a thermal void); ref_rejected's rerun runs with R12's stop off (D-021 phase 2)
+REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory", "external_kill", "ref_rejected")
 A6M_MEM_GB = dict(cuopt_mem_gb=24.0, gpu_mem_gb=36.0)    # D-020: A6m's host MemoryMax and RMM limit (GAMS's max RSS
                                                          # <= 16 GB on the sample, 49 GB at most over the 233)
 # harness settings a run may not change from PairOptions() defaults, per split (D-002 §1.2 / §1.8, D-003)
@@ -235,6 +247,10 @@ class Block:
     thermal_voids: int = 0              # times the thermal pause voided it (capped by max_thermal_requeues)
     voids: dict = field(default_factory=dict)   # D-021 causes: times each voided it (capped by max_cause_requeues)
     wait_auto: bool = False             # requeued after a cap void: its next run waits for the fan on AUTO (R25)
+    ref_stop_off: str | None = None     # D-021 R12: voided by `ref_rejected` — its rerun runs without the stop (the
+                                        # reason travels in the job as `ref_stop_off`, outside the run id)
+    priority: int | None = None         # D-021 phase 2: the jobs' `priority` (lower runs first; only when every job of
+                                        # the file carries one, `order_blocks`)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -264,6 +280,9 @@ def validate_job(job: dict) -> dict:
         pair.job_harness(job)                     # D-021: a preset name or a dict of known keys
     except pair.RunError as e:
         raise PoolError(f"{pair.arm_label(job)} of {job.get('name') or pair.stem(job['instance'])}: {e}") from None
+    pr = job.get("priority")
+    if pr is not None and (isinstance(pr, bool) or not isinstance(pr, int)):
+        raise PoolError(f"job priority must be an integer, not {pr!r}: {job}")
     return job
 
 
@@ -291,9 +310,12 @@ def make_blocks(jobs: list[dict], master: int = MASTER_SEED) -> list[Block]:
         bid = j.get("block") or f"{name}__s{int(j['seed'])}"
         b = blocks.get((j["set"], bid))
         if b is None:
-            b = blocks[(j["set"], bid)] = Block(j["set"], bid, name, int(j["seed"]), j.get("stratum") or "-")
+            b = blocks[(j["set"], bid)] = Block(j["set"], bid, name, int(j["seed"]), j.get("stratum") or "-",
+                                                priority=j.get("priority"))
         elif b.name != name:
             raise PoolError(f"block {bid} mixes instances {b.name} and {name}")
+        elif b.priority != j.get("priority"):
+            raise PoolError(f"block {bid}: its jobs carry different priorities ({b.priority}, {j.get('priority')})")
         b.runs.append(Run(j, b))
     for b in blocks.values():
         labels = [r.label for r in b.runs]
@@ -311,7 +333,22 @@ def make_blocks(jobs: list[dict], master: int = MASTER_SEED) -> list[Block]:
 
 def order_blocks(blocks: list[Block], seed: int = MASTER_SEED) -> list[Block]:
     """Seeded random order, strata interleaved: within a stratum the blocks are shuffled; the i-th of n_s blocks of
-    stratum s gets the key (i + u)/n_s with u uniform in [0, 1), and the blocks run in key order."""
+    stratum s gets the key (i + u)/n_s with u uniform in [0, 1), and the blocks run in key order.
+
+    When every block carries a `priority` (D-021 phase 2: the jobs' field, e.g. `itx-a0`'s H_cu ∪ W_SCIP unseen first,
+    `itx-m6`'s load before the measured runs) the groups run in increasing priority, each group in its own order by
+    the rule above (same seed); some blocks with and some without is refused. No job file before D-021 phase 2 has the
+    field, so every earlier order is unchanged."""
+    pr = {b.priority for b in blocks}
+    if None in pr and len(pr) > 1:
+        raise PoolError("some blocks carry a priority and some do not: give every job one, or none")
+    if pr and None not in pr:
+        return [b for p in sorted(pr) for b in _order_group([x for x in blocks if x.priority == p], seed)]
+    return _order_group(blocks, seed)
+
+
+def _order_group(blocks: list[Block], seed: int) -> list[Block]:
+    """`order_blocks`' rule on one group of blocks."""
     rng = random.Random(seed)
     by: dict[str, list[Block]] = {}
     for b in sorted(blocks, key=lambda b: b.key):
@@ -329,13 +366,18 @@ def order_blocks(blocks: list[Block], seed: int = MASTER_SEED) -> list[Block]:
 
 # ---------------------------------------------------------------------------------------------- freeze check
 def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | None = None,
-                 frozen: str = FROZEN_CONFIG) -> dict:
+                 frozen: str = FROZEN_CONFIG, frozen_v2: str = FROZEN_V2_CONFIG) -> dict:
     """D-002 §1 / §1.8. `prereg-v1` (an ancestor of HEAD) precedes the first timed run on any candidate instance:
     test-split jobs, screening jobs and any job whose instance is a screening candidate need it, never bypassed;
     other non-toy jobs need it unless allow_unfrozen. Test and screening jobs also need a clean, committed tree under
     src/ and configs/; test jobs need the frozen configuration and no job-level overrides beyond a named ablation file
-    (committed with the tag). Toy smoke jobs (outside data/, not named like a candidate) need nothing. Raises
-    GateError; returns what was checked."""
+    (committed with the tag). Toy smoke jobs (outside data/, not named like a candidate) need nothing. D-021 R33:
+    external jobs (split "ext") of an arm with the EA (A9) need the tag `prereg-v2` as an ancestor of HEAD — before it,
+    no A9 outcome on an unseen instance is run (A0 and A6F's external jobs need only prereg-v1) — AND the configuration
+    registered with it: `configs/frozen-v2.yaml` (the C1 freeze) must exist, be byte-identical to the file in the
+    tagged commit, and every such job's configuration must hash to it, with no free overrides or ablation (as test jobs
+    against frozen-e2). Every external job (A0, A6F, A2F and A9 alike) needs a clean, committed tree under src/ and
+    configs/. Raises GateError; returns what was checked."""
     from itrea.experiments import make_jobs                 # lazy: make_jobs imports this module
     root = root or paths.ROOT
     names, roots = make_jobs.candidate_names(), make_jobs.data_roots()
@@ -358,11 +400,44 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
         if not record_env.is_ancestor(record_env.PREREG_TAG, "HEAD", root):
             raise gates.GateError(f"{record_env.PREREG_TAG} is not an ancestor of HEAD")
         out["prereg"] = record_env.tag_commit(record_env.PREREG_TAG, root)
-    if test or screen:
+    ext = [j for j in jobs if j.get("split") == EXT_SPLIT]
+    ext_ea = [j for j in ext if pair.arm_spec(j).has_ea]
+    out["ext_jobs"] = len(ext)
+    if ext_ea:                    # D-021 R33 (sealing): A9's external runs only after prereg-v2 is tagged
+        if record_env.tag_commit(PREREG_V2_TAG, root) is None or \
+                not record_env.is_ancestor(PREREG_V2_TAG, "HEAD", root):
+            raise gates.GateError(f"{len(ext_ea)} external (split {EXT_SPLIT!r}) job(s) run the EA "
+                                  f"({sorted({pair.arm_label(j) for j in ext_ea})}): D-021 R33 seals A9's outcomes on "
+                                  f"the unseen instances until git tag {PREREG_V2_TAG} exists and is an ancestor of HEAD")
+        out["prereg_v2"] = record_env.tag_commit(PREREG_V2_TAG, root)
+        # ... and only on the configuration registered with the tag (the C1 freeze), never on a development default
+        fz = Path(root) / frozen_v2
+        if not fz.exists():
+            raise gates.GateError(f"{frozen_v2} does not exist: external EA jobs run only on the configuration "
+                                  f"registered with {PREREG_V2_TAG} (the C1 freeze, committed in the tagged commit)")
+        at_tag = record_env.file_at(PREREG_V2_TAG, frozen_v2, root)
+        if at_tag is None:
+            raise gates.GateError(f"{frozen_v2} is not in the commit tagged {PREREG_V2_TAG}: the configuration must be "
+                                  f"registered with the tag")
+        if at_tag != fz.read_bytes():
+            raise gates.GateError(f"{frozen_v2} differs from the file registered at {PREREG_V2_TAG}")
+        fh = EAConfig.from_yaml(fz).hash()
+        for j in ext_ea:
+            h = pair.base_config_hash(j)
+            if h != fh:
+                raise gates.GateError(f"external job {pair.stem(j['instance'])} {pair.arm_label(j)}: config hash {h} "
+                                      f"!= {PREREG_V2_TAG}'s {fh} ({frozen_v2}; write the tiers with "
+                                      f"`make-jobs itx-v1`, whose A9 default is that file)")
+            if j.get("overrides") or j.get("ablation"):
+                raise gates.GateError(f"external job {pair.stem(j['instance'])} {pair.arm_label(j)} carries overrides "
+                                      f"or an ablation ({j.get('overrides') or j.get('ablation')}); v1 runs the "
+                                      f"registered configuration only")
+        out["frozen_v2_hash"] = fh
+    if test or screen or ext:
         dirty = record_env.dirty_paths(root=root)
         if dirty is None or dirty:
-            raise gates.GateError(f"{'test' if test else 'screening'} jobs need a clean, committed tree under src/ and "
-                                  f"configs/ (dirty: {dirty})")
+            kind = "test" if test else "screening" if screen else "external (split ext)"
+            raise gates.GateError(f"{kind} jobs need a clean, committed tree under src/ and configs/ (dirty: {dirty})")
     if test:
         fz = Path(root) / frozen
         if not fz.exists():
@@ -747,10 +822,32 @@ class Pool:
                 continue
             if any(s is not None for s in st):
                 self._move_block_aside(b, "split block (resume)" if any(finished) else "stale run (resume)")
+            prior = self._ref_rejected_before(b, popts)
+            if prior:                              # D-021 R12: a resumed block keeps its rerun's stop off (and cap)
+                b.ref_stop_off = f"rerun after ref_rejected in {prior} (void.jsonl, resume)"
+                b.voids["ref_rejected"] = max(1, b.voids.get("ref_rejected", 0))
             for r in b.runs:                       # orphaned mailboxes of an earlier attempt
                 done = pair.clear_stale(r.job, popts, wait_s=self.o.stale_wait_s)
                 if done["killed"] or done["mailbox_removed"]:
                     self.log(f"cleared stale state of {done['run_id']}: {done}")
+
+    def _ref_rejected_before(self, b: Block, popts: pair.PairOptions) -> str | None:
+        """The run id of an earlier attempt of this block voided by `ref_rejected` (the set's void.jsonl), or None: on
+        resume its rerun still runs with R12's stop off."""
+        ids = {pair.run_id_for(r.job, popts) for r in b.runs}
+        p = Path(popts.traces_dir) / "raw" / b.set / "void.jsonl"
+        try:
+            lines = p.read_text().splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("run_id") in ids and str(d.get("reason") or "").startswith("ref_rejected"):
+                return str(d["run_id"])
+        return None
 
     def _move_block_aside(self, b: Block, reason: str) -> None:
         """Move every run directory of the block to void/ (evidence) and log it in void.jsonl. Processes of an earlier
@@ -1107,9 +1204,10 @@ class Pool:
                 self.log(f"[{lane.name}] {late}; block {b.id} is partly run, so it continues (a stop never splits a "
                          f"block)")
         popts = self._popts(lane)
-        self.log(f"[{lane.name}] start {pair.run_id_for(r.job, popts)} (block {r.block.id}, position "
-                 f"{r.job.get('position')})")
-        rec = pair.run_pair(r.job, popts)
+        job = dict(r.job, ref_stop_off=r.block.ref_stop_off) if r.block.ref_stop_off else r.job
+        self.log(f"[{lane.name}] start {pair.run_id_for(job, popts)} (block {r.block.id}, position "
+                 f"{r.job.get('position')})" + (" with R12's stop off" if r.block.ref_stop_off else ""))
+        rec = pair.run_pair(job, popts)
         st = rec["status"]
         if st == "void":
             with self.cv:
@@ -1133,6 +1231,8 @@ class Pool:
                                     else ("thermal_watch", rec["run_id"], time.time()), cause or "thermal")
                 elif cause in REQUEUE_CAUSES:          # D-021: requeued once, then skipped and listed
                     r.block.requeue, r.block.requeue_cause = True, cause
+                    if cause == "ref_rejected":        # R12: the rerun of the whole block runs without the stop
+                        r.block.ref_stop_off = f"rerun after ref_rejected in {rec['run_id']}"
                     if cause == "gpu_cap":
                         r.block.wait_auto = True
                         self._heat_void(("gpu_cap", rec["run_id"], time.time()), cause)

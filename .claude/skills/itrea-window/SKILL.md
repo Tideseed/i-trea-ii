@@ -53,6 +53,25 @@ Berk usually does not coordinate the sessions — the lease does.
    ≥ 90 °C, no cap, busy SM median ≥ 2,350 MHz) before M3 / M4. **A6m (D-020) is out of v1 (D-021 R9)**: its pool
    (`--layout full --cuopt-mem-gb 24 --gpu-mem-gb 36`, 81 GB, `make-jobs mipfeas-cal`) runs only through the heat
    ladder with Berk's yes for that window.
+   **ITX-1 phase 2 (2026-10-12):** the v1 tiers (`itrea make-jobs itx-v1 --tier T1..T5 --out F`, written only once
+   cuOpt 26.10 is in and `prereg-v2` is tagged with `configs/frozen-v2.yaml` — A9's configuration, the C1 freeze — in
+   the tagged commit; the writer refuses an A9 tier without that file, and the pool refuses external A9 jobs unless the
+   tag is an ancestor of HEAD, the file is unchanged since it and the jobs' config hashes to it, R33) carry preset
+   `itx1` (ext + R12's stop at the proven optimum + cuOpt killed at a definitive outcome + `scoped_hash`: A0's run ids
+   depend only on its SCIP-side harness): same gates as ext (A9 97, A2F 78, A6F 69 GB). Every external job (A0's too)
+   needs a clean tree under `src/` and `configs/`. **Check the installed cuOpt against the jobs' variant tag
+   (`v1c2610`) before the pool** — the pool does not. CPU-only windows (both servers off: every job has a harness; the
+   memory column is the pool's gate, the 20-GB reserve counted once):
+   | step | file (set) | runs | layout | memory | run hours |
+   |---|---|---|---|---|---|
+   | M6 alone | `itx-m6a.jsonl` (itx-m6a): crna, fhnw-binpack4-48, glass4 × A0 × 60 s | 3 | `--layout screen --cpu-lanes 1` | 9 + 20 = 29 GB | 0.05 |
+   | M6 beside + heat | `itx-m6.jsonl` (itx-m6): 3 loads, then the 3 measured runs beside them, then 11 loads × 600 s (`priority`) | 17 | `--layout screen --cpu-lanes 4` | 4 × 9 + 20 = 56 GB | ≈ 0.6 (4 lanes, 30+ min) |
+   | A0 | `itx-a0.jsonl` (itx-a0): A0@v1 × the 230, itx1, 600 s, seed 2000; H_cu ∪ W_SCIP unseen (81) first | 230 | `--layout screen --cpu-lanes 4` (3 if M6 says so) | 4 × 9 + 20 = 56 GB (3 lanes: 47) | 24–33 serial (D-021), ≈ 6–8.3 on 4 lanes |
+
+   Read M6 with `itrea build-runs` then `itrea itx-report --m6` (4 lanes iff nodes/s beside is at most 3 % slower and
+   the hottest zone stays < 85 °C). The screen layout's single-core X925 lanes need no E0 flag (the pair layout's
+   `--cpu-lanes` does). A block voided by `ref_rejected` (R12's trigger not confirmed by the exact checker) is rerun once
+   with the stop off — normal, counted in `counts.requeues`.
 4. Confirmatory runs (and the screening pass) need **both LLM servers stopped** (vLLM serving Ornith-1.5-35B-A3B on
    :8094, llama.cpp serving Qwen3.8-27B on :8092; Berk's yes of 2026-10-05). Schedule the restore **first**, then stop:
    ```bash
@@ -91,8 +110,9 @@ Berk usually does not coordinate the sessions — the lease does.
   state with cap=1 stamped inside the run) — the block is rerun once, after the fan reads AUTO; a low clock with the
   governor's cap off before and after and no cap interval (an unknown lock, e.g. left by a governor restart; it needs
   `sudo nvidia-smi -rgc`) halts the pool at once; `compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth
-  after t0), `cuopt_memory` (harness: cuOpt's cap confirmed) and `external_kill` (any arm: a SIGKILL the runner did not
-  send, at no cap) — rerun once; `thermal_watch` (thermal-watch stopped one of the run's scopes at ≥ 98 °C) — rerun as
+  after t0), `cuopt_memory` (harness: cuOpt's cap confirmed), `external_kill` (any arm: a SIGKILL the runner did not
+  send, at no cap) and `ref_rejected` (harness with `ref_stop`: the incumbent that stopped the run at the proven optimum
+  is not confirmed; the rerun has the stop off) — rerun once; `thermal_watch` (thermal-watch stopped one of the run's scopes at ≥ 98 °C) — rerun as
   a thermal void. A further void of the same cause skips the block (`skipped`, reason = the cause);
   `counts.requeues` in `logs/pool-status.json` counts the reruns by cause. **R26:** after 2 thermal or cap voids
   (`--max-heat-voids`; one thermal pause counts once) the pool opens no new block and ends `halted` — close the

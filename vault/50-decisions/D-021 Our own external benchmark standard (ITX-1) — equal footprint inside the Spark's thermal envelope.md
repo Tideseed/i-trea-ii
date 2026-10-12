@@ -413,3 +413,92 @@ recorded as cap hits, not voided (scope Result oom-kill, confirmed):
 (in H_cu: GAMS cuOpt P 0.230), nw04 and supportcase6 (both in E)** are excluded from both arms of the external set.
 Decision sets: H_cu-unseen 65 → **64**, the unseen set 218 → **215**. The M0 shape-only plan of A9 on the rest is still
 owed.
+
+## Phase 2 built, M0 run, the sets fixed (2026-10-12 12:5x, AgentRA, branch dev-itx2; not merged)
+Code (CPU tests only; every existing arm's plan byte-identical old vs new — 35,337 plan records and 961 pool blocks of
+the base's job files): R12's stop at the proven optimum in the runner (harness switch `ref_stop`; the triggering
+incumbent checked exactly after the run, unconfirmed = void `ref_rejected`, rerun once with the stop off); cuOpt
+SIGKILLed at once after a definitive outcome (switch `cuopt_kill_on_end`); preset `itx1` = ext + both (the v1 tier and
+A0 jobs); `tools/derive_mipfeas_strata.py` → `datasets/mipfeas_strata.csv`; `make-jobs itx-v1 --tier T1..T5`
+(no v1 file written: v1 runs on 26.10), `itx-a0`, `itx-m6` / `itx-m6a`; `itrea gams-trc` (GAMS's own script reproduces
+`pt_gams` to 1e-12 on our exports and on its 233 GB10 26.08 traces re-exported); `itrea itx-report` (R17–R22, D-019's
+literal readings beside, R36's published rows on our subset, M6's lane reading); build_runs' run-record columns;
+`tools/m0_replay.py`.
+
+**The sets (R3, R4, R31; sha256 `d2ad90ee040e4b6a046cda9abe67c6add86b48f64547288c2edc292a0c203842`).** Every count
+above matches: H_cu 75 / 65 unseen (64 after M3's list), H_cu at 0.5: 34 / 30, W_SCIP 74 / 62, W-only 17, E 136, the
+decision set 215. satellites2-40 and supportcase22 are in W_SCIP by Berthold's P(300) of GAMS's SCIP 10 trace (1.000
+each). Choice (AgentRA, open to Berk): R4 was written before M3, so **both samples are drawn after M3's list** — the
+E-sample from E minus nw04 and supportcase6 (134; 4 quartiles of GAMS's cuOpt P by D-020's stable-sort + array_split
+pattern, 10 each), the panel from H_cu-unseen minus eilA101-2 (64: 10 with P >= 0.5 or none, 10 with 0.1 <= P < 0.5),
+one `default_rng(20261012)` stream in that order. Tiers: T1 64, T2 57 (17 + 40), T3 109 (94 + 15 development), T4 /
+T5 the panel (20).
+
+**M0 replay of R12.** (a) Our runs — `datasets/runs.parquet` and `incumbents_checked.parquet` of the main checkout as
+built 2026-10-11 14:09 (itx-m2 / m3 and the 10-12 M4 runs are not in it): 921 runs, 707 on =opt= references, 192 would
+stop, 0 would be void (no triggering incumbent failed the check); `pt_gams` and its launch-clock value unchanged
+(max difference 0), Berthold's P and `pt_mf` within 1.45e-11; 41.50 h as run → 39.60 h (1.90 h saved; 1.09 h in the
+screening). (b) GAMS's 3,495 traces (3,480 on =opt=; supportcase22's 15 are never stopped): 1,588 reach the proven
+optimum before 600 s; `pt_gams` unchanged (0), P and `pt_mf` within 7.04e-10. **Correction to § R12 above:** cuOpt-GB10
+26.08's 233-pass falls from 29.39 h to **23.54 h with 105 instances stopped**, not 22.8 h / 116 — that estimate used
+GAMS's gamma <= 0 alone; R12 also asks Berthold's gap <= 1e-9, which holds back 11 instances whose incumbent rounds to
+gamma 0 but differs from z* by more (binkar10_1, graphdraw-domain, istanbul-no-cutoff, mas76, momentum1,
+mushroom-best, neos-2978193-inde, neos-4722843-widden, roi2alpha3n4, supportcase26, supportcase7). Hours saved per
+GAMS run 3.0–6.2 h of 23.7–31.6 h.
+
+**M0 memory plan (A9 on the 233, shape only, `configs/itrea2-dev-rc-3way.yaml`):** no instance refused (gene dtype,
+population fit in 12 GB, Rank 0 slot); the population is below 256 on supportcase12 (P = 174) and
+neos-5114902-kasavu (192); the parse's peak RSS is at most 2.26 GB (square47), under the EA's 6-GB host cap. So no A9
+non-start is predicted (R29's A9-outcome path stays for what the plan cannot see).
+
+**Added beyond the code list above (each a safety or ordering control; open to a superseding decision):**
+- R33 enforced: the pool refuses external jobs (split `ext`) of an arm with the EA unless `prereg-v2` is an ancestor
+  of HEAD (A0 and A6F external jobs need prereg-v1 only).
+- A job-level `priority` (blocks in increasing priority, each group in the usual seeded stratified order; no earlier
+  job file has it): A0's H_cu ∪ W_SCIP unseen first (81 of 230); M6's three measured 60-s runs start while three load
+  runs hold the other lanes.
+- A0 and M6 run on single-core X925 lanes with `--layout screen --cpu-lanes 4` (or 1 for M6's alone runs), which
+  needs no E0 flag — the pair layout's `--cpu-lanes` does.
+- Not enforced: the pool does not compare the installed cuOpt version with a job's variant tag (`v1c2610`); the v1
+  window's checklist must.
+
+## Phase 2 review fixes (2026-10-12 14:0x, AgentRA, branch dev-itx2; not merged)
+An adversarial review of phase 2 confirmed 12 findings (1 blocker, 3 major, 8 minor); each is fixed with a test. No
+rule above changes: the code now does what R10, R12, R21, R31 and R33 say. Every pre-existing arm's plan is still
+byte-identical old vs new (the base's 35,337 plan records and 961 pool blocks, re-run after the fixes).
+- **R31 / R19 (blocker):** with T3 incomplete, the minimum and the R10 reading came from the plain mean over the pairs
+  present. `itx-report` now reads the minimum on a stated basis: "full" (every decision pair present); "stratified"
+  (T3 incomplete, census + E-sample complete: (a) the stratified guard >= −0.05, harm shown iff its interval's upper end
+  < −0.05; (b) the stratified count of solutions found A9 − A6F >= 0); "incomplete" otherwise. In the reviewer's case
+  (A9 +0.5 on H_cu-unseen, 0 on W-only, −0.7 on the E-sample, T3 not run) the plain guard was +0.033 and the stratified
+  −0.287: the minimum now reads "not met", harm shown.
+- **R10 / R32 (major):** the target is read only on the complete H_cu-unseen (T1 is never cut); with a pair missing,
+  the target and the minimum read "incomplete (n of N)", never "met". Completeness is reported per basis (decision set,
+  census + E-sample, T3); a gap in T1 is no longer called a T3 gap.
+- **R33, sealing (major):** the v1 writer's A9 default was the development configuration and the pool checked only
+  the tag. Now `make-jobs itx-v1` writes A9 on `configs/frozen-v2.yaml` (the C1 freeze, committed in the commit tagged
+  `prereg-v2`) and refuses an A9 tier while that file does not exist; the pool refuses an external A9 job unless the
+  file equals the tagged one and the job's configuration hashes to it (no overrides); every external job needs a clean
+  tree under `src/` and `configs/`; `itx-report` takes only runs with the registered itx1 harness and, for A9, that
+  configuration (`--frozen` for a development reading). Not done: re-deriving each run's full run hash (it also folds
+  in the lane's footprint) in the analysis.
+- **R33, reading (major + minor):** the strata file gains `exposed` = D-020's calibration sample ∪ M3's probe (37; 34
+  unseen; 31 in the decision set: T1 8, T2 11, T3 12) and `itx-report` gives every decisive aggregate and reading again
+  without them (184 decision instances, 56 of H_cu-unseen). Choice (AgentRA, open to Berk): all 8 probe instances are
+  flagged (the 3 on the does-not-fit list are out of every decision anyway); a further pre-tag exposure joins the list
+  before prereg-v2.
+- **The strata file's floats (minor):** GAMS's `primalintegral.csv` is now read round trip; `p_cuopt` / `p_scip10` are
+  the published decimals (173 / 135 values moved by ≤ 2.2e-16). Every set, sample and tier is unchanged. **New sha256
+  `c0221d429f3368c4181177cbd33b3b3717ddad8946bf712ca5440f6fc4ab35e5`** (replaces `d2ad90ee…` above; not yet registered).
+- **R33, A0's hash (minor):** new harness switch `scoped_hash` (in `itx1`): an arm without cuOpt hashes only the keys
+  that act on it, so a change to cuOpt's settings before the tag (C1, R13's test) leaves A0's run ids and runs
+  standing — "A0 stands if the SCIP harness hash is unchanged" is now a property of the run id.
+- **R12's trigger (minor):** the runner's trigger is the earliest qualifying record over every process (as M0's replay
+  judges), not the first role read in a poll; run.json lists every role's candidate.
+- **R21 (minor):** `--bca` adds BCa intervals to every mean d_ε (target, guard, secondaries), not only the ratio.
+- **R10 (minor):** "met on the call clock only" carries each arm's median / p90 start-up and the launch clock's figure.
+- **R3 / R8 (minor):** the target's figures on H_cu at P ≥ 0.5 (30) and live A2F vs the computed race on the panel are
+  reported beside.
+- **R16 (minor):** `gams_trc`'s docstring no longer claims bit-exact read-back by GAMS's `read_csv` (pandas' default
+  parser: within ~1e-12 relative; exact with `float_precision="round_trip"`).
+- **Window skill (minor):** the CPU windows' memory is 4 × 9 + 20 = 56 GB (one lane 29), not "4 × 29".
