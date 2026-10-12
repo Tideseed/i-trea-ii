@@ -106,6 +106,8 @@ WHO = "i-trea-ii (Claude Code)"
 FROZEN_CONFIG = "configs/frozen-e2.yaml"
 E0_FLAG = "configs/e0-calibration.yaml"
 CONFIRM_SPLITS = ("test",)
+EXT_SPLIT = "ext"                         # D-021's external (ITX-1) v1 runs: the tiers and A0 (`make-jobs itx-v1`, `itx-a0`)
+PREREG_V2_TAG = "prereg-v2"               # D-021 R33: no A9 outcome on an unseen instance before this tag
 QUIET_SPLITS = ("test", "screen")         # both local model servers must be stopped (D-002 §1, D-003)
 
 
@@ -237,6 +239,8 @@ class Block:
     wait_auto: bool = False             # requeued after a cap void: its next run waits for the fan on AUTO (R25)
     ref_stop_off: str | None = None     # D-021 R12: voided by `ref_rejected` — its rerun runs without the stop (the
                                         # reason travels in the job as `ref_stop_off`, outside the run id)
+    priority: int | None = None         # D-021 phase 2: the jobs' `priority` (lower runs first; only when every job of
+                                        # the file carries one, `order_blocks`)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -266,6 +270,9 @@ def validate_job(job: dict) -> dict:
         pair.job_harness(job)                     # D-021: a preset name or a dict of known keys
     except pair.RunError as e:
         raise PoolError(f"{pair.arm_label(job)} of {job.get('name') or pair.stem(job['instance'])}: {e}") from None
+    pr = job.get("priority")
+    if pr is not None and (isinstance(pr, bool) or not isinstance(pr, int)):
+        raise PoolError(f"job priority must be an integer, not {pr!r}: {job}")
     return job
 
 
@@ -293,9 +300,12 @@ def make_blocks(jobs: list[dict], master: int = MASTER_SEED) -> list[Block]:
         bid = j.get("block") or f"{name}__s{int(j['seed'])}"
         b = blocks.get((j["set"], bid))
         if b is None:
-            b = blocks[(j["set"], bid)] = Block(j["set"], bid, name, int(j["seed"]), j.get("stratum") or "-")
+            b = blocks[(j["set"], bid)] = Block(j["set"], bid, name, int(j["seed"]), j.get("stratum") or "-",
+                                                priority=j.get("priority"))
         elif b.name != name:
             raise PoolError(f"block {bid} mixes instances {b.name} and {name}")
+        elif b.priority != j.get("priority"):
+            raise PoolError(f"block {bid}: its jobs carry different priorities ({b.priority}, {j.get('priority')})")
         b.runs.append(Run(j, b))
     for b in blocks.values():
         labels = [r.label for r in b.runs]
@@ -313,7 +323,22 @@ def make_blocks(jobs: list[dict], master: int = MASTER_SEED) -> list[Block]:
 
 def order_blocks(blocks: list[Block], seed: int = MASTER_SEED) -> list[Block]:
     """Seeded random order, strata interleaved: within a stratum the blocks are shuffled; the i-th of n_s blocks of
-    stratum s gets the key (i + u)/n_s with u uniform in [0, 1), and the blocks run in key order."""
+    stratum s gets the key (i + u)/n_s with u uniform in [0, 1), and the blocks run in key order.
+
+    When every block carries a `priority` (D-021 phase 2: the jobs' field, e.g. `itx-a0`'s H_cu ∪ W_SCIP unseen first,
+    `itx-m6`'s load before the measured runs) the groups run in increasing priority, each group in its own order by
+    the rule above (same seed); some blocks with and some without is refused. No job file before D-021 phase 2 has the
+    field, so every earlier order is unchanged."""
+    pr = {b.priority for b in blocks}
+    if None in pr and len(pr) > 1:
+        raise PoolError("some blocks carry a priority and some do not: give every job one, or none")
+    if pr and None not in pr:
+        return [b for p in sorted(pr) for b in _order_group([x for x in blocks if x.priority == p], seed)]
+    return _order_group(blocks, seed)
+
+
+def _order_group(blocks: list[Block], seed: int) -> list[Block]:
+    """`order_blocks`' rule on one group of blocks."""
     rng = random.Random(seed)
     by: dict[str, list[Block]] = {}
     for b in sorted(blocks, key=lambda b: b.key):
@@ -336,8 +361,10 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
     test-split jobs, screening jobs and any job whose instance is a screening candidate need it, never bypassed;
     other non-toy jobs need it unless allow_unfrozen. Test and screening jobs also need a clean, committed tree under
     src/ and configs/; test jobs need the frozen configuration and no job-level overrides beyond a named ablation file
-    (committed with the tag). Toy smoke jobs (outside data/, not named like a candidate) need nothing. Raises
-    GateError; returns what was checked."""
+    (committed with the tag). Toy smoke jobs (outside data/, not named like a candidate) need nothing. D-021 R33:
+    external jobs (split "ext") of an arm with the EA (A9) need the tag `prereg-v2` as an ancestor of HEAD — before it,
+    no A9 outcome on an unseen instance is run (A0 and A6F's external jobs need only prereg-v1). Raises GateError;
+    returns what was checked."""
     from itrea.experiments import make_jobs                 # lazy: make_jobs imports this module
     root = root or paths.ROOT
     names, roots = make_jobs.candidate_names(), make_jobs.data_roots()
@@ -360,6 +387,14 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
         if not record_env.is_ancestor(record_env.PREREG_TAG, "HEAD", root):
             raise gates.GateError(f"{record_env.PREREG_TAG} is not an ancestor of HEAD")
         out["prereg"] = record_env.tag_commit(record_env.PREREG_TAG, root)
+    ext_ea = [j for j in jobs if j.get("split") == EXT_SPLIT and pair.arm_spec(j).has_ea]
+    if ext_ea:                    # D-021 R33 (sealing): A9's external runs only after prereg-v2 is tagged
+        if record_env.tag_commit(PREREG_V2_TAG, root) is None or \
+                not record_env.is_ancestor(PREREG_V2_TAG, "HEAD", root):
+            raise gates.GateError(f"{len(ext_ea)} external (split {EXT_SPLIT!r}) job(s) run the EA "
+                                  f"({sorted({pair.arm_label(j) for j in ext_ea})}): D-021 R33 seals A9's outcomes on "
+                                  f"the unseen instances until git tag {PREREG_V2_TAG} exists and is an ancestor of HEAD")
+        out["prereg_v2"] = record_env.tag_commit(PREREG_V2_TAG, root)
     if test or screen:
         dirty = record_env.dirty_paths(root=root)
         if dirty is None or dirty:

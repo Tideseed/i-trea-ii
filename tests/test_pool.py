@@ -176,6 +176,45 @@ def test_freeze_check_tag_must_be_an_ancestor(repo):
         pool.check_frozen([_tjob(repo)], root=repo)
 
 
+def test_external_a9_jobs_are_sealed_until_prereg_v2(repo):
+    """D-021 R33: an external job (split ext) of an arm with the EA needs the tag prereg-v2 as an ancestor of HEAD; A0
+    and A6F's external jobs need prereg-v1 only."""
+    _git(repo, "tag", "prereg-v1")
+    a9 = dict(_tjob(repo, split="ext"), arm="A9")
+    a6f, a0 = dict(a9, arm="A6F", config=None), dict(a9, arm="A0", config=None)
+    assert "prereg_v2" not in pool.check_frozen([a6f, a0], root=repo)
+    with pytest.raises(gates.GateError, match="R33.*prereg-v2"):
+        pool.check_frozen([a6f, a9], root=repo)
+    with pytest.raises(gates.GateError, match="prereg-v2"):
+        pool.check_frozen([a9], allow_unfrozen=True, root=repo)                 # never bypassed
+    _git(repo, "tag", "prereg-v2")
+    assert pool.check_frozen([a6f, a9], root=repo)["prereg_v2"]
+
+
+def test_block_priority_groups():
+    """D-021 phase 2: when every job carries `priority`, the groups run in increasing priority, each in the usual
+    seeded order with strata interleaved; mixed (some with, some without) and two priorities in one block are refused;
+    files without the field keep their order."""
+    jobs = []
+    for s, n, pr in (("a", 6, 1), ("b", 6, 0), ("c", 4, 2)):
+        jobs += [dict(j, priority=pr) for j in _jobs([f"/x/{s}{i}.mps" for i in range(n)], ["A0"], stratum=s)]
+    order = pool.order_blocks(pool.make_blocks(jobs), seed=7)
+    assert [b.priority for b in order] == [0] * 6 + [1] * 6 + [2] * 4
+    assert [b.key for b in order[:6]] == [b.key for b in pool.order_blocks(pool.make_blocks(
+        [j for j in jobs if j["priority"] == 0]), seed=7)]
+    plain = [{k: v for k, v in j.items() if k != "priority"} for j in jobs]
+    assert [b.key for b in pool.order_blocks(pool.make_blocks(plain), seed=7)] == \
+        [b.key for b in pool._order_group(pool.make_blocks(plain), 7)]
+    with pytest.raises(pool.PoolError, match="some blocks carry a priority"):
+        pool.order_blocks(pool.make_blocks(plain[:3] + jobs[3:]), seed=7)
+    two = _jobs(["/x/z.mps"], ["A0", "A1"])
+    two[1]["priority"] = 1
+    with pytest.raises(pool.PoolError, match="different priorities"):
+        pool.make_blocks(two)
+    with pytest.raises(pool.PoolError, match="integer"):
+        pool.make_blocks([dict(jobs[0], priority="1")])
+
+
 def test_freeze_check_needs_frozen_file(repo):
     _git(repo, "rm", "-q", "configs/frozen-e2.yaml")
     _git(repo, "commit", "-q", "-m", "drop")
