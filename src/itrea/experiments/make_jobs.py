@@ -28,6 +28,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
     python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
     python -m itrea.experiments.make_jobs backoff2 --harness ext|r13-off --seeds 0 --out jobs/dev-backoff2-s0.jsonl
+    python -m itrea.experiments.make_jobs itx-r13f --instances a,b|all --out jobs/itx-r13f.jsonl   (D-022 follow-up)
     python -m itrea.experiments.make_jobs mipfeas-cal [--out jobs/mipfeas-cal-26.08.jsonl]
     python -m itrea.experiments.make_jobs itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13   [--out jobs/itx-<k>.jsonl]
 
@@ -40,8 +41,12 @@ EA (config null). Instance paths come from datasets/dev_set.csv and datasets/cla
 
 `backoff2` writes D-023's test (A9 back-off, phase Y only): D-018 stage 1's 14 instances x seeds x {A9@boY, A9@bo1s,
 A6F}, 120 s, set `backoff2`, one block per instance x seed (42 runs per seed; jobs/dev-backoff2-s0.jsonl, -s1.jsonl).
-`--harness` is required and is D-022's outcome, carried by all three arms: `ext` (R13 + R14 adopted) or `r13-off`
-(rejected: the ext harness with cuOpt's default gaps and its thread variables kept).
+`--harness` is required and is D-022's outcome, carried by both A9 arms: `ext` (R13 + R14 adopted) or `r13-off`
+(rejected: the ext harness with cuOpt's default gaps and its thread variables kept); A6F runs under `ext` either way
+(D-021 R13: gaps 0 for every cuOpt process; R6: A6F is our cuOpt alone; D-022's reject clause covers only A9's rows).
+
+`itx-r13f` writes D-022's INCONCLUSIVE follow-up (its clarification of 2026-10-12): the instances the seeds 0-1 report
+names (`--instances a,b` or `all`) x seeds 2-3 x the same three arms and harnesses as `itx-r13`, 120 s, set `itx-r13f`.
 
 `mipfeas-cal` writes D-020's calibration of the MIPfeas harness against GAMS's published cuOpt 26.08 GB10 row: the 30
 sampled MIPLIB 2017 instances (`itrea.analysis.mipfeas.STRATA`, in D-020's order) x arm A6m (cuOpt as GAMS ran it),
@@ -108,7 +113,9 @@ BACKOFF1_VARIANTS = ("bo1s", "bo1")        # control bo1s = bo1's values in shad
 BACKOFF2_SET, BACKOFF2_BUDGET = "backoff2", 120.0
 BACKOFF2_VARIANTS = ("boY", "bo1s")
 BACKOFF2_A6 = "A6F"                         # cuOpt alone at A9's footprint (D-021); it needs a harness
-BACKOFF2_HARNESS = ("ext", "r13-off")      # -> ITX_EXT / ITX_R13_CONTROL (`backoff2`)
+BACKOFF2_HARNESS = ("ext", "r13-off")      # -> ITX_EXT / ITX_R13_CONTROL for the two A9 arms (`backoff2`); A6F: ext
+# D-022's INCONCLUSIVE follow-up (clarification 2026-10-12): seeds 2-3 of the named instances, its own set
+ITX_R13F_SET, ITX_R13F_SEEDS = "itx-r13f", (2, 3)
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
 # D-020: the MIPfeas harness's calibration (arm A6m on D-020's 30-instance sample)
 MIPFEAS_SET, MIPFEAS_ARM, MIPFEAS_SEED, MIPFEAS_BUDGET = "mipfeas", "A6m", 0, 600.0
@@ -522,9 +529,11 @@ def backoff2(seeds=(0, 1), harness=None, budget: float = BACKOFF2_BUDGET, set_: 
     """D-023 (A9 back-off, phase Y only): D-018 stage 1's 14 instances (`analysis.backoff.STAGE1`) x seeds x {A9@boY
     (configs/itrea2-dev-rc-3way-boY.yaml: bo1's values, active, the ladder disabled by unbounded patience), A9@bo1s (the
     control: bo1's values in shadow mode), A6F (cuOpt alone on A9's footprint F)}, 120 s, one block per instance x seed
-    (84 runs for seeds 0-1). `harness` is D-022's outcome and goes on all three arms (A6F needs one): "ext" (D-022
-    adopts R13 + R14) or "r13-off" (rejects: ext with cuOpt's default gaps and its thread variables kept), or a
-    harness spec as `pair.resolve_harness` takes it. No default: the file is written once D-022 has decided."""
+    (84 runs for seeds 0-1). `harness` is D-022's outcome and goes on the two A9 arms: "ext" (D-022 adopts R13 + R14)
+    or "r13-off" (rejects: ext with cuOpt's default gaps and its thread variables kept), or a harness spec as
+    `pair.resolve_harness` takes it. A6F runs under ext in either case: D-022's reject clause covers only A9's rows,
+    D-021 R13 sets gaps 0 for every cuOpt process and R6 makes A6F our cuOpt alone, so A6F's runs (and run ids) are
+    the same under both outcomes. No default: the file is written once D-022 has decided."""
     from itrea.analysis.backoff import STAGE1
     if harness is None:
         raise JobError("backoff2 needs the harness of D-022's outcome (ext or r13-off)")
@@ -533,12 +542,26 @@ def backoff2(seeds=(0, 1), harness=None, budget: float = BACKOFF2_BUDGET, set_: 
     out = []
     for n in STAGE1:
         for seed in seeds:
-            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}", harness=spec)
+            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}")
             for v in BACKOFF2_VARIANTS:
                 out.append(job(where[n], set_, "A9", seed, budget, config=f"{BACKOFF_BASE}-{v}.yaml", variant=v,
-                               **common))
-            out.append(job(where[n], set_, BACKOFF2_A6, seed, budget, config=None, **common))
+                               harness=spec, **common))
+            out.append(job(where[n], set_, BACKOFF2_A6, seed, budget, config=None, harness=ITX_EXT, **common))
     return _sorted(out)
+
+
+def itx_r13_followup(instances, seeds=ITX_R13F_SEEDS, budget: float = 120.0, set_: str = ITX_R13F_SET,
+                     tables=INSTANCE_TABLES) -> list[dict]:
+    """D-022's INCONCLUSIVE follow-up (its clarification of 2026-10-12): `instances` (the ones the seeds 0-1 report
+    names; "all" or every name = all 17) x seeds 2-3 x the same three arms and harnesses as `itx_r13` (A9@r13 under
+    ITX_R13_CONTROL, A9@r13x and A6F@r13x under ext), 120 s, one block per instance x seed, in its own set — the jobs
+    are `itx_r13`'s, so nothing but the seeds, the set and the instance list can differ."""
+    names = development_names(tables)
+    want = list(names) if instances == "all" or list(instances) == ["all"] else list(instances)
+    unknown = [n for n in want if n not in names]
+    if not want or unknown:
+        raise JobError(f"itx-r13f needs instances of the 17 development / class-probe ones (unknown: {unknown})")
+    return [j for j in itx_r13(budget, tuple(seeds), set_, tables) if j["name"] in want]
 
 
 def mipfeas_calibration(budget: float = MIPFEAS_BUDGET, seed: int = MIPFEAS_SEED, set_: str = MIPFEAS_SET,
@@ -724,11 +747,16 @@ def main(argv=None) -> int:
     b2 = sub.add_parser("backoff2", help="D-023: A9@boY (phase Y only) vs A9@bo1s + A6F under D-022's harness "
                                          "(42 runs per seed)")
     b2.add_argument("--harness", required=True, choices=BACKOFF2_HARNESS,
-                    help="D-022's outcome: ext (R13 + R14 adopted) or r13-off (rejected: cuOpt's default gaps and "
-                         "thread variables)")
+                    help="D-022's outcome, for both A9 arms: ext (R13 + R14 adopted) or r13-off (rejected: cuOpt's "
+                         "default gaps and thread variables); A6F stays ext per D-021 R13 / R6")
     b2.add_argument("--seeds", default="0,1", help="comma-separated (jobs/dev-backoff2-s0.jsonl, -s1.jsonl)")
     b2.add_argument("--budget", type=float, default=BACKOFF2_BUDGET)
     b2.add_argument("--out", required=True, type=Path)
+    rf = sub.add_parser("itx-r13f", help="D-022's INCONCLUSIVE follow-up: the named instances x seeds 2-3 x itx-r13's "
+                                         "three arms, set itx-r13f (6 runs per instance)")
+    rf.add_argument("--instances", required=True,
+                    help="comma-separated: the instances the seeds 0-1 report names, or 'all' when it names none")
+    rf.add_argument("--out", required=True, type=Path)
     mf = sub.add_parser("mipfeas-cal", help="D-020: the MIPfeas calibration, A6m on 30 sampled MIPLIB instances (30 runs)")
     mf.add_argument("--budget", type=float, default=MIPFEAS_BUDGET)
     mf.add_argument("--seed", type=int, default=MIPFEAS_SEED)
@@ -770,6 +798,8 @@ def main(argv=None) -> int:
             jobs = backoff_stage1(tuple(int(x) for x in a.seeds.split(",") if x), a.budget)
         elif a.cmd == "backoff2":
             jobs = backoff2(tuple(int(x) for x in a.seeds.split(",") if x), a.harness, a.budget)
+        elif a.cmd == "itx-r13f":
+            jobs = itx_r13_followup([x for x in a.instances.split(",") if x])
         elif a.cmd == "mipfeas-cal":
             jobs = mipfeas_calibration(a.budget, a.seed, data=a.data)
         elif a.cmd == "itx-m1":

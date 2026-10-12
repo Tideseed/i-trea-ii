@@ -660,17 +660,26 @@ def test_stage1_band_uses_the_control_spread():
 
 
 # ======================================================================================== stage 1y (D-023)
+def _resolved(spec):
+    from itrea.experiments import pair
+    return pair.resolve_harness(spec)
+
+
 def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ctrl=None, phase_y=None,
                   boy_events=None, boy_summary=None, ctrl_summary=None, boy_row=None, censored=(), drop=(),
-                  failed=()):
+                  failed=(), harness=None):
     """14 instances x {A6F, A9@bo1s (control), A9@boY} x seeds 0-1 in set backoff2 where every D-023 rule holds unless
     changed: `p_ctrl` = {instance: (seed 0, seed 1)} (A6F follows it), `p_boy` = {instance: P}, `leads_boy` /
     `leads_ctrl` = {instance: {seed: lead times}}, `phase_y` = {(instance, seed): (exit_t, exit_busy_s)} of boY (default
     0.4 s / 0.2 s, the partner posts at 0.3 s), `boy_events` = {instance: extra EA events}, `boy_summary` /
     `ctrl_summary` = {instance: extra EA-summary fields}, `boy_row` = {instance: extra run-table fields}, `censored` =
     {(instance, arm, seed)} whose cuOpt found nothing, `drop` = {(instance, arm, seed)} not run, `failed` = same,
-    status failed."""
+    status failed; `harness` = {(instance, arm, seed): a run.json config.harness (a resolved dict, or None)} — every run
+    carries the resolved ext harness by default (D-022 adopted)."""
+    from itrea.experiments import make_jobs as MJ
     S = "backoff2"
+    ext = _resolved(MJ.ITX_EXT)
+    harness = harness or {}
     rows = []
     base = {i: 0.4 for i in BR.STAGE1}
     base.update({BR.CHROMATIC: 0.55, "neos-960392": 0.03, "neos-3004026-krka": 0.005, "fhnw-binpack4-48": 0.004,
@@ -693,8 +702,10 @@ def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ct
                 if (i, arm, s) in drop:
                     return
                 st = "failed" if (i, arm, s) in failed else "completed"
+                hz = harness.get((i, arm, s), ext)
                 rows.append(make_run(tmp_path, S, i, arm, s, p, gpu_util=80.0, best_obj=10.0, cuopt_events=send,
-                                     censored=(i, arm, s) in censored, status=st, **kw))
+                                     censored=(i, arm, s) in censored, status=st,
+                                     run_extra=dict(config=dict(harness=hz)), **kw))
             add(BR.A6F, a6, cuopt_t_first=8.0 if i == BR.CHROMATIC else 0.3)
             c_ev = [dict(t=0.0, kind="backoff", phase="Y", level=1, reason="start"),
                     dict(t=0.4, kind="backoff", phase="P", level=0, reason="y_peek")]
@@ -857,6 +868,62 @@ def test_stage1y_cli(tmp_path):
     assert BR.main(["--stage", "2", "--runs", str(tmp_path / "runs.parquet")]) == 2
 
 
+def test_stage1y_harness_leg(tmp_path):
+    """D-023 runs under D-022's harness outcome: the A9 arms share one harness, A6F runs under ext, and --harness checks
+    the A9 harness against the outcome; a mix — seed 0 under ext, seed 1 under r13-off — is INVALID, not a verdict."""
+    from itrea.experiments import make_jobs as MJ
+    off = _resolved(MJ.ITX_R13_CONTROL)
+    a9 = (BR.BOY, BR.CTRL1)
+    # r13-off on both A9 arms, A6F ext: valid; named in the header; --harness r13-off agrees, --harness ext does not
+    runs = stage1y_world(tmp_path, harness={(i, a, s): off for i in BR.STAGE1 for a in a9 for s in (0, 1)})
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert res["harness"]["ok"] and res["harness"]["a9"] == "r13-off" and res["verdict"].startswith("ADOPT boY")
+    assert any("not checked against D-022's recorded outcome" in n for n in res["notes"])
+    assert BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None, harness="r13-off")["verdict"] \
+        .startswith("ADOPT boY")
+    bad = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None, harness="ext")
+    assert bad["verdict"].startswith("INVALID") and "not D-022's outcome ext" in bad["verdict"]
+    with open(tmp_path / "out.txt", "w") as f:
+        BR.print_stage1y(bad, out=f)
+    assert "harness: A9 arms r13-off, A6F ext (D-022's outcome given: ext) — FAILS" in (tmp_path / "out.txt").read_text()
+    # seed 0 under ext, seed 1 under r13-off (every A9 run): INVALID with both groups named
+    mix = stage1y_world(tmp_path / "m", harness={(i, a, 1): off for i in BR.STAGE1 for a in a9})
+    r = BR.stage1y(mix, None, "backoff2", root=tmp_path / "m", stage0_set=None)
+    assert r["verdict"].startswith("INVALID") and "2 harnesses" in r["verdict"] and not r["harness"]["ok"]
+    assert {g["name"] for g in r["harness"]["a9_groups"]} == {"ext", "r13-off"}
+    # A6F under r13-off (D-021 R13 / R6: A6F is cuOpt alone at gaps 0 in either outcome): INVALID
+    a6 = stage1y_world(tmp_path / "a", harness={(BR.CA, BR.A6F, 0): off})
+    r = BR.stage1y(a6, None, "backoff2", root=tmp_path / "a", stage0_set=None)
+    assert r["verdict"].startswith("INVALID") and r["harness"]["a6f_not_ext"] == [dict(instance=BR.CA, seed=0,
+                                                                                       harness=off)]
+    # a run without a harness (none in run.json, none in the table): INVALID
+    nh = stage1y_world(tmp_path / "n", harness={(BR.GLASS4, BR.BOY, 1): None})
+    assert BR.stage1y(nh, None, "backoff2", root=tmp_path / "n", stage0_set=None)["verdict"].startswith("INVALID")
+    # the run table's `harness` column stands in when run.json has none
+    nh["harness"] = json.dumps(_resolved(MJ.ITX_EXT), sort_keys=True)
+    assert BR.stage1y(nh, None, "backoff2", root=tmp_path / "n", stage0_set=None)["verdict"].startswith("ADOPT boY")
+    # a second attempt of one key under the other harness is caught although `load` keeps only the latest attempt
+    dup = stage1y_world(tmp_path / "d")
+    row = dict(dup[(dup["instance"] == BR.SING44) & (dup["arm"] == BR.BOY) & (dup["seed"] == 0)].iloc[0])
+    d2 = Path(row["run_dir"] + "_a1")
+    d2.mkdir()
+    for f in Path(row["run_dir"]).iterdir():
+        (d2 / f.name).write_bytes(f.read_bytes())
+    rj = json.loads((d2 / "run.json").read_text())
+    rj["config"] = dict(harness=off)
+    (d2 / "run.json").write_text(json.dumps(rj))
+    row.update(run_dir=str(d2), attempt=1, run_id=row["run_id"] + "_a1")
+    dup = pd.concat([dup, pd.DataFrame([row])], ignore_index=True)
+    assert BR.stage1y(dup, None, "backoff2", root=tmp_path / "d", stage0_set=None)["verdict"].startswith("INVALID")
+    # the CLI: --harness is a 1y option
+    runs.to_parquet(tmp_path / "runs.parquet")
+    assert BR.main(["--stage", "1y", "--harness", "r13-off", "--runs", str(tmp_path / "runs.parquet"), "--incumbents",
+                    str(tmp_path / "none"), "--root", str(tmp_path), "--stage0-set", "none"]) == 0
+    assert BR.main(["--stage", "1", "--harness", "ext", "--runs", str(tmp_path / "runs.parquet")]) == 2
+    with pytest.raises(ValueError):
+        BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None, harness="nope")
+
+
 # ======================================================================================== D-023 config and jobs
 def test_boy_config_file():
     """configs/itrea2-dev-rc-3way-boY.yaml (D-023) = bo1's back-off values in active mode with the four patiences at
@@ -881,8 +948,9 @@ def test_boy_config_file():
 
 def test_backoff2_jobs(tmp_path):
     """D-023's job file: the 14 instances x seeds x {A9@boY, A9@bo1s, A6F}, 120 s, set backoff2, one block per
-    instance x seed, the harness of D-022's outcome on all three arms (required: no default). Written to a temporary
-    directory only — jobs/dev-backoff2-*.jsonl wait for D-022."""
+    instance x seed, the harness of D-022's outcome on both A9 arms (required: no default) and ext on A6F in either
+    outcome (D-021 R13 / R6; D-022's reject clause covers only A9's rows). Written to a temporary directory only —
+    jobs/dev-backoff2-*.jsonl wait for D-022."""
     from itrea.experiments import make_jobs as MJ
     from itrea.experiments import pair
     with pytest.raises(MJ.JobError, match="harness"):
@@ -905,12 +973,21 @@ def test_backoff2_jobs(tmp_path):
         else:
             assert j["config"] is None and "variant" not in j
     off = MJ.backoff2(seeds=(0,), harness="r13-off")
-    assert len(off) == 42 and all(j["harness"] == MJ.ITX_R13_CONTROL for j in off)
-    assert pair.resolve_harness(off[0]["harness"])["cuopt_gap_zero"] is False
-    # no run id of backoff2 is one of D-018 stage 1's (the harness enters the hash), nor shared between the harnesses
+    assert len(off) == 42
+    assert all(j["harness"] == (MJ.ITX_R13_CONTROL if j["arm"] == "A9" else "ext") for j in off)
+    a9_off = next(j for j in off if j["arm"] == "A9")
+    a6_off = next(j for j in off if j["arm"] == "A6F")
+    assert pair.resolve_harness(a9_off["harness"])["cuopt_gap_zero"] is False
+    assert pair.resolve_harness(a6_off["harness"]) == pair.resolve_harness("ext")       # gaps 0, env unset
+    # no run id of backoff2 is one of D-018 stage 1's (the harness enters the hash); the A9 ids differ between the
+    # harness outcomes, A6F's are the same run under both
     b1 = {pair.run_id_for(j) for j in MJ.backoff_stage1(seeds=(0,))}
     ext0 = {pair.run_id_for(j) for j in jobs if j["seed"] == 0}
-    assert not b1 & ext0 and not ext0 & {pair.run_id_for(j) for j in off} and len(ext0) == 42
+    assert not b1 & ext0 and len(ext0) == 42
+    ids = {h: {(j["arm"], pair.run_id_for(j)) for j in js if j["seed"] == 0} for h, js in (("ext", jobs), ("off", off))}
+    a6 = {h: {i for a, i in v if a == "A6F"} for h, v in ids.items()}
+    a9 = {h: {i for a, i in v if a == "A9"} for h, v in ids.items()}
+    assert a6["ext"] == a6["off"] and len(a6["ext"]) == 14 and not a9["ext"] & a9["off"]
     with pytest.raises(MJ.JobError):
         MJ.backoff2(seeds=(0,), harness="nope")
     # the CLI: --harness required; a file in a temporary directory, never jobs/

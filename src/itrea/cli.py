@@ -28,7 +28,8 @@ the only place the mapping lives.
                                --stage 1y = D-023 (phase Y only: A9@boY vs A9@bo1s + A6F, set backoff2)
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
     itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
-    (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off, from D-022's outcome)
+    (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off, from D-022's outcome — the A9 arms' harness;
+     D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)

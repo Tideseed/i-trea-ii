@@ -13,7 +13,7 @@ highest attempt.
 
     itrea backoff-report --stage 0 [--set backoff0] [--runs datasets/runs.parquet] [--json out.json]
     itrea backoff-report --stage 1 [--set backoff1] [--stage0-set backoff0] [--json out.json]
-    itrea backoff-report --stage 1y [--set backoff2] [--failed both|keep|exclude] [--json out.json]
+    itrea backoff-report --stage 1y [--set backoff2] [--failed both|keep|exclude] [--harness ext|r13-off] [--json out]
 
 Stage 0 (seed 2; chromaticindex1024-7, sing44, comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}; ca and
 glass4 x A9@bo0; sing44 x A2, the zero-duty reference of rule (b), D-018 amendment: 18 runs). Readouts: S_first =
@@ -75,6 +75,12 @@ ladder, F and the mean guard all hold: D-023 asks every outcome rule to hold and
 whereas D-018 stage 1 (design §5) reported the ladder without gating — stage 1 keeps that. Failed runs: both readings
 (`--failed both`, the default for 1y): kept as D-002 §6 keeps crashes in full, the excluded reading's verdict beside.
 In 1y's result the effect keys keep stage 1's names (`*_bo1` = boY, `*_bo0` = the control, `*_A6` = A6F).
+Harness (validity of 1y; D-023 runs under D-022's harness outcome): every run of the set's three arms (completed, and
+failed under the kept reading; not voided, not synthetic; every attempt, not only the one `load` keeps) carries a
+resolved harness — run.json `config.harness`, else the run table's `harness` column —; the two A9 arms share ONE
+harness (so every block is equal), every A6F run is `pair.resolve_harness("ext")` (D-021 R13 / R6: D-022's outcome
+sets only A9's harness), and with `--harness ext|r13-off` the A9 harness must be that outcome's. Otherwise the
+verdict is INVALID with the runs listed; the header names the A9 harness found.
 """
 from __future__ import annotations
 
@@ -131,6 +137,7 @@ M5_ACC, M5_STOP = 0.02, 0.25
 # stage-1y thresholds (D-023, fixed before any run): M1's phase-Y exit latency relaxed to 1.0 s; M3 on leads summed
 # over the seeds; M4 the arm's busy share in phase Y; M5 cap hits per call within +0.10 of the control's
 Y_M1_S, Y_M3_LEADS, Y_M4_SHARE, Y_M5_CAP = 1.0, 0.8, 0.6, 0.10
+Y_HARNESS = ("ext", "r13-off")             # D-022's outcomes -> make_jobs.ITX_EXT / ITX_R13_CONTROL (A9 arms only)
 REL_TOL = 1e-9
 
 
@@ -995,12 +1002,79 @@ def _phase_y_share(r: RunView) -> tuple[float, float, str]:
     return w, b, str(py.get("reason") or "")
 
 
+def _run_harness(row: dict, root: Path) -> dict | None:
+    """A run's resolved harness: run.json `config.harness` (the runner's record), else the run table's `harness`
+    column (JSON; "" = none); None without one."""
+    p = Path(str(row.get("run_dir") or ""))
+    d = p if p.is_absolute() else root / p
+    try:
+        rj = json.loads((d / "run.json").read_text())
+    except (OSError, ValueError):
+        rj = {}
+    cfg = rj.get("config") if isinstance(rj, dict) and isinstance(rj.get("config"), dict) else {}
+    h = cfg.get("harness")
+    if h is None and isinstance(row.get("harness"), str) and row["harness"]:
+        try:
+            h = json.loads(row["harness"])
+        except ValueError:
+            h = None
+    return h if isinstance(h, dict) else None
+
+
+def harness_check(runs: pd.DataFrame, set_name: str | None, root: Path, expect: str | None = None) -> dict:
+    """Stage 1y's harness leg (module docstring): over every completed, not voided, not synthetic run of the set's
+    three arms — every attempt — the A9 arms (boY and the control) share one resolved harness, A6F runs under ext, and
+    the A9 harness is `expect`'s ("ext" / "r13-off", D-022's outcome) when given."""
+    from itrea.experiments.make_jobs import ITX_EXT, ITX_R13_CONTROL
+    from itrea.experiments.pair import resolve_harness
+    named = {"ext": resolve_harness(ITX_EXT), "r13-off": resolve_harness(ITX_R13_CONTROL)}
+    df = runs if set_name is None else runs[runs["set"] == set_name]
+
+    def flag(col):
+        return df[col].fillna(False).astype(bool) if col in df else pd.Series(False, index=df.index)
+    df = df[(df["status"] == "completed") & ~flag("block_void") & ~flag("synthetic") & df["arm"].isin([BOY, CTRL1,
+                                                                                                         A6F])]
+    a9: dict[str, list] = {}
+    a6_bad = []
+    for r in df.sort_values(["instance", "arm", "seed"], kind="mergesort").to_dict("records"):
+        h = _run_harness(r, root)
+        k = (str(r["instance"]), str(r["arm"]), int(r["seed"]))
+        if r["arm"] == A6F:
+            if h != named["ext"]:
+                a6_bad.append(dict(instance=k[0], seed=k[2], harness=h))
+        else:
+            a9.setdefault(json.dumps(h, sort_keys=True), []).append(k)
+    groups = [dict(harness=json.loads(j), name=next((n for n, v in named.items() if v == json.loads(j)), None),
+                   n=len(ks), runs=ks[:6]) for j, ks in sorted(a9.items(), key=lambda x: -len(x[1]))]
+    one = groups[0] if len(groups) == 1 else None
+    problems = []
+    if len(groups) > 1:
+        problems.append("the A9 arms run under " + str(len(groups)) + " harnesses: " + "; ".join(
+            f"{g['name'] or g['harness']} ({g['n']} runs, e.g. {g['runs'][:2]})" for g in groups))
+    if one is not None and one["harness"] is None:
+        problems.append("the A9 runs carry no harness")
+    if one is not None and one["harness"] is not None and one["name"] is None:
+        problems.append(f"the A9 harness is neither D-022 outcome's: {one['harness']}")
+    if expect is not None and one is not None and one["name"] is not None and one["name"] != expect:
+        problems.append(f"the A9 harness is {one['name']}, not D-022's outcome {expect}")
+    if a6_bad:
+        problems.append(f"{len(a6_bad)} A6F runs not under ext (D-021 R13 / R6): "
+                        f"{[(x['instance'], x['seed']) for x in a6_bad[:4]]}")
+    return dict(ok=not problems, a9=one["name"] if one else None, a9_harness=one["harness"] if one else None,
+                a9_groups=groups, a6f_not_ext=a6_bad, expect=expect, problems=problems)
+
+
 def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
-            stage0_set: str | None = "backoff0") -> dict:
+            stage0_set: str | None = "backoff0", harness: str | None = None) -> dict:
     """D-023: A9@boY (phase Y only) vs the control A9@bo1s, same-day A6F; D-018 stage 1's outcome rules unchanged and
     D-023's mechanism rules M1–M5 (module docstring). D-018's own M1 / M3 / M5 on the same runs are returned under
-    `mechanism_d018` (reported, not gating). Returns the stage-1 keys plus `mechanism_d018`."""
+    `mechanism_d018` (reported, not gating). `harness`: D-022's outcome ("ext" / "r13-off") the A9 arms must carry,
+    or None (the harness found is reported and must still be one for both A9 arms, ext for A6F). Returns the stage-1
+    keys plus `mechanism_d018` and `harness`."""
+    if harness is not None and harness not in Y_HARNESS:
+        raise ValueError(f"harness must be one of {Y_HARNESS}, not {harness!r}")
     R = load(runs, set_name, root)
+    hz = harness_check(runs, set_name, root, harness)
     notes: list[str] = []
     missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BOY, A6F) for s in STAGE1_SEEDS if (i, a, s) not in R]
     eff = _effects(R, BOY, CTRL1, A6F)
@@ -1063,7 +1137,9 @@ def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backo
                    relay=relay_latency(R, (CTRL1, BOY)), lp_arrival=lp_arrival(R, (CTRL1, BOY)))
     gates = ("T", "G", "ladder", "F", "mean_guard")
     adopt = mech_ok and all(out[k]["ok"] for k in gates)
-    if missing:
+    if not hz["ok"]:
+        verdict = "INVALID (harness: " + "; ".join(hz["problems"]) + "); the rules below are not decided"
+    elif missing:
         verdict = f"INCOMPLETE: {len(missing)} missing runs (first: {missing[:3]})"
     elif adopt:
         verdict = ("ADOPT boY as A9's development default: M1–M5 (D-023), T, G, the ladder targets, F and the mean "
@@ -1077,12 +1153,14 @@ def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backo
     notes.append(f"M4 reads the arm's pooled phase-Y busy share (sum of exit_busy_s / sum of exit_t over every boY "
                  f"run); a phase Y shorter than ~2 x burst_s ends before the first sleep falls due, so a per-run share "
                  f"is 1.0 by construction there (per run listed)")
+    if harness is None and hz["ok"]:
+        notes.append(f"the A9 harness ({hz['a9']}) was not checked against D-022's recorded outcome (--harness)")
     return dict(stage="1y", set=set_name, effects=eff, mechanism=mech, mechanism_d018=d018, outcome=out,
-                classification=cls, reports=reports, verdict=verdict, notes=notes, missing=missing)
+                classification=cls, reports=reports, verdict=verdict, notes=notes, missing=missing, harness=hz)
 
 
 def run_stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
-                stage0_set: str | None = "backoff0", failed: str = "both") -> dict:
+                stage0_set: str | None = "backoff0", failed: str = "both", harness: str | None = None) -> dict:
     """Stage 1y under a reading of the set's failed runs (D-023: "read as D-002 §6 keeps crashes, reported both
     ways"): "keep" (kept, truncated at the crash, as build-runs scores them), "exclude" (missing: the verdict is then
     INCOMPLETE) or "both" (the kept reading in full, the excluded reading's verdict and missing runs under
@@ -1090,17 +1168,17 @@ def run_stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "b
     sel = (runs["set"] == set_name) & (runs["status"] == "failed")
     failed_ids = sorted(runs.loc[sel, "run_id"].astype(str))
     if failed == "exclude" or not failed_ids:
-        res = stage1y(runs, inc, set_name, root, stage0_set)
+        res = stage1y(runs, inc, set_name, root, stage0_set, harness)
         res["kept_failed"] = []
         if failed_ids:
             res["notes"].append(f"{len(failed_ids)} failed runs excluded (reading 'exclude'): {failed_ids}")
         return res
     kept = runs.copy()
     kept.loc[sel, "status"] = "completed"
-    res = stage1y(kept, inc, set_name, root, stage0_set)
+    res = stage1y(kept, inc, set_name, root, stage0_set, harness)
     res["kept_failed"] = failed_ids
     if failed == "both":
-        ex = stage1y(runs, inc, set_name, root, stage0_set)
+        ex = stage1y(runs, inc, set_name, root, stage0_set, harness)
         res["exclude_reading"] = dict(verdict=ex["verdict"], missing=ex["missing"])
     return res
 
@@ -1364,6 +1442,10 @@ def print_stage1y(res: dict, out=sys.stdout) -> None:
     p = lambda *a: print(*a, file=out)  # noqa: E731
     p(f"Stage 1y (D-023, phase Y only) — {BOY} (active, no ladder) vs {CTRL1} (shadow control), same-day {A6F}, "
       f"set {res['set']}")
+    hz = res["harness"]
+    p(f"harness: A9 arms {hz['a9'] or [g['harness'] for g in hz['a9_groups']]}, A6F ext"
+      + (f" (D-022's outcome given: {hz['expect']})" if hz["expect"] else " (not checked against D-022's outcome)")
+      + ("" if hz["ok"] else " — FAILS: " + "; ".join(hz["problems"])))
     for n in res.get("kept_failed", []):
         p(f"   kept as failed (D-002 §6: kept, truncated at the crash): {n}")
     p("instance                       P ctrl  P boY   d       band   d ctrl|A6F d boY|A6F")
@@ -1467,6 +1549,9 @@ def main(argv: list[str] | None = None) -> int:
                          "as D-002 §6 keeps crashes — truncated at the crash, as build-runs already scores them "
                          "(stated deviation of 2026-10-11: cuOpt's RMM limit hit on ca seed 1); stage 1y: default "
                          "both — the kept reading in full (D-023) and the excluded reading's verdict beside it")
+    ap.add_argument("--harness", choices=Y_HARNESS, default=None,
+                    help="stage 1y: D-022's outcome — the harness both A9 arms must carry (A6F: ext); without it the "
+                         "harness found is reported and must still be one for the A9 arms")
     ap.add_argument("--steps-gate", action="store_true",
                     help="stage 0: let the lane-steps limb gate the sanity check (the rule as first written, before "
                          "the D-018 deviation of 2026-10-09)")
@@ -1479,6 +1564,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     runs = pd.read_parquet(a.runs)
     inc = pd.read_parquet(a.incumbents) if Path(a.incumbents).exists() else None
+    if a.harness is not None and a.stage != "1y":
+        print("--harness is a stage-1y option (D-023 under D-022's outcome)", file=sys.stderr)
+        return 2
     if a.stage == "0":
         res = stage0(runs, inc, a.set_ or "backoff0", Path(a.root), steps_gate=a.steps_gate)
         print_stage0(res)
@@ -1496,7 +1584,7 @@ def main(argv: list[str] | None = None) -> int:
         res["kept_failed"] = kept
         print_stage1(res)
     else:
-        res = run_stage1y(runs, inc, a.set_ or "backoff2", Path(a.root), a.stage0_set, a.failed or "both")
+        res = run_stage1y(runs, inc, a.set_ or "backoff2", Path(a.root), a.stage0_set, a.failed or "both", a.harness)
         print_stage1y(res)
     if a.json:
         Path(a.json).write_text(json.dumps(_jsonable(res), indent=1, default=str))

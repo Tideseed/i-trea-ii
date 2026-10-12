@@ -473,7 +473,10 @@ failed runs: missing — the letter — and kept as D-002 §6 keeps crashes):
   1.0 by construction for a phase Y shorter than about 2 × `burst_s`, before the first sleep falls due; per-run
   shares are printed); M5 the `rclock` accounting within 2 % and `ls_cap_hits` / `ls_calls` within +0.10 of the
   control's. D-018's own M1 / M3 / M5 are printed beside (not gating). The ladder targets gate 1y's verdict (D-023:
-  every outcome rule); stage 1 keeps reporting them without gating.
+  every outcome rule); stage 1 keeps reporting them without gating. Harness (validity, INVALID otherwise): run.json
+  `config.harness` (else `runs.parquet`'s `harness`) of every completed run of the set — every attempt — is one
+  resolved harness across both A9 arms and `resolve_harness("ext")` on A6F; `--harness ext|r13-off` checks the A9
+  harness against D-022's outcome.
 - `itrea d022-report` (D-022, set `itx-r13`): reads `runs.parquet` (`pt`, `final_gap`, `status`, `attempt`,
   `run_dir`) and, per run, `run.json` (`compiled_on_clock_cuda`, `cupy_cache.compiled_on_clock` for A9 only — the
   runner's own rule —, `processes[*]` of cuOpt: `exit_t`, `cpu_user_s` + `cpu_sys_s`, `env_unset`), the cuOpt
@@ -481,7 +484,14 @@ failed runs: missing — the letter — and kept as D-002 §6 keeps crashes):
   summary's `P` / `gene_dtype`, and the set's `void.jsonl`. cuOpt CPU-s per wall-s = (`cpu_user_s` + `cpu_sys_s`) /
   `exit_t` of its process (D-021 M1's reading); "ended by cuOpt's optimal" = its `exit_reason` optimal with the
   smallest `exit_t` of the run's processes, counted with a final gap > 1e-9. Runs are selected by `set` and keyed by
-  (instance, arm, seed), never by parsing the run id, because a reused id is `<run_id>#<set>` in the tables.
+  (instance, arm, seed), never by parsing the run id, because a reused id is `<run_id>#<set>` in the tables. A reading
+  reads only its own keys (instances × arms × seeds × 120 s, not synthetic, not block-voided): failed runs likewise,
+  and a void's key comes from its rerun's row or from the voided directory's `run.json` (`moved_to`). Validity also
+  compares run.json `config.harness` with the arm's resolved harness (ext; the control {ext, gap_zero false,
+  env_unset false}). Under `keep`, a void whose rerun failed is closed, and a kept crash without its EA / cuOpt summary
+  is listed as crashed before the record. C1's weak sets are read over every weak instance with both arms' runs
+  (both P = 1 at d = 0, as `backoff.d013_report`), with `stats.bootstrap_mean` / `wilcoxon_d` on those d's.
+  `--followup [itx-r13f]` reads D-022's INCONCLUSIVE follow-up (seeds 2–3; its clarification of 2026-10-12).
 
 **Time to target**: first time γ ≤ 5 %, γ ≤ 1 %, and time to first feasible; censored at T (Type I). Analysed per
 instance on seed medians.
