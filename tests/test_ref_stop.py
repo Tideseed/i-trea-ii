@@ -172,15 +172,18 @@ def test_miplib_stop_ref(tmp_path):
 
 
 def test_optional_harness_switches_keep_every_earlier_harness():
-    """ref_stop / cuopt_kill_on_end are absent unless on: ext, and ext with them off, resolve and hash as before;
-    itx1 = ext + both; a wrong type is refused."""
+    """ref_stop / cuopt_kill_on_end / scoped_hash are absent unless on: ext, and ext with them off, resolve and hash as
+    before; itx1 = ext + all three; a wrong type is refused."""
     ext = pair.resolve_harness("ext")
     assert set(ext) == set(pair.HARNESS_KEYS)
-    assert pair.resolve_harness({"preset": "ext", "ref_stop": False, "cuopt_kill_on_end": False}) == ext
+    assert pair.resolve_harness({"preset": "ext", "ref_stop": False, "cuopt_kill_on_end": False,
+                                 "scoped_hash": False}) == ext
     itx = pair.resolve_harness("itx1")
-    assert itx == dict(ext, ref_stop=True, cuopt_kill_on_end=True)
-    assert pair.resolve_harness({"preset": "ext", "ref_stop": True, "cuopt_kill_on_end": True}) == itx
-    assert pair.resolve_harness({"preset": "itx1", "ref_stop": False}) == dict(ext, cuopt_kill_on_end=True)
+    assert itx == dict(ext, ref_stop=True, cuopt_kill_on_end=True, scoped_hash=True)
+    assert pair.resolve_harness({"preset": "ext", "ref_stop": True, "cuopt_kill_on_end": True,
+                                 "scoped_hash": True}) == itx
+    assert pair.resolve_harness({"preset": "itx1", "ref_stop": False}) == dict(ext, cuopt_kill_on_end=True,
+                                                                                scoped_hash=True)
     with pytest.raises(pair.RunError, match="true or false"):
         pair.resolve_harness({"preset": "ext", "ref_stop": 1})
     j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A6F", seed=0, budget=600)
@@ -190,6 +193,41 @@ def test_optional_harness_switches_keep_every_earlier_harness():
     assert pair.run_hash(dict(a9, harness="ext")) == "28e5a5e9c725"
     assert len({pair.run_hash(dict(j, harness=h)) for h in ("ext", "itx1", {"preset": "ext", "ref_stop": True})}) == 3
     assert pair.run_hash(dict(a9, harness="itx1")) not in ("28e5a5e9c725", "0f011a2094a2")
+
+
+def test_scoped_hash_keeps_a0_ids_across_cuopt_settings():
+    """D-021 R33 ("A0 stands if the SCIP harness hash is unchanged at the tag"): under `scoped_hash` (itx1) an arm
+    without cuOpt hashes only the harness keys that act on it — a change to any cuopt_* key (gaps, thread variables,
+    RMM / host caps, the memory void, the kill at a definitive outcome) leaves A0's (and A3x's) run id as it is, while
+    A6F's, A2F's and A9's move. A key that acts on SCIP (cuda_cache, ref_stop) still moves A0's. Without the switch
+    (ext, every phase-1 dict) A0 hashes the whole harness, as before."""
+    assert set(pair.CUOPT_ONLY_KEYS) == {k for k in pair.HARNESS_KEYS + pair.HARNESS_OPTIONAL if k.startswith("cuopt_")}
+    assert "cuda_cache" not in pair.CUOPT_ONLY_KEYS and "ref_stop" not in pair.CUOPT_ONLY_KEYS
+    j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", seed=2000, budget=600, variant="v1")
+    cfg = "configs/itrea2-dev-rc-3way.yaml"
+    jobs = {a: dict(j, arm=a, **({"config": cfg} if a in ("A9", "A3x") else {})) for a in ("A0", "A3x", "A6F", "A2F",
+                                                                                           "A9")}
+    cuopt_changes = [{"cuopt_gap_zero": False}, {"cuopt_env_unset": False}, {"cuopt_rmm_gb": 30.0},
+                     {"cuopt_host_gb": 30.0}, {"cuopt_memory_void": False}, {"cuopt_kill_on_end": False}]
+    for a, jj in jobs.items():
+        base = pair.run_id_for(dict(jj, harness="itx1"))
+        moved = [pair.run_id_for(dict(jj, harness={"preset": "itx1", **ch})) != base for ch in cuopt_changes]
+        assert moved == ([False] * 6 if a in ("A0", "A3x") else [True] * 6), a
+        for ch in ({"cuda_cache": False}, {"ref_stop": False}, {"scoped_hash": False}):
+            assert pair.run_id_for(dict(jj, harness={"preset": "itx1", **ch})) != base, (a, ch)
+    # the hashed part of A0's harness, and the record's full harness
+    a0 = pair.arm_spec(jobs["A0"])
+    assert pair.hashed_harness(a0, pair.resolve_harness("itx1")) == dict(cuda_cache=True, ref_stop=True,
+                                                                         scoped_hash=True)
+    assert pair.hashed_harness(pair.arm_spec(jobs["A6F"]), pair.resolve_harness("itx1")) == \
+        pair.resolve_harness("itx1")
+    ss = pair.solver_settings(dict(jobs["A0"], harness="itx1"), pair.PairOptions(), pair.EAConfig().validate())
+    assert ss["harness"] == dict(cuda_cache=True, ref_stop=True, scoped_hash=True)
+    # without the switch: the whole harness, so a cuOpt key still moves A0 (every earlier id unchanged)
+    e0 = pair.run_id_for(dict(jobs["A0"], harness="ext"))
+    assert pair.run_id_for(dict(jobs["A0"], harness={"preset": "ext", "cuopt_rmm_gb": 30.0})) != e0
+    assert pair.hashed_harness(a0, pair.resolve_harness("ext")) == pair.resolve_harness("ext")
+    assert pair.hashed_harness(a0, None) is None
 
 
 # --------------------------------------------------------------------------------------------- runner level

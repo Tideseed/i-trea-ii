@@ -60,8 +60,8 @@ ITX-1 (D-021), on the GPU lane g0 whose cores are F (X925 5–6 + A725 1–3 + t
   the fan governor's state at the start and the end (`fan_state_start` / `fan_state_end`) and the start temperature
   (`acpi_start_c`, R28).
 
-D-021 phase 2 (two optional harness switches, absent from the resolved harness — and so from the run hash — unless on;
-preset `itx1` = ext + both, carried by the v1 tier jobs and A0's external jobs):
+D-021 phase 2 (three optional harness switches, absent from the resolved harness — and so from the run hash — unless
+on; preset `itx1` = ext + all three, carried by the v1 tier jobs and A0's external jobs):
 - **`ref_stop` (R12, stop at the proven optimum):** for an instance MIPLIB lists as `=opt=` (`miplib_stop_ref`; never
   supportcase22's `=best=`, never PGLib-UC or ML4CO) the runner reads z* and the objective (c, offset) before t0 —
   no process receives z* — and while the clock runs tails every process's incumbent records (`RefMonitor`: the
@@ -78,7 +78,12 @@ preset `itx1` = ext + both, carried by the v1 tier jobs and A0's external jobs):
 - **`cuopt_kill_on_end`:** after a definitive outcome (`definitive_stop`: a partner's proof — exit 0 with an exit
   reason in DEFINITIVE — or ref_reached; not a partner's crash) every cuOpt process still running is SIGKILLed at once
   (`killed` "SIGKILL (definitive outcome)", stopped_by_runner) instead of after kill_after_s + 10 s; without the
-  switch the runner behaves as before.
+  switch the runner behaves as before;
+- **`scoped_hash` (R33's "A0 stands if the SCIP harness hash is unchanged"):** the run hash takes only the harness keys
+  that act on the arm's processes (`hashed_harness`): an arm without a cuOpt process (A0, A3x, …) drops every
+  `cuopt_*` key, so a change to cuOpt's settings before the prereg-v2 tag leaves A0's run ids — and its runs — as they
+  are, while every arm with cuOpt (A9, A6F, A2F) hashes the whole harness. run.json `config.harness` keeps the whole
+  resolved harness either way.
 
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
@@ -154,7 +159,9 @@ HARNESS_KEYS = ("cuopt_gap_zero", "cuopt_env_unset", "cuopt_rmm_gb", "cuopt_host
 #                      references only), stop kind `ref_reached`
 #   cuopt_kill_on_end  after a definitive outcome (a partner's proof, ref_reached) every cuOpt process still running is
 #                      SIGKILLed at once (it has no interrupt API) instead of after kill_after_s + 10 s
-HARNESS_OPTIONAL = ("ref_stop", "cuopt_kill_on_end")
+#   scoped_hash        the run hash takes only the keys that act on the arm's processes: an arm without cuOpt drops
+#                      every cuopt_* key (`hashed_harness`; R33: A0's ids survive a change to cuOpt's settings)
+HARNESS_OPTIONAL = ("ref_stop", "cuopt_kill_on_end", "scoped_hash")
 HARNESS_PRESETS: dict[str, dict] = {
     # R13 gaps 0, R14 cuOpt's thread variables unset, R29 cuOpt RMM 24 GB separate from the EA's pool and host
     # MemoryMax 24 GB, R15 the project-own CUDA JIT cache for every process; a confirmed cap hit of cuOpt voids the run
@@ -162,10 +169,11 @@ HARNESS_PRESETS: dict[str, dict] = {
     "ext": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
                 cuopt_memory_void=True),
     # ITX-1's v1 external runs (D-021 phase 2): ext + R12's stop at the proven optimum + cuOpt killed at a definitive
-    # outcome; the tier jobs (`make-jobs itx-v1`) and A0's external jobs (`itx-a0`) carry it
+    # outcome + the process-scoped run hash; the tier jobs (`make-jobs itx-v1`) and A0's external jobs (`itx-a0`) carry it
     "itx1": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
-                 cuopt_memory_void=True, ref_stop=True, cuopt_kill_on_end=True),
+                 cuopt_memory_void=True, ref_stop=True, cuopt_kill_on_end=True, scoped_hash=True),
 }
+CUOPT_ONLY_KEYS = tuple(k for k in HARNESS_KEYS + HARNESS_OPTIONAL if k.startswith("cuopt_"))   # act on cuOpt only
 _HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache", "cuopt_memory_void") + HARNESS_OPTIONAL
 SCOPE_STOP_TIMEOUT = "5s"   # every run scope: systemd's stop (thermal-watch's `systemctl stop`) kills within 5 s, not 90
 RMM_CAP_SHARE = 0.8         # an RMM allocation error counts as cuOpt's cap only when its peak reached this share of the
@@ -485,6 +493,16 @@ def resolve_harness(spec) -> dict | None:
     return out
 
 
+def hashed_harness(arm: ArmSpec, h: dict | None) -> dict | None:
+    """The part of a resolved harness that enters the run hash: all of it, unless the switch `scoped_hash` is on AND
+    the arm has no cuOpt process — then every `cuopt_*` key (CUOPT_ONLY_KEYS) is dropped, since none acts on SCIP or the
+    EA (R33: A0 stands at the prereg-v2 tag iff its SCIP-side harness is unchanged). Without the switch (every harness
+    before phase 2's itx1) the whole dict, as before."""
+    if h is None or not h.get("scoped_hash") or any(p.kind == "cuopt" for p in arm.procs):
+        return h
+    return {k: v for k, v in h.items() if k not in CUOPT_ONLY_KEYS}
+
+
 def job_harness(job: dict) -> dict | None:
     """The job's resolved harness (`resolve_harness`); refused for A6m, which carries D-020's own settings."""
     h = resolve_harness(job.get("harness"))
@@ -546,8 +564,9 @@ def harness_footprint(arm: ArmSpec, opts: PairOptions) -> dict:
 
 def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
     """What identifies a run of an arm without an EA (its <cfg-hash>). Only A6m's dict carries `mip_gap_zero` and only
-    a job with a harness carries `harness` and `footprint` (D-021), so every other arm's dict — and hash — is what it
-    was before A6m existed (tests pin them). `gpu_mem_gb` is cuOpt's RMM limit (the harness's when there is one)."""
+    a job with a harness carries `harness` (the hashed part, `hashed_harness`) and `footprint` (D-021), so every other
+    arm's dict — and hash — is what it was before A6m existed (tests pin them). `gpu_mem_gb` is cuOpt's RMM limit (the
+    harness's when there is one)."""
     arm = arm_spec(job)
     h = job_harness(job)
     d: dict = {"arm": arm.name, "emphasis": job.get("emphasis") if any(p.emphasis for p in arm.procs) else None}
@@ -558,7 +577,7 @@ def solver_settings(job: dict, opts: PairOptions, cfg: EAConfig) -> dict:
         if cu[0].gap_zero:
             d["mip_gap_zero"] = True
     if h is not None:
-        d["harness"] = h
+        d["harness"] = hashed_harness(arm, h)
         d["footprint"] = harness_footprint(arm, opts)
     return d
 
@@ -568,7 +587,8 @@ def run_hash(job: dict, opts: PairOptions | None = None) -> str:
     config_hash); a hash of the solver-side settings otherwise. An arm with an EA AND cuOpt (A9) folds in cuOpt's
     thread count when it is not the default PARTNER_THREADS, so a thread-count variant gets its own run id (the default
     id stays the EA configuration hash; build_runs reads the EA hash from `run.json["config"]["ea_hash"]`). A job's
-    harness (D-021) and its footprint (`harness_footprint`) are folded in the same way, only when the job has one."""
+    harness (D-021; `hashed_harness`: with `scoped_hash` an arm without cuOpt drops the cuopt_* keys) and its
+    footprint (`harness_footprint`) are folded in the same way, only when the job has one."""
     opts = opts or PairOptions()
     cfg, _ = effective_config(job, opts)
     arm = arm_spec(job)
@@ -580,7 +600,7 @@ def run_hash(job: dict, opts: PairOptions | None = None) -> str:
             extra["cuopt_threads"] = n
         hz = job_harness(job)
         if hz is not None:
-            extra["harness"] = hz
+            extra["harness"] = hashed_harness(arm, hz)
             extra["footprint"] = harness_footprint(arm, opts)
         if extra:
             h = hashlib.sha256(json.dumps({"ea": h, **extra}, sort_keys=True).encode()).hexdigest()[:12]
