@@ -54,6 +54,28 @@ def test_trc_lines_shape_and_refusals(tmp_path):
     assert G.trc_name("x", "A0", 1, "launch").rsplit("_", 2) == ["x", "gb10-f-launch", "A0-s1.trc"]
 
 
+def test_floats_read_back_round_trip_exactly_and_by_gams_default_parser_to_1e12(tmp_path):
+    """Review finding (analysis): the export writes repr floats. Read with float_precision="round_trip" every double
+    comes back bit for bit; GAMS's own call (`mipfeas.read_gams_trc`, pandas' default parser) is not round-trip exact
+    on small magnitudes — it agrees to 1e-12 relative, the tolerance the docstring now states."""
+    import numpy as np
+    import pandas as pd
+    rs = np.random.default_rng(7)
+    t = np.sort(rs.uniform(0.0, 599.0, 2000))
+    obj = np.exp(rs.uniform(np.log(1e-5), np.log(1e6), 2000))
+    steps = list(zip(t.tolist(), obj.tolist()))
+    p = G.write_trc(tmp_path / "x_gb10-f-call_A9-s0.trc", steps, 600.0, None)
+    exact = pd.read_csv(p, comment="*", header=None, na_values=["na", "inf"], skipinitialspace=True,
+                        names=MF.TRC_COLUMNS, float_precision="round_trip")
+    rows = exact[exact["seriesID"] == "I"]
+    assert rows["bestFound"].tolist() == obj.tolist() and rows["seconds"].tolist() == t.tolist()
+    theirs = MF.read_gams_trc(p)
+    got = theirs[theirs["seriesID"] == "I"]["bestFound"].to_numpy(float)
+    rel = np.abs(got - obj) / np.abs(obj)
+    assert rel.max() <= 1e-12
+    assert np.abs(theirs[theirs["seriesID"] == "I"]["seconds"].to_numpy(float) - t).max() <= 1e-12
+
+
 @needs_archive
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_gams_script_reproduces_pt_gams_synthetic(gams, tmp_path, case):

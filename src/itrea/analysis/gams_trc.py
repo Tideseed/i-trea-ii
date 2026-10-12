@@ -7,7 +7,12 @@ header lines (their reader skips `*` as a comment): one `S` record at 0 s, one `
 incumbent of the run's portfolio (the trajectory every metric uses: `build_runs.role_steps` merged over the roles,
 the exact checker's recomputed objective) stamped before T on that clock, and one `E` record. Seconds are on the call
 clock (since t0, the run's own `pt_gams`) or the launch clock (+ `startup_offset_s`, `pt_gams_launch`). Floats are
-written with `repr`, so their `read_csv` reads back the doubles our metric used. Choices, each recorded in the
+written with `repr` (the shortest decimal that round-trips), so `pandas.read_csv(..., float_precision="round_trip")`
+reads back exactly the doubles our metric used. GAMS's script calls `read_csv` with pandas' default parser, which is
+not round-trip exact: values come back within about 1e-12 relative (measured: up to 9.8e-13 on objectives of
+magnitude 1e-5 to 1e6, and 5.7e-14 s on the seconds, pandas 3.0.3), not bit for bit — so their score of our trace
+agrees with our `pt_gams` to ~1e-12 (the test's tolerance), and could differ by up to 1e-6 · Δt / T only where an
+objective lies within ~1e-12 relative of a boundary of GAMS's 6-decimal gamma rounding. Choices, each recorded in the
 header:
 - the `E` record is at T (our runs are held to T, R12) unless the caller gives an end time AND the final gamma is <= 0;
   GAMS's script raises on an `E` before T − 1 whose gamma is above 0, and an incumbent after T changes nothing in
