@@ -375,3 +375,78 @@ def test_monitor_reads_partial_files_across_polls(tmp_path):
     (tmp_path / "ea.incumbents.part").unlink()                             # the process removed it: nothing breaks
     assert mon.poll() is tr and mon.summary()["roles"]["ea"]["records"] == 4
     mon.close()
+
+
+def _part_rec(t, x, c, src=0):
+    """One crash-safe incumbent record (solvers.common's format) of vector x (the process's own order)."""
+    import struct
+    x = np.asarray(x, float)
+    nz = np.flatnonzero(x)
+    return struct.pack("<ddBi", t, float(np.dot(c, x)), src, nz.size) + nz.astype("<i4").tobytes() + \
+        x[nz].astype("<f8").tobytes()
+
+
+def test_trigger_is_the_earliest_record_across_roles(tmp_path):
+    """Review finding (stop): A9's roles are read in the order (solver, ea, cuopt), but the trigger is the EARLIEST
+    qualifying record by its time stamp: cuOpt records z* at 10.0, the EA re-records the vector at 10.2 and SCIP the
+    EA's post at 10.4, all inside one poll -> cuopt #0 at 10.0 (as M0's replay judges). Equal stamps go to the earlier
+    role of `roles`. Once chosen, the trigger never changes; a record read later (an earlier stamp that was not yet
+    visible, read by `drain()` after the stop) is listed as a candidate with after_trigger, and `drain()` never sets a
+    trigger on a run that ended otherwise."""
+    names, c = ["a", "b", "c"], np.array([1.0, 2.0, 3.0])
+    ref = pair.StopRef(5.0, "opt", "test")
+    roles = ("solver", "ea", "cuopt")
+    x_poor = [0, 0, 7]                                                       # 21: far from z* = 5
+    for r in roles:
+        (tmp_path / f"{r}.names.json").write_text(json.dumps(names))
+    mon = pair.RefMonitor(tmp_path, roles, names, c, 0.0, 1, ref, t_max=600.0)
+    parts = {r: open(tmp_path / f"{r}.incumbents.part", "ab", buffering=0) for r in roles}
+    parts["solver"].write(_part_rec(1.0, x_poor, c) + _part_rec(10.4, [0, 1, 1], c))     # 2 + 3 = 5: z*
+    parts["ea"].write(_part_rec(10.2, [0, 1, 1], c, src=2))
+    parts["cuopt"].write(_part_rec(10.0, [0, 1, 1], c))
+    tr = mon.poll()
+    assert (tr["role"], tr["k"], tr["t"], tr["obj"]) == ("cuopt", 0, 10.0, 5.0)
+    s = mon.summary()
+    assert [(x["role"], x["t"]) for x in s["candidates"]] == [("cuopt", 10.0), ("ea", 10.2), ("solver", 10.4)]
+    assert not any(x["after_trigger"] for x in s["candidates"])
+    assert s["trigger"] is tr and tr["role"] == "cuopt"
+    for f in parts.values():
+        f.close()
+    mon.close()
+    # a tie: the earlier role of `roles` (solver before ea)
+    d2 = tmp_path / "tie"
+    d2.mkdir()
+    for r in roles:
+        (d2 / f"{r}.names.json").write_text(json.dumps(names))
+    (d2 / "ea.incumbents.part").write_bytes(_part_rec(7.0, [0, 1, 1], c))
+    (d2 / "solver.incumbents.part").write_bytes(_part_rec(7.0, [0, 1, 1], c))
+    mon = pair.RefMonitor(d2, roles, names, c, 0.0, 1, ref, t_max=600.0)
+    assert mon.poll()["role"] == "solver"
+    mon.close()
+    # across polls: the trigger stays; a later-visible earlier record is a candidate after the trigger
+    d3 = tmp_path / "late"
+    d3.mkdir()
+    for r in roles:
+        (d3 / f"{r}.names.json").write_text(json.dumps(names))
+    ea = open(d3 / "ea.incumbents.part", "ab", buffering=0)
+    ea.write(_part_rec(10.2, [0, 1, 1], c))
+    mon = pair.RefMonitor(d3, roles, names, c, 0.0, 1, ref, t_max=600.0)
+    tr = mon.poll()
+    assert tr["role"] == "ea" and tr["t"] == 10.2
+    (d3 / "cuopt.incumbents.part").write_bytes(_part_rec(10.0, [0, 1, 1], c))
+    mon.drain()
+    assert mon.trigger is tr and tr["role"] == "ea"
+    cand = mon.summary()["candidates"]
+    assert [(x["role"], x["t"], x["after_trigger"]) for x in cand] == [("cuopt", 10.0, True), ("ea", 10.2, False)]
+    ea.close()
+    mon.close()
+    # drain() on a monitor without a trigger (the run ended by its budget) sets none
+    d4 = tmp_path / "budget"
+    d4.mkdir()
+    (d4 / "solver.names.json").write_text(json.dumps(names))
+    mon = pair.RefMonitor(d4, ("solver",), names, c, 0.0, 1, ref, t_max=600.0)
+    assert mon.poll() is None
+    (d4 / "solver.incumbents.part").write_bytes(_part_rec(599.0, [0, 1, 1], c))
+    mon.drain()
+    assert mon.trigger is None and mon.summary()["candidates"][0]["t"] == 599.0
+    mon.close()

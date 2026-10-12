@@ -66,14 +66,15 @@ preset `itx1` = ext + both, carried by the v1 tier jobs and A0's external jobs):
   supportcase22's `=best=`, never PGLib-UC or ML4CO) the runner reads z* and the objective (c, offset) before t0 —
   no process receives z* — and while the clock runs tails every process's incumbent records (`RefMonitor`: the
   `.part` files and `names.json`, cuOpt's in A6F / A2F / A9 included), recomputes obj = c·x + offset from each stored
-  vector and ends the run (stop kind `ref_reached`, `stop` written to the mailbox) at the first record before T whose
-  GAMS gamma round((obj − z*)/max(|obj|, |z*|, 1), 6) is <= 0 AND whose Berthold gap is <= 1e-9 (`ref_reached`). After
+  vector and ends the run (stop kind `ref_reached`, `stop` written to the mailbox) at the first record before T — the
+  earliest by its time stamp over every process, not the first role read — whose GAMS gamma
+  round((obj − z*)/max(|obj|, |z*|, 1), 6) is <= 0 AND whose Berthold gap is <= 1e-9 (`ref_reached`). After
   the processes ended, the triggering incumbent is checked by the independent exact checker (`check_ref_trigger`);
   unconfirmed, the run is void (`ref_rejected`) and the pool reruns its block once with the stop off (`ref_stop_off`
   in the job, a runtime switch outside the run id). Processes killed after the stop are `stopped_by_runner` (not
   crashes), and the last checked incumbent is held to T in every metric, so `pt_gams` and Berthold's P are those of a
-  run to T (M0's replay checks it). run.json `ref_stop`: the reference, the records read per role, the trigger, the
-  check;
+  run to T (M0's replay checks it). run.json `ref_stop`: the reference, the records read per role, the trigger, every
+  role's first qualifying record (`candidates`), the check;
 - **`cuopt_kill_on_end`:** after a definitive outcome (`definitive_stop`: a partner's proof — exit 0 with an exit
   reason in DEFINITIVE — or ref_reached; not a partner's crash) every cuOpt process still running is SIGKILLed at once
   (`killed` "SIGKILL (definitive outcome)", stopped_by_runner) instead of after kill_after_s + 10 s; without the
@@ -1099,10 +1100,16 @@ class RefMonitor:
     (`<role>.incumbents.part`, the format of `solvers.common.SolverProcess.record_incumbent` and `ea.engine`), maps
     each vector by `<role>.names.json` onto the runner's variable order, recomputes the objective c·x + offset from the
     stored vector (c and offset were read before t0, from the runner's own parse) and reports the first record stamped
-    before `t_max` (the budget) that meets `ref_reached`. Each .part file is opened once and the descriptor kept: the
-    process unlinks the file after writing its .npz, and an open descriptor still reads every byte. A role whose names
-    the runner cannot map, or whose records do not parse, is left out with the reason (`summary`) — never a crash of
-    the run."""
+    before `t_max` (the budget) that meets `ref_reached` — first by its time stamp across ALL roles, not by the order
+    the roles are read in: each poll reads every role, keeps each role's first qualifying record (its candidate; within
+    a role the file order is time order) and, while no trigger is set, takes the candidate with the smallest t (a tie
+    goes to the earlier role of `roles`). In A9 cuOpt's record of z*, the EA's re-record of the same vector and SCIP's
+    re-record of the EA's post usually land in one poll; the trigger is cuOpt's, the earliest (as M0's replay judges).
+    Once set the trigger never changes; `summary()` lists every role's candidate (`candidates`, by t; `after_trigger`:
+    read only after the trigger was chosen, e.g. by `drain()` at the end). Each .part file is opened once and the
+    descriptor kept: the process unlinks the file after writing its .npz, and an open descriptor still reads every
+    byte. A role whose names the runner cannot map, or whose records do not parse, is left out with the reason
+    (`summary`) — never a crash of the run."""
 
     def __init__(self, run_dir: Path, roles, names, c, offset: float, sense: int, ref: StopRef, t_max: float,
                  gap_tol: float = REF_STOP_GAP):
@@ -1111,19 +1118,33 @@ class RefMonitor:
         self.c = np.asarray(c, dtype=np.float64)
         self.offset, self.sense, self.ref, self.t_max, self.gap_tol = float(offset), int(sense), ref, float(t_max), \
             float(gap_tol)
-        self.st = {r: dict(fh=None, buf=b"", k=0, cl=None, error=None, last_t=None) for r in roles}
+        self.st = {r: dict(fh=None, buf=b"", k=0, cl=None, error=None, last_t=None, first=None) for r in roles}
         self.trigger: dict | None = None
         self.records = 0
 
-    def poll(self) -> dict | None:
-        """Read what the processes appended since the last call; the trigger (once found, always the same) or None."""
+    def _read_all(self) -> None:
         for role, st in self.st.items():
             if st["error"] is None:
                 try:
                     self._read(role, st)
                 except Exception as e:  # noqa: BLE001 — a fault of this reader leaves the role out, nothing else
                     st["error"] = f"{type(e).__name__}: {e}"[:300]
+
+    def poll(self) -> dict | None:
+        """Read what the processes appended since the last call; the trigger (once found, always the same: the
+        earliest candidate by t over every role read so far, ties by role order) or None."""
+        self._read_all()
+        if self.trigger is None:
+            cands = [(st["first"]["t"], i, st["first"]) for i, st in enumerate(self.st.values())
+                     if st["first"] is not None]
+            if cands:
+                self.trigger = dict(min(cands, key=lambda c: (c[0], c[1]))[2])
         return self.trigger
+
+    def drain(self) -> None:
+        """Read what is left after the stop (records written but not yet read when the trigger was chosen) into the
+        candidates; the trigger never changes and none is set here (a run that ended otherwise keeps none)."""
+        self._read_all()
 
     def _read(self, role: str, st: dict) -> None:
         if st["cl"] is None:
@@ -1168,10 +1189,11 @@ class RefMonitor:
             st["k"] += 1
             st["last_t"] = t
             self.records += 1
-            if self.trigger is None and t < self.t_max and math.isfinite(o):
+            if st["first"] is None and t < self.t_max and math.isfinite(o):
                 ok, g, b = ref_reached(o, self.ref.value, self.sense, self.gap_tol)
                 if ok:
-                    self.trigger = dict(role=role, k=k, t=t, obj=o, obj_reported=obj, source=int(src), gamma=g, gap=b)
+                    st["first"] = dict(role=role, k=k, t=t, obj=o, obj_reported=obj, source=int(src), gamma=g, gap=b,
+                                       after_trigger=self.trigger is not None)
             off = end
         st["buf"] = buf[off:]
 
@@ -1185,7 +1207,9 @@ class RefMonitor:
                 st["fh"] = None
 
     def summary(self) -> dict:
-        return dict(records=self.records, trigger=self.trigger,
+        cands = sorted((st["first"] for st in self.st.values() if st["first"] is not None),
+                       key=lambda c: (c["t"], list(self.st).index(c["role"])))
+        return dict(records=self.records, trigger=self.trigger, candidates=cands,
                     roles={r: dict(records=st["k"], last_t=st["last_t"], error=st["error"]) for r, st in self.st.items()})
 
 
@@ -1505,6 +1529,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
                 except Exception as e:  # noqa: BLE001 — recovery is best effort; the reason is recorded
                     reasons.append(f"recover {p.role} incumbents: {e!r}")
         if monitor is not None:                          # D-021 R12: what the runner read, and the confirmation
+            monitor.drain()                              # records left unread at the stop: candidates only
             monitor.close()
             ref_rec.update(monitor.summary())
             trig = monitor.trigger
