@@ -55,3 +55,10 @@ launch runs). Control = **bo1s** (bo1's values in shadow mode = today's behaviou
 - **The harness is checked:** `backoff-report --stage 1y [--harness ext|r13-off]` requires one resolved harness on every
   A9 run of the set (boY and the control, every attempt), ext on every A6F run, and — given `--harness` — D-022's
   outcome on the A9 runs; otherwise the verdict is INVALID. The report names the harness it found.
+- **(13:5x, AgentRA, after merging the tooling; still no backoff2 run)** Two further readings, recorded before any run:
+  the ladder targets (kumeu, comp21, toguru within band) are an **adoption gate** under D-023 — "every outcome rule" —
+  whereas D-018 stage 1 reported them without gating; and D-018's G noise exemption ("never left level 0 and phase Y
+  < 1 s on both seeds") is nearly always met under boY, which has no ladder, so a guard whose partner posts within a
+  second is exempt from its own band and binds only through the guard-set mean and "still beats A6F". An ADOPT verdict
+  for boY is therefore weaker on the guards than D-018's would have been; the report prints every guard's d and band
+  either way.
