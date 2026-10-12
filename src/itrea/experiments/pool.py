@@ -61,6 +61,13 @@ validated before anything runs and refused on test and screening jobs (a prereg-
 carries `position` keeps that order (M2's AB / BA) instead of the Williams row; `--dry-run` prints D-003's arithmetic
 per treatment (e.g. A9 under the ext harness: 9 + 6 + 24 host + 12 + 24 GPU + 2 + 20 = 97 GB) and the governor's state.
 
+D-021 phase 2 (2026-10-12): a job may carry an integer `priority` — when every job of the file does, the block groups
+run in increasing priority, each group in the seeded stratified order (`order_blocks`; A0's H_cu ∪ W_SCIP unseen first,
+M6's loads before its measured runs); a block voided by `ref_rejected` (R12's stop at the proven optimum not confirmed
+by the exact checker) is rerun once, whole and first, with the stop off (`ref_stop_off` in its jobs, outside the run
+id; a resumed pool reads it from the set's void.jsonl); external jobs (split `ext`) of an arm with the EA need the tag
+`prereg-v2` as an ancestor of HEAD (R33, `check_frozen`).
+
 Resumable: run directories whose run.json says completed (or failed: a crash is kept, D-002 §6) are skipped. One pool
 at a time (RunLock). Log: logs/pool-<date>.log; status: logs/pool-status.json; voided runs: traces/raw/<set>/void/ and
 void.jsonl (rerun counts per arm are reported from it).

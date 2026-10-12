@@ -1,4 +1,4 @@
-# Trace format and metrics (contract, 2026-10-05; updated 2026-10-06, 2026-10-10 and 2026-10-11 to the built code)
+# Trace format and metrics (contract, 2026-10-05; updated 2026-10-06, 2026-10-10, 2026-10-11 and 2026-10-12 to the built code)
 
 What every run writes, and how every reported number is computed from it. Writers: `itrea.trace` (events, summary,
 incumbent vectors), the EA engine (genealogy, frontier), the solver adapters (`itrea.solvers.common` and the three
@@ -324,8 +324,14 @@ median below 2,300 MHz, a fan-governor clock cap during the run, or a fan state 
 window), `cuopt_memory` (harness: cuOpt's cap confirmed — RMM error with the peak ≥ 0.8 × the limit, or a kill with
 the scope's Result oom-kill or maxrss ≥ 0.95 × MemoryMax; a failure of SCIP or the EA stays `failed`),
 `external_kill` (any arm: a SIGKILL of any process the runner did not send, at no cap and not by thermal-watch) and
-`compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth after t0) — the whole block is rerun),
-`void_cause`, `reasons`, `stop`, `wall_s`, `exchange` (verdict counts; Redis stream
+`compiled_on_clock` (harness: a CUDA-cache entry or CuPy cache growth after t0) — the whole block is rerun — and
+since D-021 phase 2 `ref_rejected` (R12: the incumbent that triggered the stop at the proven optimum is not confirmed
+by the exact checker; the block is rerun once with the stop off)),
+`void_cause`, `reasons`, `stop` (`reason`, `t`, `kind`: budget | partner_end — with `proven`, a process ended with exit
+0 and a DEFINITIVE reason — | ref_reached | abort | interrupted | start_failed | runner_error; null when every process
+ended by itself), `ref_stop` (D-021 R12, harness with `ref_stop` only, else null: `enabled`, `reason`, `z`, `kind`,
+`source`, `sense`, `gap_tol`, `poll_s`, per role the records read, `trigger`, `check` — Process interface § ITX-1 phase
+2), `wall_s`, `exchange` (verdict counts; Redis stream
 lengths), and the merged trajectories as reported by the processes: `portfolio` (best of all processes at every
 moment, `[t, obj, role, source]`) and `solver` (what the solver itself held). The analysis rebuilds both from checked
 incumbents.
@@ -402,8 +408,35 @@ time unless `--recheck`.
   `solver_lp_iter_per_s`, `solver_status`, `solver_exit_reason`, `solved_optimal`, `backend`, `backend_mismatch`;
 - frontier and exchange window: `frontier_size`, `frontier_hv`, `frontier_mean_pairwise`, `frontier_max_dist`,
   `frontier_mean_dist_to_inc`, `cb_first_s`, `cb_first_solving_s`, `cb_max_gap_s`, `no_exchange_window`.
+- the run record (D-021, appended at the end 2026-10-12; every earlier column unchanged; `build_runs.record_cols`):
+  `fan_start_state`, `fan_start_cap`, `fan_end_state`, `fan_end_cap` (the fan governor at the start and the end; −1 /
+  "" without), `acpi_start_c`, `acpi_during_max_c`, `void_info` (run.json's `void_info` as JSON), `cuda_compiled_on_clock`,
+  `cuda_cache_n_on_clock`, `stop_kind` (run.json `stop.kind`; "none" = every process ended by itself, "" = no record),
+  `ref_stop_enabled`, `ref_stop_t` (the triggering record's time), `ref_stop_role`, `ref_stop_check` (confirmed |
+  rejected | ""). A run R12 stopped (`ref_reached`) reads like a run to T: the processes killed then are
+  `stopped_by_runner` (not crashes) and every metric holds the last checked incumbent to T.
 - **synthetic rows** (`synthetic = True`, arm `A0+A5`): the uncoupled portfolio of D-002 v3 H2 — the pointwise best of
   the checked A0 and A5 trajectories of the same block.
+
+**`datasets/mipfeas_strata.csv`** (D-021 R3 / R4 / R31; `tools/derive_mipfeas_strata.py`, read by
+`itrea.analysis.itx_strata.read_strata`; committed and hashed in prereg-v2, sha256 `d2ad90ee040e…` on 2026-10-12) —
+one row per instance of MIPfeas's 233: `name`, `instance`, `dev` / `unseen` (the 15 development and class-probe
+instances among the 233 are not unseen), `ref_kind` (MIPLIB solu), `z_star` (GAMS's), `r12` (R12 applies: =opt=),
+`p_cuopt` (GAMS's published cuOpt-GB10 26.08 `pt_gams`, 2 = none), `H_cu` (>= 0.1 or none), `H_cu_p05` (>= 0.5 or
+none), `p300_scip` and `w_source` (our screening's Berthold P(300), seed 900; satellites2-40 and supportcase22 from
+GAMS's SCIP 10 trace), `p_scip10` (GAMS's published SCIP 10 `pt_gams`), `W_SCIP` (P(300) >= 0.5), `W_only`, `E`,
+`does_not_fit` (M3's list), `decide` (unseen and not on the list: 215), `e_quartile` (1–4 for E on the decision set),
+`e_sample`, `panel`, `panel_group` (p05 | p01), `tier` (T1 | T2 | T3 | "" for the list), `t4`, `t5`. Booleans 0 / 1,
+floats %.17g, sorted by name.
+
+**GAMS `.trc` export** (D-021 R16; `itrea gams-trc`, `itrea.analysis.gams_trc`): one trace per run and clock —
+`<instance>_gb10-f-<clock>_<arm label>-s<seed>.trc`, GAMS's six fields after two `*` lines: an `S` record at 0, an `I`
+record per improving checked incumbent of the portfolio before T (call clock, or + `startup_offset_s` on the launch
+clock), an `E` record at T (the run is held to T; at an earlier given end only when its gamma is 0), `bestBound` na,
+node 0, floats by `repr`. GAMS's own `calculate_primal_integral` (create_primalintegral.py) on the export reproduces
+`pt_gams` / `pt_gams_launch` to 1e-12 (`tests/test_gams_trc.py`, also on its 233 GB10 26.08 traces re-exported).
+Limits: minimisation only (refused otherwise; every MIPfeas instance minimises); an incumbent better than z* is written
+as it is and flagged in the header — GAMS's script raises on it unless the trace is on its whitelist.
 
 ## Metrics
 All in the user's objective sense; computed by `itrea.analysis` (adapted from berkorbay/optopt@4dd48395, MIT,
@@ -458,6 +491,27 @@ the median of every stratum is reported beside, strata 2–5 being thread-sensit
 D-021: CLOCK-FAIL (the reading stops) before INSIDE / OUTSIDE the band 0.870 ≤ R ≤ 1.150 with feasible ±1, and only
 runs under the ext harness exactly with cuOpt's thread count |F| (and F's cores) count — any other is listed under
 missing with the reason; the configuration hash of the chosen runs is printed. A6m keeps D-020's PASS / FAIL.
+
+**ITX-1's external analysis** (D-021 R17–R22; `itrea itx-report`, `itrea.analysis.itx_report`), on the v1 runs (A9 /
+A6F `@v1c<tag>` at seed 2000 — the panel also at 2001 —, A0@v1, live A2F; T = 600; one valid run per instance, arm
+and seed: completed or failed — an arm's failure is its outcome —, not void, intact; two or more refused): per
+instance `pt_gams` at 600 and at 300, Berthold's P(300) and the first incumbent on both clocks, and the **computed
+race** (`metrics.merge_steps` of A0's and A6F's checked trajectories, same seed; on the launch clock each with its own
+offset). The **ε-floored effect** d_ε = (P_ctrl − P_arm)/max(P_ctrl, P_arm, ε), ε = 60 γ-seconds / T (0.1 at 600).
+Target: the ratio of mean `pt_gams` A9 / A6F on H_cu-unseen (64) with a 10,000-resample paired bootstrap (met <= 0.75;
+"better shown" = the 95 % interval's upper end < 1; the one-sided 95 % bound beside; BCa with `--bca`), improved /
+worse (d_ε ±0.10) with a two-sided sign test, the worst case. Minimum: the guard's mean d_ε over the decision set (215)
+>= −0.05 (harm shown only if the whole interval is below) and solutions found (`pt_gams` < 2) A9 >= A6F there.
+Stratified estimates (census of H_cu-unseen and W-only, the E-sample per quartile weighted N_q / 10) — the reading
+while T3 is incomplete. Secondary, Holm: A9 vs the race on H_cu-unseen, A9 vs A0 on W_SCIP-unseen (62). Reported:
+geo-means at shift 0.001 and 1/30 per arm over the 230 run and the 215, both clocks; D-019's literal readings; the
+panel's 90th percentile of |d_ε| between seeds; GAMS's published rows re-scored by the port on exactly our completed
+subset. "Met" only when met on both clocks (R10). `--m6`: M6's lanes (nodes/s beside vs alone, > 3 % slower or the
+hottest zone >= 85 °C → 3 lanes).
+
+**R12 offline** (`tools/m0_replay.py`, D-021 M0): the stop applied to every recorded run's checked incumbents and to
+GAMS's 3,495 traces; on 2026-10-12 `pt_gams` unchanged (difference 0) and P / `pt_mf` within 1.45e-11 (our runs) and
+7.04e-10 (GAMS's), D-021's 1e-12 / 5e-7.
 
 **Time to target**: first time γ ≤ 5 %, γ ≤ 1 %, and time to first feasible; censored at T (Type I). Analysed per
 instance on seed medians.
