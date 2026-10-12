@@ -120,6 +120,24 @@ def test_report_on_synthetic_runs():
                                 T3=dict(instances=109, pairs=109))
 
 
+def test_better_shown_reads_the_ratio_interval():
+    """The target's "better shown" reads the RATIO's bootstrap upper end, not the d_ε interval's: A9 twice as fast on
+    half of H_cu-unseen and 1.5 x slower on the other half -> mean ratio 1 (upper end above 1: not shown) while the
+    d_ε interval lies below 1 (+0.5 / −0.33)."""
+    st = read_strata()
+    hcu = list(st[st["decide"] & st["H_cu"]]["name"])
+    spec = []
+    for k, n in enumerate(hcu):
+        spec.append((n, LAB["A9"], 2000, 30.0 if k % 2 == 0 else 90.0))
+        spec.append((n, LAB["A6F"], 2000, 60.0))
+    runs, inc = _table(spec)
+    t = X.report(runs, inc, st)["aggregates"]["call"]["target"]
+    assert t["n"] == t["n_d"] == 64 and t["ratio"] == pytest.approx(1.0)
+    assert t["lo"] < 1.0 < t["hi"] and not t["better_shown"] and not t["met"]
+    assert t["d_hi"] < 1.0 and t["d_mean"] == pytest.approx((0.5 - 1 / 3) / 2)
+    assert (t["improved"], t["worse"]) == (32, 32)
+
+
 def test_both_clocks_and_incomplete_t3():
     """A9 started 25 s late on the launch clock only: the target holds on the call clock only (R10). A missing pair
     makes T3 incomplete and the stratified estimate the one to read."""

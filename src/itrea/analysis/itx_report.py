@@ -318,8 +318,11 @@ def aggregates(df: pd.DataFrame, strata: pd.DataFrame, bca: bool = False) -> dic
         a9, a6 = f"A9_pt_gams_{clock}", f"A6F_pt_gams_{clock}"
         c: dict = {}
         x, y, names = _pairs(df, hcu, a9, a6)
-        c["target"] = dict(ratio_of_means(x, y, bca=bca), **{k: v for k, v in effect_summary(
-            d_eps(y, x, eps), eps, names).items() if k != "eps"}, missing=int(hcu.sum()) - len(names))
+        e = effect_summary(d_eps(y, x, eps), eps, names)    # the d_ε side, prefixed: n / lo / hi are the ratio's
+        c["target"] = dict(ratio_of_means(x, y, bca=bca), d_mean=e["mean_d"], d_lo=e["lo"], d_hi=e["hi"], n_d=e["n"],
+                           wilcoxon_p=e["wilcoxon_p"], improved=e["improved"], worse=e["worse"], sign_p=e["sign_p"],
+                           worst_d=e.get("worst_d", math.nan), worst=e.get("worst"),
+                           missing=int(hcu.sum()) - len(names))
         c["target"]["met"] = bool(c["target"]["ratio"] <= TARGET_RATIO) if math.isfinite(c["target"]["ratio"]) else None
         c["target"]["better_shown"] = bool(c["target"]["hi"] < 1) if math.isfinite(c["target"]["hi"]) else None
         x, y, names = _pairs(df, dec, a9, a6)
@@ -487,8 +490,10 @@ def markdown(res: dict) -> str:
         L += [f"### {clock} clock",
               f"- Target (H_cu-unseen, n {t['n']}, missing {t['missing']}): mean pt_gams ratio A9/A6F "
               f"{_f(t['ratio'], 3)} [{_f(t['lo'], 3)}, {_f(t['hi'], 3)}] (one-sided 95 % bound {_f(t['hi95'], 3)}); "
-              f"met (<= {TARGET_RATIO}) {t['met']}, better shown {t['better_shown']}; improved {t['improved']} / worse "
-              f"{t['worse']} (sign p {_f(t['sign_p'], 3)}); worst d_ε {_f(t.get('worst_d'), 3)} ({t.get('worst')})",
+              f"met (<= {TARGET_RATIO}) {t['met']}, better shown {t['better_shown']}; mean d_ε {_f(t['d_mean'], 3)} "
+              f"[{_f(t['d_lo'], 3)}, {_f(t['d_hi'], 3)}], Wilcoxon p {_f(t['wilcoxon_p'], 3)}; improved "
+              f"{t['improved']} / worse {t['worse']} (sign p {_f(t['sign_p'], 3)}); worst d_ε {_f(t.get('worst_d'), 3)}"
+              f" ({t.get('worst')})",
               f"- Guard (decision set, n {g['n']}, missing {g['missing']}): mean d_ε {_f(g['mean_d'], 3)} "
               f"[{_f(g['lo'], 3)}, {_f(g['hi'], 3)}], Wilcoxon p {_f(g['wilcoxon_p'], 3)}; passes (>= {GUARD}) "
               f"{g['passes']}, harm shown {g['harm_shown']}",
