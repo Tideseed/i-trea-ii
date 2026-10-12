@@ -413,3 +413,51 @@ recorded as cap hits, not voided (scope Result oom-kill, confirmed):
 (in H_cu: GAMS cuOpt P 0.230), nw04 and supportcase6 (both in E)** are excluded from both arms of the external set.
 Decision sets: H_cu-unseen 65 → **64**, the unseen set 218 → **215**. The M0 shape-only plan of A9 on the rest is still
 owed.
+
+## Phase 2 built, M0 run, the sets fixed (2026-10-12 12:5x, AgentRA, branch dev-itx2; not merged)
+Code (CPU tests only; every existing arm's plan byte-identical old vs new — 35,337 plan records and 961 pool blocks of
+the base's job files): R12's stop at the proven optimum in the runner (harness switch `ref_stop`; the triggering
+incumbent checked exactly after the run, unconfirmed = void `ref_rejected`, rerun once with the stop off); cuOpt
+SIGKILLed at once after a definitive outcome (switch `cuopt_kill_on_end`); preset `itx1` = ext + both (the v1 tier and
+A0 jobs); `tools/derive_mipfeas_strata.py` → `datasets/mipfeas_strata.csv`; `make-jobs itx-v1 --tier T1..T5`
+(no v1 file written: v1 runs on 26.10), `itx-a0`, `itx-m6` / `itx-m6a`; `itrea gams-trc` (GAMS's own script reproduces
+`pt_gams` to 1e-12 on our exports and on its 233 GB10 26.08 traces re-exported); `itrea itx-report` (R17–R22, D-019's
+literal readings beside, R36's published rows on our subset, M6's lane reading); build_runs' run-record columns;
+`tools/m0_replay.py`.
+
+**The sets (R3, R4, R31; sha256 `d2ad90ee040e4b6a046cda9abe67c6add86b48f64547288c2edc292a0c203842`).** Every count
+above matches: H_cu 75 / 65 unseen (64 after M3's list), H_cu at 0.5: 34 / 30, W_SCIP 74 / 62, W-only 17, E 136, the
+decision set 215. satellites2-40 and supportcase22 are in W_SCIP by Berthold's P(300) of GAMS's SCIP 10 trace (1.000
+each). Choice (AgentRA, open to Berk): R4 was written before M3, so **both samples are drawn after M3's list** — the
+E-sample from E minus nw04 and supportcase6 (134; 4 quartiles of GAMS's cuOpt P by D-020's stable-sort + array_split
+pattern, 10 each), the panel from H_cu-unseen minus eilA101-2 (64: 10 with P >= 0.5 or none, 10 with 0.1 <= P < 0.5),
+one `default_rng(20261012)` stream in that order. Tiers: T1 64, T2 57 (17 + 40), T3 109 (94 + 15 development), T4 /
+T5 the panel (20).
+
+**M0 replay of R12.** (a) Our runs — `datasets/runs.parquet` and `incumbents_checked.parquet` of the main checkout as
+built 2026-10-11 14:09 (itx-m2 / m3 and the 10-12 M4 runs are not in it): 921 runs, 707 on =opt= references, 192 would
+stop, 0 would be void (no triggering incumbent failed the check); `pt_gams` and its launch-clock value unchanged
+(max difference 0), Berthold's P and `pt_mf` within 1.45e-11; 41.50 h as run → 39.60 h (1.90 h saved; 1.09 h in the
+screening). (b) GAMS's 3,495 traces (3,480 on =opt=; supportcase22's 15 are never stopped): 1,588 reach the proven
+optimum before 600 s; `pt_gams` unchanged (0), P and `pt_mf` within 7.04e-10. **Correction to § R12 above:** cuOpt-GB10
+26.08's 233-pass falls from 29.39 h to **23.54 h with 105 instances stopped**, not 22.8 h / 116 — that estimate used
+GAMS's gamma <= 0 alone; R12 also asks Berthold's gap <= 1e-9, which holds back 11 instances whose incumbent rounds to
+gamma 0 but differs from z* by more (binkar10_1, graphdraw-domain, istanbul-no-cutoff, mas76, momentum1,
+mushroom-best, neos-2978193-inde, neos-4722843-widden, roi2alpha3n4, supportcase26, supportcase7). Hours saved per
+GAMS run 3.0–6.2 h of 23.7–31.6 h.
+
+**M0 memory plan (A9 on the 233, shape only, `configs/itrea2-dev-rc-3way.yaml`):** no instance refused (gene dtype,
+population fit in 12 GB, Rank 0 slot); the population is below 256 on supportcase12 (P = 174) and
+neos-5114902-kasavu (192); the parse's peak RSS is at most 2.26 GB (square47), under the EA's 6-GB host cap. So no A9
+non-start is predicted (R29's A9-outcome path stays for what the plan cannot see).
+
+**Added beyond the code list above (each a safety or ordering control; open to a superseding decision):**
+- R33 enforced: the pool refuses external jobs (split `ext`) of an arm with the EA unless `prereg-v2` is an ancestor
+  of HEAD (A0 and A6F external jobs need prereg-v1 only).
+- A job-level `priority` (blocks in increasing priority, each group in the usual seeded stratified order; no earlier
+  job file has it): A0's H_cu ∪ W_SCIP unseen first (81 of 230); M6's three measured 60-s runs start while three load
+  runs hold the other lanes.
+- A0 and M6 run on single-core X925 lanes with `--layout screen --cpu-lanes 4` (or 1 for M6's alone runs), which
+  needs no E0 flag — the pair layout's `--cpu-lanes` does.
+- Not enforced: the pool does not compare the installed cuOpt version with a job's variant tag (`v1c2610`); the v1
+  window's checklist must.
