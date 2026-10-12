@@ -26,6 +26,7 @@ the only place the mapping lives.
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
+    itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)
@@ -58,6 +59,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off (D-018): stage-0 / stage-1 rules, verdict"),
     "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas calibration vs GAMS's cuOpt GB10 row: --arm A6F "
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
+    "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
     "exchange": ("itrea.experiments.exchange_ctl", (), "the itrea-redis container: up | down | status | flush RUN_ID"),
     "bench-ls": ("path:tools/bench_ls.py", (), "local-search benchmark"),
     "env": ("itrea.experiments.record_env", (), "environment record (versions, hardware, git state)"),
