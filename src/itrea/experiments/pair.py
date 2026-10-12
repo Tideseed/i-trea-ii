@@ -1130,7 +1130,14 @@ class RefMonitor:
             p = self.run_dir / f"{role}.names.json"
             if not p.exists():
                 return                                    # not recording yet (the EA starts its log at t0)
-            local = json.loads(p.read_text())
+            try:
+                local = json.loads(p.read_text())
+            except ValueError:
+                # names.json is written (not atomically) before the .part file is opened (solvers.common, ea.engine):
+                # a half-written file is read again later, an error only once the .part file exists
+                if not (self.run_dir / f"{role}.incumbents.part").exists():
+                    return
+                local = json.loads(p.read_text())
             idx = [self.index.get(str(n)) for n in local]
             miss = sum(1 for i in idx if i is None)
             if miss:

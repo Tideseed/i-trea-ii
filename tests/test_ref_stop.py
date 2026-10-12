@@ -341,3 +341,37 @@ def test_build_runs_reads_a_ref_reached_run_like_a_run_to_T(ks, tmp_path, fake, 
     assert steps[-1][1] == pytest.approx(ks["z"]) and steps[-1][0] < 1.5
     assert r["pt_gams"] == pytest.approx(M.gams_integral(steps, r["ref"], -1, 20.0).value, abs=1e-15)
     assert r["final_gap"] == 0.0 and r["t_gap1_event"] and rec["wall_s"] < 5.0
+
+
+def test_monitor_reads_partial_files_across_polls(tmp_path):
+    """RefMonitor on its own: a half-written names.json (the EA writes it at t0) is read again later, not an error; a
+    record split across two polls is parsed once complete; records at or after t_max never trigger; the trigger is the
+    first record that meets the rule, in the process's own variable order mapped by name."""
+    import struct
+    names = ["a", "b", "c"]
+    c = np.array([1.0, 2.0, 3.0])
+    ref = pair.StopRef(5.0, "opt", "test")
+    mon = pair.RefMonitor(tmp_path, ("ea",), names, c, 0.0, 1, ref, t_max=10.0)
+    (tmp_path / "ea.names.json").write_text('["c", "b"')                 # half written, no .part yet
+    assert mon.poll() is None and mon.st["ea"]["error"] is None
+    (tmp_path / "ea.names.json").write_text(json.dumps(["c", "b", "a"]))
+
+    def rec(t, x):                                                        # x in the process's order (c, b, a)
+        x = np.asarray(x, float)
+        nz = np.flatnonzero(x)
+        obj = float(np.dot(c[[2, 1, 0]], x))
+        return struct.pack("<ddBi", t, obj, 1, nz.size) + nz.astype("<i4").tobytes() + x[nz].astype("<f8").tobytes()
+    part = open(tmp_path / "ea.incumbents.part", "ab", buffering=0)
+    r1, r2, r3 = rec(1.0, [0, 0, 7]), rec(11.0, [1, 1, 0]), rec(12.0, [1, 1, 0])   # 7; 5 but after t_max
+    r4 = rec(3.0, [1, 1, 0])                                                       # c + b = 3 + 2 = 5: z*
+    part.write(r1 + r2[:10])
+    assert mon.poll() is None and mon.st["ea"]["k"] == 1
+    part.write(r2[10:] + r3)
+    assert mon.poll() is None and mon.st["ea"]["k"] == 3                 # 11 s and 12 s: after t_max, no trigger
+    part.write(r4)
+    tr = mon.poll()
+    assert tr is not None and (tr["role"], tr["k"], tr["t"], tr["obj"]) == ("ea", 3, 3.0, 5.0)
+    part.close()
+    (tmp_path / "ea.incumbents.part").unlink()                             # the process removed it: nothing breaks
+    assert mon.poll() is tr and mon.summary()["roles"]["ea"]["records"] == 4
+    mon.close()
