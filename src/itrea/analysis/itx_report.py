@@ -9,30 +9,52 @@ the v1 job writers make them, `make-jobs itx-v1 | itx-a0`): A9 = `A9@v1c<tag>`, 
 panel's seed 2001 too), A0 = `A0@v1`, live A2F = `A2F@v1c<tag>`; T = 600 s.
 
 Runs: per (instance, arm, seed) the one run at budget T, status completed or failed (an arm's failure is its outcome,
-R29: it counts against that arm), not void and not in a voided block, not synthetic, intact (`mipfeas.integrity_faults`:
-no incumbent file missing, none unchecked, stored = traced, none before t0). Two or more such runs: refused, never one
-picked. Every run's trajectory is its checked portfolio (`gams_trc.run_steps`).
+R29: it counts against that arm), not void and not in a voided block, not synthetic, carrying the registered settings
+(R33, prereg-v2; `registered_values` / `registered_fault`: the `itx1` harness as recorded in run.json — for an arm
+without cuOpt only its SCIP-side part, `pair.hashed_harness` — and, for A9, the base configuration hash of
+`configs/frozen-v2.yaml`, the C1 freeze registered with the tag; `--frozen` names another file for a development
+reading; while no registered file exists no A9 run is taken), intact (`mipfeas.integrity_faults`: no incumbent file
+missing, none unchecked, stored = traced, none before t0). Two or more such runs: refused, never one picked. Every
+run's trajectory is its checked portfolio (`gams_trc.run_steps`). The full run hash (which also folds in the lane's
+footprint) is not re-derived here.
 
 Per instance (`instances`), every arm, both clocks (call = since t0, launch = + the run's `startup_offset_s`):
 `pt_gams` at T = 600 (GAMS's integral, `metrics.gams_integral`) and at 300, Berthold's P(300), the time to the first
-incumbent; the computed race (R8: at every moment the better of A0's and A6F's checked trajectories, same instance and
-seed — `metrics.merge_steps`; on the launch clock each run with its own offset).
+incumbent, the run's start-up (`<arm>_startup_s` = launch − call clock); the computed race (R8: at every moment the
+better of A0's and A6F's checked trajectories, same instance and seed — `metrics.merge_steps`; on the launch clock each
+run with its own offset); the set flags (decide, H_cu, H_cu_p05, W_SCIP, W_only, E, e_sample, panel / t5, exposed …).
 
-Aggregates (each names its clock, set, tier completion and seed count):
+Aggregates (each names its clock, set, tier completion and seed count; `decisions` per clock):
+- **Completeness:** A9 / A6F pairs present of expected on the decision set (`full_complete`), on the census +
+  E-sample basis — H_cu-unseen, W-only and the E-sample (`census_complete`; T1 + T2, never cut, R32) — and on T3's
+  decision instances (`t3_complete`). They decide how the target and the minimum are read.
 - **Target (R19):** the ratio of mean `pt_gams` A9 / A6F on H_cu-unseen (after M3's list, 64) with a 10,000-resample
   paired percentile bootstrap (resampling instances, seed `stats.BOOT_SEED`): met iff the point estimate <= 0.75;
   "better shown" iff the interval's upper end (the two-sided 95 % interval's, i.e. a one-sided 97.5 % bound; the
   one-sided 95 % bound is reported beside) < 1; improved / worse counts (d_ε >= +0.10 / <= −0.10, R20) with a two-sided
-  sign test; the worst case.
+  sign test; the worst case. Read only on the complete set: with a pair missing, `met` / `better_shown` are None and
+  the reading is "incomplete (n of N)" (`met_on_available` keeps the figure on the pairs present). Beside it (R3): the
+  same figures on H_cu at P >= 0.5 (`target_p05`, 30 decision instances).
 - **Minimum (R19):** (a) the ε-floored guard d_ε = (P_ctrl − P_arm) / max(P_ctrl, P_arm, ε), ε = 60 γ-seconds / T =
   0.1 at T = 600 (R18), mean over the decision set (215 = unseen minus the list) A9 vs A6F with its bootstrap interval
   and Wilcoxon p: passes iff the mean >= −0.05; harm "shown" only if the whole interval lies below −0.05; (b) solutions
-  found (`pt_gams` < 2) by A9 >= A6F's on the decision set (on the 233 beside). Minimum = (a) and (b).
+  found (`pt_gams` < 2) by A9 >= A6F's on the decision set (on the 233 beside). Minimum = (a) and (b), read on a basis
+  (`minimum_basis`): "full" when every decision pair is present (the plain mean and the counts); "stratified" when T3
+  is incomplete but the census and the E-sample are complete — (a) on the stratified guard (harm shown iff its
+  interval's upper end < −0.05), (b) on the stratified count of solutions found A9 − A6F >= 0 (R31, Berk's "Accept
+  all"); "incomplete" otherwise (None, never "met"). The plain figures on the pairs present are kept as
+  `passes_on_available` / `harm_shown_on_available`.
 - **Stratified estimates (R31)** of the guard and solutions found on the decision set from the census of H_cu-unseen
-  and W-only and the E-sample (each E quartile weighted N_q / 10): reported always, and THE estimate while T3 is
-  incomplete (a decision-set instance without its pair).
+  and W-only and the E-sample (each E quartile weighted N_q / 10): reported always, decisive while T3 is incomplete.
+- **Without the exposed instances (R33):** every decisive aggregate above (completeness, target, guard, solutions,
+  stratified estimates, minimum and its R10 reading) again on the decision set minus the instances whose A6F 26.08
+  outcome was seen before prereg-v2 (`exposed` in the strata file: the calibration sample and M3's probe; 31 of the
+  215), under `without_exposed`.
 - **Secondary (R21, Holm over the two):** A9 vs the computed race on H_cu-unseen; A9 vs A0 on W_SCIP-unseen (62):
-  mean d_ε, bootstrap interval, Wilcoxon p, Holm-adjusted p.
+  mean d_ε, bootstrap interval, Wilcoxon p, Holm-adjusted p. `--bca`: BCa intervals beside every percentile interval
+  of the target ratio and of each mean d_ε (target, guard, secondaries; R21's sensitivity).
+- **R8, live A2F vs the computed race** on the panel (T5, 20): ratio of means A2F / race and mean d_ε (negative: the
+  computed race flatters the live one).
 - **Reported, not decisive (R17):** the shifted geometric means of `pt_gams` at shift 0.001 and 1/30, both clocks, per
   arm, over the instances run (the 233 minus the list) and the decision set; the panel's 90th percentile of |d_ε|
   between its two seeds per arm (R20's per-instance noise scale).
@@ -40,13 +62,16 @@ Aggregates (each names its clock, set, tier completion and seed count):
   A6F (`pt_gams` >= 0.1 or no solution): mean ratio <= 0.75; geo-mean ratio <= 0.9; stretch A9's geo-mean <= 0.0274.
 - **Published rows (R36)** re-scored by the port from GAMS's own traces on exactly our completed subset (instances with
   both A9 and A6F at seed 2000), with footprint, clock, version and machine named; descriptive only (no "beats").
-Claims are written "met" only when met on both clocks (R10); otherwise "met on the call clock only".
+Claims are written "met" only when met on both clocks (R10); otherwise "met on the call clock only", with the
+start-up cost beside it (each arm's median / p90 start-up on the set, `startup`) and the launch clock's figure; or
+"not met", or "incomplete (n of N)".
 
 M6 (`--m6`): SCIP's nodes/s alone (A0@m6a) vs beside 3 busy lanes (A0@m6b) per instance — more than 3 % slower on
 the mean ratio -> fewer lanes — and the hottest ACPI zone over the heat phase's runs (set itx-m6): >= 85 °C -> 3 lanes.
 
     itrea itx-report [--cuopt 26.10] [--runs datasets/runs.parquet] [--inc datasets/incumbents_checked.parquet]
-                     [--strata datasets/mipfeas_strata.csv] [--gams-dir …] [--json F] [--md F] [--bca] [--m6]
+                     [--strata datasets/mipfeas_strata.csv] [--gams-dir …] [--frozen configs/frozen-v2.yaml]
+                     [--json F] [--md F] [--bca] [--m6]
 """
 from __future__ import annotations
 
@@ -93,9 +118,51 @@ def labels(cuopt: str = "26.10") -> dict[str, str]:
 
 
 # ------------------------------------------------------------------------------------------------------ runs
-def select(runs: pd.DataFrame, label: str, seed: int, budget: float = T_EXT) -> tuple[dict, dict]:
+def registered_values(frozen: str | Path | None = None) -> dict:
+    """What every v1 run must carry (R33, prereg-v2): the `itx1` harness as this code resolves it and, for A9, the
+    base configuration hash of the file registered with the tag (`configs/frozen-v2.yaml`, the C1 freeze; another file
+    only by `--frozen` for a development reading). `A9_base_hash` is None while the file does not exist: then no A9 run
+    is taken."""
+    from itrea import paths
+    from itrea.config import EAConfig
+    from itrea.experiments import pair
+    from itrea.experiments.pool import FROZEN_V2_CONFIG
+    name = str(frozen or FROZEN_V2_CONFIG)
+    fp = paths.resolve(name)
+    return dict(harness=pair.resolve_harness("itx1"), frozen=name,
+                A9_base_hash=EAConfig.from_yaml(fp).hash() if fp.exists() else None)
+
+
+def registered_fault(row, arm: str, reg: dict) -> str:
+    """'' if a run carries the registered settings, else why not: its recorded harness (`harness`, JSON) against the
+    registered itx1 — for an arm without cuOpt only the part that acts on it (`pair.hashed_harness`; R33: A0 stands
+    if its SCIP-side harness is unchanged at the tag) — and, for A9, its `base_hash` against the registered
+    configuration's. The full run hash (it also folds in the lane's footprint) is not re-derived here."""
+    from itrea.experiments import pair
+    spec = pair.arm_spec({"arm": arm})
+    raw = str(row.get("harness") or "")
+    try:
+        got = json.loads(raw) if raw else None
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        return "no harness recorded (v1 runs carry itx1)"
+    if pair.hashed_harness(spec, got) != pair.hashed_harness(spec, reg["harness"]):
+        return f"harness {json.dumps(got, sort_keys=True)} is not the registered itx1"
+    if arm == "A9":
+        if reg.get("A9_base_hash") is None:
+            return f"A9's registered configuration {reg.get('frozen')} does not exist"
+        bh = str(row.get("base_hash") or "")
+        if bh != reg["A9_base_hash"]:
+            return f"config {bh or '(none)'} is not the registered {reg['A9_base_hash']} ({reg.get('frozen')})"
+    return ""
+
+
+def select(runs: pd.DataFrame, label: str, seed: int, budget: float = T_EXT,
+           registered: dict | None = None) -> tuple[dict, dict]:
     """The one valid run per instance of an arm label at a seed (module docstring): ({instance: row}, {instance: [why
-    the other runs were not taken]})."""
+    the other runs were not taken]}). With `registered` (`registered_values`; the CLI always passes it) a run that does
+    not carry the registered settings (`registered_fault`) is not taken either."""
     from itrea.analysis.mipfeas import integrity_faults
     r = runs[(runs["arm"].astype(str) == label) & (runs["seed"].astype(int) == int(seed)) &
              np.isclose(runs["budget"].astype(float), float(budget))]
@@ -110,6 +177,11 @@ def select(runs: pd.DataFrame, label: str, seed: int, budget: float = T_EXT) -> 
             why.setdefault(n, []).append(f"{row['run_id']}: status {row['status']}"
                                          + (", block void" if bool(row.get("block_void", False)) else ""))
             continue
+        if registered is not None:
+            rf = registered_fault(row, label.split("@")[0], registered)
+            if rf:
+                why.setdefault(n, []).append(f"{row['run_id']}: {rf}")
+                continue
         f = integrity_faults(row)
         if f:
             why.setdefault(n, []).append(f"{row['run_id']}: not intact ({'; '.join(f)})")
@@ -196,8 +268,29 @@ def sign_test(improved: int, worse: int) -> float:
     return float(st.binomtest(improved, n, 0.5).pvalue) if n else 1.0
 
 
-def effect_summary(d, eps: float, names=None) -> dict:
-    """mean d_ε with its bootstrap interval, Wilcoxon, improved / worse (±0.10) with the sign test, the worst case."""
+def bca_mean(d, n_boot: int = S.N_BOOT, seed: int = S.BOOT_SEED) -> dict:
+    """R21's sensitivity for a mean d_ε: the BCa 95 % interval (`scipy.stats.bootstrap`, the resample count and seed
+    of the percentile interval). Fewer than 3 values: none; all values equal: the degenerate interval [d, d]."""
+    d = np.asarray(d, dtype=float)
+    d = d[np.isfinite(d)]
+    if d.size < 3:
+        return dict(bca_lo=math.nan, bca_hi=math.nan)
+    if np.ptp(d) == 0:
+        return dict(bca_lo=float(d[0]), bca_hi=float(d[0]))
+    import warnings
+    from scipy import stats as st
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = st.bootstrap((d,), np.mean, n_resamples=n_boot, method="BCa", random_state=seed)
+        return dict(bca_lo=float(r.confidence_interval.low), bca_hi=float(r.confidence_interval.high))
+    except Exception as e:  # noqa: BLE001 — a sensitivity only
+        return dict(bca_lo=math.nan, bca_hi=math.nan, bca_error=repr(e)[:200])
+
+
+def effect_summary(d, eps: float, names=None, bca: bool = False) -> dict:
+    """mean d_ε with its bootstrap interval (with `bca`, also the BCa interval: R21's sensitivity), Wilcoxon, improved
+    / worse (±0.10) with the sign test, the worst case."""
     d = np.asarray(d, dtype=float)
     ok = np.isfinite(d)
     b = S.bootstrap_mean(d[ok])
@@ -205,6 +298,8 @@ def effect_summary(d, eps: float, names=None) -> dict:
     imp, wor = int((d[ok] >= IMPROVED).sum()), int((d[ok] <= -IMPROVED).sum())
     out = dict(n=int(ok.sum()), eps=eps, mean_d=b["mean"], lo=b["lo"], hi=b["hi"], wilcoxon_p=w["p"],
                improved=imp, worse=wor, sign_p=sign_test(imp, wor))
+    if bca:
+        out.update(bca_mean(d[ok]))
     if ok.any():
         k = int(np.nanargmin(np.where(ok, d, np.inf)))
         out.update(worst_d=float(d[k]), worst=(None if names is None else str(list(names)[k])))
@@ -216,12 +311,13 @@ def shifted_geomeans(p) -> dict:
     return {f"shift_{s:.6g}": M.shifted_geomean(p, shift=s) if p else math.nan for s in SHIFTS}
 
 
-def stratified(df: pd.DataFrame, value: str, strata: pd.DataFrame) -> dict:
+def stratified(df: pd.DataFrame, value: str, strata: pd.DataFrame, exclude=()) -> dict:
     """R31's stratified estimate over the decision set of a per-instance value (`value` column of `df`, indexed by
     instance): census of H_cu-unseen and W-only, the E-sample per quartile weighted N_q / n_q; with a stratified
-    bootstrap (resampling within each stratum). Returns {estimate, lo, hi, complete, n_by_stratum}."""
+    bootstrap (resampling within each stratum). `exclude`: names left out of the decision set, its strata and their
+    sizes (R33's reading without the exposed instances). Returns {estimate, lo, hi, complete, n_by_stratum}."""
     st = strata.set_index("name")
-    dec = st[st["decide"]]
+    dec = st[st["decide"] & ~st.index.isin(set(exclude))]
     groups: dict[str, tuple[list[str], int]] = {
         "H_cu": (list(dec.index[dec["H_cu"]]), int(dec["H_cu"].sum())),
         "W_only": (list(dec.index[dec["W_only"]]), int(dec["W_only"].sum()))}
@@ -253,12 +349,17 @@ def stratified(df: pd.DataFrame, value: str, strata: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------------- report
-def per_instance(runs: pd.DataFrame, inc: pd.DataFrame, strata: pd.DataFrame, lab: dict) -> tuple[pd.DataFrame, dict]:
+PER_INSTANCE_FLAGS = ("decide", "H_cu", "H_cu_p05", "W_SCIP", "W_only", "E", "e_sample", "panel", "t5", "unseen",
+                      "does_not_fit", "exposed")
+
+
+def per_instance(runs: pd.DataFrame, inc: pd.DataFrame, strata: pd.DataFrame, lab: dict,
+                 registered: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """The per-instance table (module docstring) and the selection notes."""
     want = [("A9", 2000), ("A6F", 2000), ("A0", 2000), ("A2F", 2000), ("A9", 2001), ("A6F", 2001)]
     chosen, notes = {}, {}
     for arm, seed in want:
-        c, w = select(runs, lab[arm], seed)
+        c, w = select(runs, lab[arm], seed, registered=registered)
         chosen[(arm, seed)] = c
         if w:
             notes[f"{arm}@s{seed}"] = w
@@ -267,8 +368,7 @@ def per_instance(runs: pd.DataFrame, inc: pd.DataFrame, strata: pd.DataFrame, la
     rows = []
     for _, srow in strata.iterrows():
         n = str(srow["name"])
-        out = dict(instance=n, tier=srow["tier"], decide=bool(srow["decide"]), H_cu=bool(srow["H_cu"]),
-                   W_SCIP=bool(srow["W_SCIP"]), unseen=bool(srow["unseen"]), does_not_fit=bool(srow["does_not_fit"]),
+        out = dict(instance=n, tier=srow["tier"], **{k: bool(srow[k]) for k in PER_INSTANCE_FLAGS},
                    p_gams_cuopt_2608=float(srow["p_cuopt"]))
         race_parts = {}
         for (arm, seed), c in chosen.items():
@@ -283,6 +383,7 @@ def per_instance(runs: pd.DataFrame, inc: pd.DataFrame, strata: pd.DataFrame, la
             out[f"{key}_run"] = str(r["run_id"])
             out[f"{key}_status"] = str(r["status"])
             out[f"{key}_stop"] = str(r.get("stop_kind", "") or "")
+            out[f"{key}_startup_s"] = off                 # launch clock − call clock (R10's start-up cost)
             out.update({f"{key}_{k}": v for k, v in m.items()})
             if seed == 2000 and arm in ("A0", "A6F"):
                 race_parts[arm] = (st, off, float(r["ref"]), int(r["sense"]))
@@ -305,68 +406,202 @@ def _pairs(df: pd.DataFrame, mask, a: str, b: str):
     return df.loc[m, a].to_numpy(float), df.loc[m, b].to_numpy(float), list(df.index[m])
 
 
+def _have_pair(df: pd.DataFrame, a: str, b: str) -> pd.Series:
+    if a not in df or b not in df:
+        return pd.Series(False, index=df.index)
+    return df[a].notna() & df[b].notna()
+
+
+def _arm_vs_ctrl(df: pd.DataFrame, mask, arm_col: str, ctrl_col: str, eps: float, bca: bool) -> dict:
+    """Ratio of means arm / control with its paired bootstrap, and the d_ε side (prefixed d_: n / lo / hi stay the
+    ratio's), on the instances of `mask` where both exist; N = the instances of `mask`, missing = N − n."""
+    x, y, names = _pairs(df, mask, arm_col, ctrl_col)
+    e = effect_summary(d_eps(y, x, eps), eps, names, bca=bca)
+    out = dict(ratio_of_means(x, y, bca=bca), d_mean=e["mean_d"], d_lo=e["lo"], d_hi=e["hi"], n_d=e["n"],
+               wilcoxon_p=e["wilcoxon_p"], improved=e["improved"], worse=e["worse"], sign_p=e["sign_p"],
+               worst_d=e.get("worst_d", math.nan), worst=e.get("worst"), N=int(mask.sum()),
+               missing=int(mask.sum()) - len(names))
+    if bca:
+        out.update(d_bca_lo=e.get("bca_lo", math.nan), d_bca_hi=e.get("bca_hi", math.nan))
+    return out
+
+
+def decisions(df: pd.DataFrame, strata: pd.DataFrame, clock: str, exclude=(), bca: bool = False) -> dict:
+    """The decisive aggregates of one clock (R19, R31) on the decision set minus `exclude` (R33's reading without the
+    exposed instances), with the completeness that decides how they are read:
+    - `completeness`: pairs present / expected on the decision set (`full_complete`), on the census + E-sample basis —
+      H_cu-unseen, W-only and the E-sample (`census_complete`) — and on T3's decision instances (`t3_complete`);
+    - **target** (R19): the ratio of mean pt_gams A9 / A6F on H_cu-unseen. `met` / `better_shown` are read only on the
+      complete set (T1 is never cut, R32): with any pair missing they are None and the reading says "incomplete (n of
+      N)"; `met_on_available` / `better_shown_on_available` keep the figures on the pairs present;
+    - **guard** and **solutions found** on the pairs present (`passes_on_available`, `harm_shown_on_available`);
+    - **minimum** (R19 (a) and (b)), read on the full decision set when every pair is present (basis "full"), else —
+      T3 incomplete, the census and E-sample complete — on R31's stratified estimates (basis "stratified": (a) the
+      stratified guard >= −0.05, harm shown iff its interval's upper end < −0.05; (b) the stratified count of
+      solutions found A9 − A6F >= 0), else not read (basis "incomplete", None)."""
+    eps = eps_for(T_EXT)
+    ex = df.index.isin(set(exclude))
+    dec = df["decide"] & ~ex
+    hcu = dec & df["H_cu"]
+    a9, a6 = f"A9_pt_gams_{clock}", f"A6F_pt_gams_{clock}"
+    have = _have_pair(df, a9, a6)
+    census = dec & (df["H_cu"] | df["W_only"] | df["e_sample"])
+    t3 = dec & (df["tier"] == "T3")
+    comp = {k: dict(n=int((m & have).sum()), N=int(m.sum())) for k, m in
+            (("decision_set", dec), ("census", census), ("t3", t3), ("target", hcu))}
+    comp["full_complete"] = comp["decision_set"]["n"] == comp["decision_set"]["N"]
+    comp["census_complete"] = comp["census"]["n"] == comp["census"]["N"]
+    comp["t3_complete"] = comp["t3"]["n"] == comp["t3"]["N"]
+    c: dict = dict(N_decide=int(dec.sum()), completeness=comp)
+    t = _arm_vs_ctrl(df, hcu, a9, a6, eps, bca)
+    t["complete"] = bool(t["missing"] == 0 and t["N"] > 0)
+    fin = math.isfinite(t["ratio"])
+    t["met_on_available"] = bool(t["ratio"] <= TARGET_RATIO) if fin else None
+    t["better_shown_on_available"] = bool(t["hi"] < 1) if math.isfinite(t["hi"]) else None
+    t["met"] = t["met_on_available"] if t["complete"] else None
+    t["better_shown"] = t["better_shown_on_available"] if t["complete"] else None
+    c["target"] = t
+    x, y, names = _pairs(df, dec, a9, a6)
+    g = effect_summary(d_eps(y, x, eps), eps, names, bca=bca)
+    g["N"], g["missing"] = int(dec.sum()), int(dec.sum()) - len(names)
+    g["passes_on_available"] = bool(g["mean_d"] >= GUARD) if math.isfinite(g["mean_d"]) else None
+    g["harm_shown_on_available"] = bool(g["hi"] < GUARD) if math.isfinite(g["hi"]) else None
+    c["guard"] = g
+    sol = {}
+    for scope, mask in (("decide", dec), ("run_set", ~df["does_not_fit"] & ~ex)):
+        xs, ys, nm = _pairs(df, mask, a9, a6)
+        sol[scope] = dict(n=len(nm), A9=int((xs < M.MIPFEAS_NONE).sum()), A6F=int((ys < M.MIPFEAS_NONE).sum()))
+    sol["passes_on_available"] = sol["decide"]["A9"] >= sol["decide"]["A6F"] if sol["decide"]["n"] else None
+    c["solutions"] = sol
+    # R31: stratified estimates of the guard and solutions found (always reported; decisive while T3 is incomplete)
+    tmp = pd.DataFrame(index=df.index, data=dict(d=np.nan, found_diff=np.nan))
+    if a9 in df and a6 in df:
+        pa, pc = df[a9].astype(float), df[a6].astype(float)
+        tmp["d"] = np.where(have, d_eps(pc, pa, eps), np.nan)
+        tmp["found_diff"] = np.where(have, (pa < M.MIPFEAS_NONE).astype(float) - (pc < M.MIPFEAS_NONE).astype(float),
+                                     np.nan)
+    sg = stratified(tmp, "d", strata, exclude)
+    ss = stratified(tmp, "found_diff", strata, exclude)
+    if ss.get("total"):
+        ss["count_estimate"] = ss["estimate"] * ss["total"]
+    if bca and sg.get("complete"):
+        sg["note"] = "BCa is not computed for the stratified estimate (a percentile interval within strata only)"
+    c["stratified"] = dict(guard=sg, solutions_diff=ss)
+    # the minimum, on the basis the completeness allows
+    if comp["full_complete"] and comp["decision_set"]["N"] > 0:
+        basis, a, harm = "full", g["passes_on_available"], g["harm_shown_on_available"]
+        b = sol["passes_on_available"]
+    elif comp["census_complete"] and math.isfinite(sg["estimate"]) and math.isfinite(ss.get("count_estimate",
+                                                                                             math.nan)):
+        basis = "stratified"
+        a, harm = bool(sg["estimate"] >= GUARD), bool(sg["hi"] < GUARD)
+        b = bool(ss["count_estimate"] >= -1e-9)          # float noise of the weighted sum, not a solution
+    else:
+        basis, a, b, harm = "incomplete", None, None, None
+    c["minimum_basis"] = basis
+    c["minimum_detail"] = dict(basis=basis, guard_passes=a, harm_shown=harm, solutions_pass=b,
+                               guard=(g["mean_d"] if basis == "full" else sg["estimate"] if basis == "stratified"
+                                      else math.nan),
+                               solutions_diff=(sol["decide"]["A9"] - sol["decide"]["A6F"] if basis == "full" else
+                                               ss.get("count_estimate", math.nan) if basis == "stratified"
+                                               else math.nan))
+    c["minimum"] = bool(a and b) if basis != "incomplete" else None
+    c["t3_complete"] = comp["t3_complete"]
+    c["census_complete"] = comp["census_complete"]
+    return c
+
+
+def startup_summary(df: pd.DataFrame, masks: dict) -> dict:
+    """R10's start-up cost: per arm, the median and 90th percentile of `startup_offset_s` (launch clock − call clock)
+    over the runs taken on each set of `masks`."""
+    out: dict = {}
+    for arm in ("A9", "A6F", "A0", "A2F"):
+        col = f"{arm}_startup_s"
+        if col not in df:
+            continue
+        out[arm] = {}
+        for name, m in masks.items():
+            v = df.loc[m & df[col].notna(), col].astype(float).to_numpy()
+            v = v[np.isfinite(v)]
+            out[arm][name] = dict(n=int(v.size), median=float(np.median(v)) if v.size else math.nan,
+                                  p90=float(np.percentile(v, 90)) if v.size else math.nan)
+    return out
+
+
+def _reading(call, launch, kind: str) -> str:
+    """R10's words for one decision: "met" only if met on both clocks, "met on the call clock only", "not met", or
+    "incomplete (n of N)" when the call clock's set is not complete enough to read it."""
+    if kind == "target":
+        a, b = call["target"]["met"], launch["target"]["met"]
+        if a is None:
+            ct = call["completeness"]["target"]
+            return f"incomplete ({ct['n']} of {ct['N']} H_cu-unseen pairs)"
+    else:
+        a, b = call["minimum"], launch["minimum"]
+        if a is None:
+            cc, cd = call["completeness"]["census"], call["completeness"]["decision_set"]
+            return (f"incomplete (census + E-sample {cc['n']} of {cc['N']} pairs, decision set {cd['n']} of "
+                    f"{cd['N']})")
+    if a and b:
+        return "met"
+    if a:
+        return "met on the call clock only"
+    return "not met"
+
+
+def readings(out: dict, df: pd.DataFrame, hcu, dec) -> tuple[dict, dict]:
+    """R10 for the target and the minimum, and beside each its detail: the basis, and — when it holds on the call
+    clock only — the start-up cost (each arm's median / p90 start-up on the set) and the launch clock's figure."""
+    rd, det = {}, {}
+    st = startup_summary(df, dict(target=hcu, decision_set=dec))
+    for k in ("target", "minimum"):
+        rd[k] = _reading(out["call"], out["launch"], k)
+        d: dict = {}
+        if k == "target":
+            d.update(call_ratio=out["call"]["target"]["ratio"], launch_ratio=out["launch"]["target"]["ratio"],
+                     n=out["call"]["target"]["n"], N=out["call"]["target"]["N"])
+        else:
+            d.update(basis=out["call"]["minimum_basis"], call=out["call"]["minimum_detail"],
+                     launch=out["launch"]["minimum_detail"])
+        if rd[k] == "met on the call clock only":
+            sset = "target" if k == "target" else "decision_set"
+            d["startup"] = {arm: v[sset] for arm, v in st.items()}
+        det[k] = d
+    return rd, det
+
+
 def aggregates(df: pd.DataFrame, strata: pd.DataFrame, bca: bool = False) -> dict:
     eps = eps_for(T_EXT)
-    st = strata.set_index("name")
     dec = df["decide"]
     hcu = dec & df["H_cu"]
     wsc = dec & df["W_SCIP"]
     ran = ~df["does_not_fit"]
+    exposed = sorted(df.index[df["exposed"]]) if "exposed" in df else []
     out: dict = dict(T=T_EXT, eps=eps, counts=dict(decide=int(dec.sum()), H_cu_unseen=int(hcu.sum()),
-                                                    W_SCIP_unseen=int(wsc.sum()), run_set=int(ran.sum())))
+                                                    W_SCIP_unseen=int(wsc.sum()), run_set=int(ran.sum()),
+                                                    exposed_decide=int((dec & df.index.isin(exposed)).sum())))
     for clock in CLOCKS:
         a9, a6 = f"A9_pt_gams_{clock}", f"A6F_pt_gams_{clock}"
-        c: dict = {}
-        x, y, names = _pairs(df, hcu, a9, a6)
-        e = effect_summary(d_eps(y, x, eps), eps, names)    # the d_ε side, prefixed: n / lo / hi are the ratio's
-        c["target"] = dict(ratio_of_means(x, y, bca=bca), d_mean=e["mean_d"], d_lo=e["lo"], d_hi=e["hi"], n_d=e["n"],
-                           wilcoxon_p=e["wilcoxon_p"], improved=e["improved"], worse=e["worse"], sign_p=e["sign_p"],
-                           worst_d=e.get("worst_d", math.nan), worst=e.get("worst"),
-                           missing=int(hcu.sum()) - len(names))
-        c["target"]["met"] = bool(c["target"]["ratio"] <= TARGET_RATIO) if math.isfinite(c["target"]["ratio"]) else None
-        c["target"]["better_shown"] = bool(c["target"]["hi"] < 1) if math.isfinite(c["target"]["hi"]) else None
-        x, y, names = _pairs(df, dec, a9, a6)
-        g = effect_summary(d_eps(y, x, eps), eps, names)
-        g["passes"] = bool(g["mean_d"] >= GUARD) if math.isfinite(g["mean_d"]) else None
-        g["harm_shown"] = bool(g["hi"] < GUARD) if math.isfinite(g["hi"]) else None
-        g["missing"] = int(dec.sum()) - len(names)
-        c["guard"] = g
-        sol = {}
-        for scope, mask in (("decide", dec), ("run_set", ran)):
-            xs, ys, nm = _pairs(df, mask, a9, a6)
-            sol[scope] = dict(n=len(nm), A9=int((xs < M.MIPFEAS_NONE).sum()), A6F=int((ys < M.MIPFEAS_NONE).sum()))
-        sol["passes"] = sol["decide"]["A9"] >= sol["decide"]["A6F"] if sol["decide"]["n"] else None
-        c["solutions"] = sol
-        c["minimum"] = bool(g["passes"] and sol["passes"]) if g["passes"] is not None and sol["passes"] is not None \
-            else None
-        # R31: stratified estimates of the guard and solutions found
-        tmp = pd.DataFrame(index=df.index, data=dict(d=np.nan, found_diff=np.nan))
-        if a9 in df and a6 in df:
-            ok = df[a9].notna() & df[a6].notna()
-            pa, pc = df[a9].astype(float), df[a6].astype(float)
-            tmp["d"] = np.where(ok, d_eps(pc, pa, eps), np.nan)
-            tmp["found_diff"] = np.where(ok, (pa < M.MIPFEAS_NONE).astype(float) - (pc < M.MIPFEAS_NONE).astype(float),
-                                         np.nan)
-        c["stratified"] = dict(guard=stratified(tmp, "d", strata), solutions_diff=stratified(tmp, "found_diff",
-                                                                                              strata))
-        if c["stratified"]["solutions_diff"].get("total"):
-            c["stratified"]["solutions_diff"]["count_estimate"] = \
-                c["stratified"]["solutions_diff"]["estimate"] * c["stratified"]["solutions_diff"]["total"]
-        c["t3_complete"] = bool(g["missing"] == 0)
+        c = decisions(df, strata, clock, bca=bca)
+        # R3: H_cu at P >= 0.5 (GAMS's cuOpt row), reported beside the target
+        c["target_p05"] = _arm_vs_ctrl(df, dec & df["H_cu_p05"], a9, a6, eps, bca)
         # secondary (Holm): A9 vs the computed race on H_cu-unseen, A9 vs A0 on W_SCIP-unseen
         sec = {}
         x, y, names = _pairs(df, hcu, a9, f"race_pt_gams_{clock}")
-        sec["A9_vs_race_Hcu"] = effect_summary(d_eps(y, x, eps), eps, names)
+        sec["A9_vs_race_Hcu"] = effect_summary(d_eps(y, x, eps), eps, names, bca=bca)
         x, y, names = _pairs(df, wsc, a9, f"A0_pt_gams_{clock}")
-        sec["A9_vs_A0_Wscip"] = effect_summary(d_eps(y, x, eps), eps, names)
+        sec["A9_vs_A0_Wscip"] = effect_summary(d_eps(y, x, eps), eps, names, bca=bca)
         p = [sec[k]["wilcoxon_p"] for k in sec]
         adj, rej = S.holm([v if math.isfinite(v) else 1.0 for v in p])
         for k, a_, r_ in zip(sec, adj, rej):
             sec[k].update(holm_p=float(a_), holm_reject=bool(r_))
         c["secondary"] = sec
+        # R8: live A2F against the computed race on the panel (T5) — how much the computed race flatters a real one:
+        # d_ε of A2F against the race (negative = the live race worse), the ratio of means A2F / race
+        c["A2F_vs_race_panel"] = _arm_vs_ctrl(df, df["t5"], f"A2F_pt_gams_{clock}", f"race_pt_gams_{clock}", eps, bca)
         # reported: geo-means per arm, over the run set and the decision set
         geo = {}
-        for arm in ("A9", "A6F", "A0", "race"):
+        for arm in ("A9", "A6F", "A0", "race", "A2F"):
             col = f"{arm}_pt_gams_{clock}"
             if col in df:
                 geo[arm] = {scope: dict(n=int((mask & df[col].notna()).sum()), **shifted_geomeans(df.loc[mask, col]))
@@ -386,13 +621,16 @@ def aggregates(df: pd.DataFrame, strata: pd.DataFrame, bca: bool = False) -> dic
             lit["target_hard"] = bool(lit["hard_ratio"] <= TARGET_RATIO) if math.isfinite(lit["hard_ratio"]) else None
         c["d019_literal"] = lit
         out[clock] = c
-    # R10: met on both clocks, or on the call clock only
-    both = {}
-    for k, f in (("target", lambda c: c["target"]["met"]), ("minimum", lambda c: c["minimum"])):
-        a, b = f(out["call"]), f(out["launch"])
-        both[k] = ("met" if (a and b) else "met on the call clock only" if a else
-                   ("not met" if a is not None else "incomplete"))
-    out["reading"] = both
+    # R10: met on both clocks, or on the call clock only (with the start-up cost), or incomplete
+    out["reading"], out["reading_detail"] = readings(out, df, hcu, dec)
+    out["startup"] = startup_summary(df, dict(target=hcu, decision_set=dec))
+    # R33: every decision also without the instances exposed before prereg-v2 (calibration sample, M3's probe)
+    wo: dict = dict(excluded=exposed, n_excluded_decide=out["counts"]["exposed_decide"])
+    for clock in CLOCKS:
+        wo[clock] = decisions(df, strata, clock, exclude=exposed, bca=bca)
+    ex_m = df.index.isin(exposed)
+    wo["reading"], wo["reading_detail"] = readings(wo, df, hcu & ~ex_m, dec & ~ex_m)
+    out["without_exposed"] = wo
     # R20: the panel's per-instance noise scale
     noise = {}
     for arm in ("A9", "A6F"):
@@ -437,10 +675,15 @@ def published_rows(df: pd.DataFrame, gams_dir: str | Path) -> dict:
 
 
 def report(runs: pd.DataFrame, inc: pd.DataFrame, strata: pd.DataFrame, cuopt: str = "26.10",
-           gams_dir: str | Path | None = None, bca: bool = False) -> dict:
+           gams_dir: str | Path | None = None, bca: bool = False, registered: dict | None = None) -> dict:
+    """The whole reading. `registered` (`registered_values`): only runs carrying the registered itx1 harness (and, for
+    A9, the registered configuration) are taken; None (synthetic tables in tests) checks nothing."""
     lab = labels(cuopt)
-    df, notes = per_instance(runs, inc, strata, lab)
+    df, notes = per_instance(runs, inc, strata, lab, registered)
     out = dict(labels=lab, cuopt=cuopt, notes=notes, aggregates=aggregates(df, strata, bca),
+               registered=(None if registered is None else
+                           dict(frozen=registered["frozen"], A9_base_hash=registered["A9_base_hash"],
+                                harness=registered["harness"])),
                tiers={t: dict(instances=int((df["tier"] == t).sum()),
                               pairs=int(((df["tier"] == t) & df.get("A9_pt_gams_call", pd.Series(np.nan, index=df.index))
                                          .notna() & df.get("A6F_pt_gams_call", pd.Series(np.nan, index=df.index))
@@ -477,36 +720,79 @@ def _f(x, nd=4) -> str:
     return "—" if x is None or (isinstance(x, float) and not math.isfinite(x)) else f"{x:.{nd}f}"
 
 
+def _bca(d: dict, pre: str = "") -> str:
+    lo, hi = d.get(f"{pre}bca_lo"), d.get(f"{pre}bca_hi")
+    return "" if lo is None and hi is None else f", BCa [{_f(lo, 3)}, {_f(hi, 3)}]"
+
+
+def _decision_lines(c: dict) -> list[str]:
+    """The decisive aggregates of one clock (`decisions`) as markdown lines."""
+    t, g, s, cm = c["target"], c["guard"], c["solutions"], c["completeness"]
+    sg, ss, md = c["stratified"]["guard"], c["stratified"]["solutions_diff"], c["minimum_detail"]
+    return [
+        f"- Completeness: decision set {cm['decision_set']['n']} of {cm['decision_set']['N']} pairs; census + "
+        f"E-sample (H_cu-unseen, W-only, E-sample) {cm['census']['n']} of {cm['census']['N']}; T3 (decision) "
+        f"{cm['t3']['n']} of {cm['t3']['N']} — the minimum is read on: {md['basis']}",
+        f"- Target (H_cu-unseen, n {t['n']} of {t['N']}): mean pt_gams ratio A9/A6F "
+        f"{_f(t['ratio'], 3)} [{_f(t['lo'], 3)}, {_f(t['hi'], 3)}]{_bca(t)} (one-sided 95 % bound {_f(t['hi95'], 3)}); "
+        f"met (<= {TARGET_RATIO}) {t['met']}, better shown {t['better_shown']}"
+        + ("" if t["complete"] else f" (incomplete; on the pairs present: met {t['met_on_available']}, better "
+                                    f"shown {t['better_shown_on_available']})")
+        + f"; mean d_ε {_f(t['d_mean'], 3)} [{_f(t['d_lo'], 3)}, {_f(t['d_hi'], 3)}]{_bca(t, 'd_')}, Wilcoxon p "
+          f"{_f(t['wilcoxon_p'], 3)}; improved {t['improved']} / worse {t['worse']} (sign p {_f(t['sign_p'], 3)}); "
+          f"worst d_ε {_f(t.get('worst_d'), 3)} ({t.get('worst')})",
+        f"- Guard on the pairs present (decision set, n {g['n']} of {g['N']}): mean d_ε {_f(g['mean_d'], 3)} "
+        f"[{_f(g['lo'], 3)}, {_f(g['hi'], 3)}]{_bca(g)}, Wilcoxon p {_f(g['wilcoxon_p'], 3)}; >= {GUARD} "
+        f"{g['passes_on_available']}, harm shown {g['harm_shown_on_available']}",
+        f"- Solutions found (pt_gams < 2) on the pairs present: decision set A9 {s['decide']['A9']} vs A6F "
+        f"{s['decide']['A6F']} (n {s['decide']['n']}); the run set A9 {s['run_set']['A9']} vs A6F "
+        f"{s['run_set']['A6F']}",
+        f"- Stratified (R31; {'decisive: T3 incomplete' if md['basis'] == 'stratified' else 'reported'}): guard "
+        f"{_f(sg['estimate'], 3)} [{_f(sg['lo'], 3)}, {_f(sg['hi'], 3)}]; solutions A9 − A6F "
+        f"{_f(ss.get('count_estimate'), 1)}",
+        f"- Minimum (R19 (a) and (b), basis {md['basis']}): guard {_f(md['guard'], 3)} >= {GUARD} "
+        f"{md['guard_passes']} (harm shown {md['harm_shown']}); solutions A9 − A6F {_f(md['solutions_diff'], 1)} "
+        f">= 0 {md['solutions_pass']} -> {c['minimum']}"]
+
+
+def _reading_line(rd: dict, det: dict) -> str:
+    def startup(d):
+        st = d.get("startup")
+        if not st:
+            return ""
+        return " (start-up, launch − call, median / p90: " + ", ".join(
+            f"{a} {_f(v['median'], 2)} / {_f(v['p90'], 2)} s" for a, v in st.items() if v["n"]) + ")"
+    t, m = det["target"], det["minimum"]
+    return (f"target {rd['target']}{startup(t)} (ratio: call clock {_f(t['call_ratio'], 3)}, launch clock "
+            f"{_f(t['launch_ratio'], 3)}); minimum {rd['minimum']}{startup(m)} (basis {m['basis']}; guard: call "
+            f"{_f(m['call']['guard'], 3)}, launch {_f(m['launch']['guard'], 3)})")
+
+
 def markdown(res: dict) -> str:
     ag = res["aggregates"]
     lab = res["labels"]
+    reg = res.get("registered")
     L = [f"<!-- generated by itrea.analysis.itx_report (D-021, ITX-1), cuOpt {res['cuopt']} -->",
          f"ITX-1 v1 report: {lab['A9']} vs {lab['A6F']} (A0 = {lab['A0']}), T = {ag['T']:g} s, ε = {ag['eps']:g}; "
          f"tiers (instances / pairs): " + ", ".join(f"{t} {v['instances']} / {v['pairs']}" for t, v in
-                                                    res["tiers"].items()), ""]
+                                                    res["tiers"].items())]
+    if reg is not None:
+        L.append(f"Runs taken only with the registered settings: harness itx1, A9 on {reg['frozen']} "
+                 f"({reg['A9_base_hash'] or 'NOT REGISTERED: no A9 run taken'}).")
+    L.append("")
     for clock in CLOCKS:
         c = ag[clock]
-        t, g, s = c["target"], c["guard"], c["solutions"]
-        L += [f"### {clock} clock",
-              f"- Target (H_cu-unseen, n {t['n']}, missing {t['missing']}): mean pt_gams ratio A9/A6F "
-              f"{_f(t['ratio'], 3)} [{_f(t['lo'], 3)}, {_f(t['hi'], 3)}] (one-sided 95 % bound {_f(t['hi95'], 3)}); "
-              f"met (<= {TARGET_RATIO}) {t['met']}, better shown {t['better_shown']}; mean d_ε {_f(t['d_mean'], 3)} "
-              f"[{_f(t['d_lo'], 3)}, {_f(t['d_hi'], 3)}], Wilcoxon p {_f(t['wilcoxon_p'], 3)}; improved "
-              f"{t['improved']} / worse {t['worse']} (sign p {_f(t['sign_p'], 3)}); worst d_ε {_f(t.get('worst_d'), 3)}"
-              f" ({t.get('worst')})",
-              f"- Guard (decision set, n {g['n']}, missing {g['missing']}): mean d_ε {_f(g['mean_d'], 3)} "
-              f"[{_f(g['lo'], 3)}, {_f(g['hi'], 3)}], Wilcoxon p {_f(g['wilcoxon_p'], 3)}; passes (>= {GUARD}) "
-              f"{g['passes']}, harm shown {g['harm_shown']}",
-              f"- Solutions found (pt_gams < 2): decision set A9 {s['decide']['A9']} vs A6F {s['decide']['A6F']} "
-              f"(n {s['decide']['n']}); the run set A9 {s['run_set']['A9']} vs A6F {s['run_set']['A6F']}; passes "
-              f"{s['passes']}; minimum (a and b): {c['minimum']}",
-              f"- Stratified (R31; {'T3 complete' if c['t3_complete'] else 'T3 INCOMPLETE: these are the estimates'}): "
-              f"guard {_f(c['stratified']['guard']['estimate'], 3)} [{_f(c['stratified']['guard']['lo'], 3)}, "
-              f"{_f(c['stratified']['guard']['hi'], 3)}]; solutions A9 − A6F "
-              f"{_f(c['stratified']['solutions_diff'].get('count_estimate'), 1)}"]
+        L += [f"### {clock} clock"] + _decision_lines(c)
+        tp = c["target_p05"]
+        L.append(f"- Beside (R3): H_cu at P >= 0.5, decision set (n {tp['n']} of {tp['N']}): ratio A9/A6F "
+                 f"{_f(tp['ratio'], 3)} [{_f(tp['lo'], 3)}, {_f(tp['hi'], 3)}], mean d_ε {_f(tp['d_mean'], 3)}")
         for k, v in c["secondary"].items():
-            L.append(f"- {k} (n {v['n']}): mean d_ε {_f(v['mean_d'], 3)} [{_f(v['lo'], 3)}, {_f(v['hi'], 3)}], "
-                     f"Wilcoxon p {_f(v['wilcoxon_p'], 3)}, Holm p {_f(v.get('holm_p'), 3)}")
+            L.append(f"- {k} (n {v['n']}): mean d_ε {_f(v['mean_d'], 3)} [{_f(v['lo'], 3)}, {_f(v['hi'], 3)}]"
+                     f"{_bca(v)}, Wilcoxon p {_f(v['wilcoxon_p'], 3)}, Holm p {_f(v.get('holm_p'), 3)}")
+        ar = c["A2F_vs_race_panel"]
+        L.append(f"- R8, live A2F vs the computed race on the panel (n {ar['n']} of {ar['N']}): ratio of means A2F / "
+                 f"race {_f(ar['ratio'], 3)} [{_f(ar['lo'], 3)}, {_f(ar['hi'], 3)}], mean d_ε {_f(ar['d_mean'], 3)} "
+                 f"[{_f(ar['d_lo'], 3)}, {_f(ar['d_hi'], 3)}] (negative: the computed race flatters the live one)")
         for arm, gm in c["geomeans"].items():
             L.append(f"- geo-mean {arm}: " + "; ".join(
                 f"{scope} (n {d['n']}) " + ", ".join(f"{k} {_f(v)}" for k, v in d.items() if k != "n")
@@ -518,7 +804,18 @@ def markdown(res: dict) -> str:
                      f"stretch <= {STRETCH_SGM} {lit['stretch']}); hard part by our A6F (n {lit['hard_n']}) ratio "
                      f"{_f(lit['hard_ratio'], 3)} (target {lit['target_hard']})")
         L.append("")
-    L.append(f"Reading (R10): target {ag['reading']['target']}; minimum {ag['reading']['minimum']}.")
+    L.append("Reading (R10): " + _reading_line(ag["reading"], ag["reading_detail"]) + ".")
+    if ag.get("startup"):
+        L.append("Start-up (launch − call clock, median / p90 s; R10): " + "; ".join(
+            f"{a} " + ", ".join(f"{k} {_f(v['median'], 2)} / {_f(v['p90'], 2)} (n {v['n']})" for k, v in d.items())
+            for a, d in ag["startup"].items()))
+    wo = ag["without_exposed"]
+    L += ["", f"### Without the exposed instances (R33: calibration sample + M3's probe; {wo['n_excluded_decide']} of "
+              f"the decision set out)"]
+    for clock in CLOCKS:
+        L += [f"#### {clock} clock"] + _decision_lines(wo[clock])
+    L.append("Reading without the exposed (R10): " + _reading_line(wo["reading"], wo["reading_detail"]) + ".")
+    L.append("")
     if ag["panel_noise"]:
         L.append("Panel noise (R20): " + "; ".join(f"{a} p90 |d_ε| {_f(v['p90_abs_d'], 3)} (n {v['n']})"
                                                    for a, v in ag["panel_noise"].items()))
@@ -561,7 +858,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--inc", default=str(DATASETS / "incumbents_checked.parquet"))
     ap.add_argument("--strata", default=str(STRATA_CSV))
     ap.add_argument("--gams-dir", default=str(GAMS_DIR))
-    ap.add_argument("--bca", action="store_true", help="BCa intervals for the target ratio (a sensitivity, R21)")
+    ap.add_argument("--bca", action="store_true", help="BCa intervals beside the percentile ones (a sensitivity, R21): "
+                                                       "the target ratio, every mean d_ε (target, guard, secondaries)")
+    ap.add_argument("--frozen", default=None, help="A9's registered configuration (default configs/frozen-v2.yaml, "
+                                                   "the C1 freeze registered with prereg-v2); only A9 runs on it count")
     ap.add_argument("--m6", action="store_true", help="M6's lane reading instead")
     ap.add_argument("--json", default=None)
     ap.add_argument("--md", default=None)
@@ -579,8 +879,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.json:
             Path(a.json).write_text(json.dumps(_jsonable(res), indent=1) + "\n")
         return 0
+    reg = registered_values(a.frozen)
+    if reg["A9_base_hash"] is None:
+        print(f"warning: {reg['frozen']} does not exist — A9's registered configuration is unknown, so no A9 run is "
+              f"taken", file=sys.stderr)
     res = report(runs, pd.read_parquet(a.inc), read_strata(a.strata), a.cuopt,
-                 a.gams_dir if Path(a.gams_dir).exists() else None, a.bca)
+                 a.gams_dir if Path(a.gams_dir).exists() else None, a.bca, registered=reg)
     md = markdown(res)
     print(md)
     if a.json:
