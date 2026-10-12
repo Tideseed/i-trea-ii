@@ -155,8 +155,11 @@ def read_z(gams_dir: str | Path = GAMS_DIR) -> dict[str, float]:
 
 
 def read_pi(gams_dir: str | Path = GAMS_DIR) -> pd.DataFrame:
-    """GAMS's per-instance integrals (`primalintegral.csv`), indexed by instance name."""
-    return pd.read_csv(Path(gams_dir) / "primalintegral.csv").set_index("mps_name")
+    """GAMS's per-instance integrals (`primalintegral.csv`), indexed by instance name, read with pandas' round-trip
+    float parser: every value is the double nearest the published decimal (Python's `float` of the cell). pandas'
+    default parser keeps about 16 significant digits and missed it on 173 of 233 cuopt-gb10 values (up to 2.2e-16
+    absolute, review 2026-10-12), which made the strata file's bytes depend on the parser."""
+    return pd.read_csv(Path(gams_dir) / "primalintegral.csv", float_precision="round_trip").set_index("mps_name")
 
 
 # -------------------------------------------------------------------------------------------------- statistics

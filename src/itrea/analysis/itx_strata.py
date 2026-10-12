@@ -25,12 +25,19 @@ Per instance of MIPfeas's 233 (`make_jobs.mipfeas_233`: MIPLIB 2017's benchmark-
   stable-sorted by p_cuopt; 10 of those with p_cuopt >= 0.5 or none (`panel_group` "p05"), then 10 of those with
   0.1 <= p_cuopt < 0.5 ("p01"), each by `rng.choice(group, 10, replace=False)`, sorted;
 - `tier` (R31): T1 = H_cu unseen; T2 = W-only unseen + the E-sample; T3 = the rest of E unseen + the development
-  instances; "" = on the does-not-fit list; `t4` / `t5` = the panel (T4: A9 and A6F at seed 2001; T5: live A2F).
+  instances; "" = on the does-not-fit list; `t4` / `t5` = the panel (T4: A9 and A6F at seed 2001; T5: live A2F);
+- `exposed` (R33): the instances whose A6F outcome on cuOpt 26.08 was seen before prereg-v2 — D-020's 30-instance
+  calibration sample (`mipfeas.SAMPLE`, M4) and M3's memory probe (`make_jobs.ITX_M3_INSTANCES`), two fixed constants
+  (`exposed_names`): 37 instances, 34 unseen, 31 in the decision set. `itrea itx-report` gives every decision with and
+  without them (`decide` and not `exposed`: 184). Any further pre-tag run that exposes an unseen instance joins the
+  list before prereg-v2 hashes the file.
 
 D-021's counts (before M3's list: H_cu 75 / 65 unseen, H_cu_p05 34 / 30, W_SCIP 74 / 62 unseen, W-only 17, E 136;
-after it H_cu-unseen 64, the decision set 215) are checked by the tool, which reports any difference instead of
-forcing it. The CSV is deterministic (sorted by name, fixed columns, %.17g floats, booleans as 0 / 1) and its sha256 is
-printed and named in prereg-v2.
+after it H_cu-unseen 64, the decision set 215; R33: 27 unseen calibration instances, 6 of them in H_cu-unseen) are
+checked by the tool, which reports any difference instead of forcing it. GAMS's published values are read with the
+round-trip float parser (`mipfeas.read_pi`), so `p_cuopt` / `p_scip10` are exactly the published decimals. The CSV is
+deterministic (sorted by name, fixed columns, %.17g floats, booleans as 0 / 1) and its sha256 is printed and named in
+prereg-v2.
 """
 from __future__ import annotations
 
@@ -54,13 +61,27 @@ SCIP10_RUN = "intel-core-ultra-9-285k_scip-soplex-10-0-1"
 TIERS = ("T1", "T2", "T3")
 COLUMNS = ("name", "instance", "dev", "unseen", "ref_kind", "z_star", "r12", "p_cuopt", "H_cu", "H_cu_p05",
            "p300_scip", "w_source", "p_scip10", "W_SCIP", "W_only", "E", "does_not_fit", "decide", "e_quartile",
-           "e_sample", "panel", "panel_group", "tier", "t4", "t5")
+           "e_sample", "panel", "panel_group", "tier", "t4", "t5", "exposed")
 BOOL_COLUMNS = ("dev", "unseen", "r12", "H_cu", "H_cu_p05", "W_SCIP", "W_only", "E", "does_not_fit", "decide",
-                "e_sample", "panel", "t4", "t5")
-# D-021's stated counts (R3, R31, M3 addendum) — the tool compares the derived ones with these
+                "e_sample", "panel", "t4", "t5", "exposed")
+# D-021's stated counts (R3, R31, R33, M3 addendum) — the tool compares the derived ones with these
 D021_COUNTS = {"the 233": 233, "unseen": 218, "H_cu": 75, "H_cu unseen": 65, "H_cu_p05": 34, "H_cu_p05 unseen": 30,
                "W_SCIP": 74, "W_SCIP unseen": 62, "W-only unseen": 17, "E unseen": 136,
-               "H_cu unseen after the list": 64, "decide (unseen after the list)": 215}
+               "H_cu unseen after the list": 64, "decide (unseen after the list)": 215,
+               "calibration sample unseen": 27, "calibration sample in H_cu unseen": 6}
+
+
+def calibration_names() -> tuple[str, ...]:
+    """D-020's 30-instance calibration sample (M4 runs A6F on it on 26.08 before prereg-v2)."""
+    from itrea.analysis.mipfeas import SAMPLE
+    return tuple(SAMPLE)
+
+
+def exposed_names() -> tuple[str, ...]:
+    """R33: the instances whose A6F outcome was seen before prereg-v2 — the calibration sample (M4) and M3's memory
+    probe (`make_jobs.ITX_M3_INSTANCES`) — sorted."""
+    from itrea.experiments.make_jobs import ITX_M3_INSTANCES
+    return tuple(sorted(set(calibration_names()) | set(ITX_M3_INSTANCES)))
 
 
 def screening_p300(runs: pd.DataFrame, names) -> dict[str, float]:
@@ -91,10 +112,12 @@ def scip10_p300(gams_dir: str | Path, name: str, z: float) -> float:
 
 def derive(names233, dev_names, pi: pd.DataFrame, z: dict[str, float], p300: dict[str, float],
            p300_fallback: dict[str, float], solu: dict, instance_paths: dict[str, str] | None = None,
-           does_not_fit=DOES_NOT_FIT, seed: int = STRATA_SEED) -> pd.DataFrame:
+           does_not_fit=DOES_NOT_FIT, seed: int = STRATA_SEED, exposed=None) -> pd.DataFrame:
     """The strata table (module docstring). `pi`: primalintegral.csv indexed by name, in the file's row order (columns
     cuopt-gb10, scip); `p300`: the screening's P(300); `p300_fallback`: GAMS SCIP 10's P(300) for instances without a
-    screening run (every instance must have one of the two, else ValueError); `solu`: MIPLIB's solu entries."""
+    screening run (every instance must have one of the two, else ValueError); `solu`: MIPLIB's solu entries;
+    `exposed`: R33's exposed names (default `exposed_names()`)."""
+    exposed = set(exposed_names() if exposed is None else exposed)
     names233 = list(names233)
     the233 = set(names233)
     if len(the233) != 233:
@@ -123,7 +146,7 @@ def derive(names233, dev_names, pi: pd.DataFrame, z: dict[str, float], p300: dic
                        p_scip10=float(pi.loc[n, "scip"]) if "scip" in pi.columns else math.nan, W_SCIP=w,
                        W_only=w and not h, E=not (w or h), does_not_fit=n in set(does_not_fit),
                        decide=(n not in devs) and n not in set(does_not_fit), e_quartile=0, e_sample=False,
-                       panel=False, panel_group="", tier="", t4=False, t5=False)
+                       panel=False, panel_group="", tier="", t4=False, t5=False, exposed=n in exposed)
     rng = np.random.default_rng(seed)
 
     def by_p(sel) -> np.ndarray:
@@ -176,6 +199,14 @@ def counts(df: pd.DataFrame) -> dict[str, int]:
            "panel": int(b["panel"].sum()), "does not fit": int(b["does_not_fit"].sum()),
            "development among the 233": int(b["dev"].sum()), "R12-eligible (=opt=)": int(b["r12"].sum()),
            "W_SCIP from GAMS's SCIP 10": int(((df["w_source"] == "gams-scip10")).sum())}
+    ex = b["exposed"]
+    cal = df["name"].isin(set(calibration_names()))
+    out.update({"exposed": int(ex.sum()), "exposed unseen": int((ex & un).sum()),
+                "exposed in the decision set": int((ex & b["decide"]).sum()),
+                "decide without the exposed": int((b["decide"] & ~ex).sum()),
+                "H_cu decide without the exposed": int((b["H_cu"] & b["decide"] & ~ex).sum()),
+                "calibration sample unseen": int((cal & un).sum()),
+                "calibration sample in H_cu unseen": int((cal & un & b["H_cu"]).sum())})
     for t in TIERS:
         out[t] = int((df["tier"] == t).sum())
     for g in ("p05", "p01"):

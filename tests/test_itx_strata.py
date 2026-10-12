@@ -15,7 +15,8 @@ from itrea import paths
 from itrea.analysis import itx_strata as S
 from itrea.benchmarks.references import SoluEntry
 
-STRATA_SHA256 = "d2ad90ee040e4b6a046cda9abe67c6add86b48f64547288c2edc292a0c203842"   # 2026-10-12, D-021 phase 2
+STRATA_SHA256 = "c0221d429f3368c4181177cbd33b3b3717ddad8946bf712ca5440f6fc4ab35e5"   # 2026-10-12, review fixes
+# (R33's `exposed` column, GAMS's values read round trip; d2ad90ee040e before, the same sets)
 
 
 def _synthetic(n=233, seed=1):
@@ -35,9 +36,12 @@ def _synthetic(n=233, seed=1):
 
 def test_rules_on_synthetic_inputs():
     names, dev, pi, z, p300, fb, solu = _synthetic()
-    df = S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004"))
+    df = S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004"), exposed=("i001", "i005", "zz"))
     r = df.set_index("name")
     assert list(df.columns) == list(S.COLUMNS) and list(df["name"]) == sorted(names)
+    assert S.names_where(df, exposed=True) == ["i001", "i005"]                  # R33: a flag, no set changes
+    assert S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004")).drop(columns="exposed").equals(
+        df.drop(columns="exposed"))
     assert r["H_cu"].equals(r["p_cuopt"] >= 0.1) and r["H_cu_p05"].equals(r["p_cuopt"] >= 0.5)
     assert r.loc["i007", "w_source"] == "gams-scip10" and r.loc["i007", "W_SCIP"]
     assert r.loc["i100", "w_source"] == "gams-scip10" and not r.loc["i100", "W_SCIP"] and not r.loc["i100", "r12"]
@@ -61,7 +65,8 @@ def test_rules_on_synthetic_inputs():
     assert set(r.index[t == "T2"]) == set(r.index[r["decide"] & (r["W_only"] | r["e_sample"])])
     assert (t != "").sum() == 233 - 2
     # deterministic: the same inputs give the same table; another seed another sample
-    assert S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004")).equals(df)
+    assert S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004"),
+                    exposed=("i001", "i005")).equals(df)
     other = S.derive(names, dev, pi, z, p300, fb, solu, does_not_fit=("i003", "i004"), seed=7)
     assert set(other.loc[other["e_sample"], "name"]) != set(e.index)
     with pytest.raises(ValueError, match="no screening run"):
@@ -96,6 +101,30 @@ def test_committed_strata_file():
     assert set(df.loc[df["does_not_fit"], "tier"]) == {""}
     assert S.names_where(df, r12=False) == ["supportcase22"]
     assert sorted(df.loc[df["w_source"] == "gams-scip10", "name"]) == ["satellites2-40", "supportcase22"]
+    # R33's exposed instances: the calibration sample (M4) and M3's probe — 37, 34 unseen, 31 in the decision set
+    # (T1 8, T2 11, T3 12), 184 decision instances without them, 56 of H_cu-unseen
+    assert S.names_where(df, exposed=True) == list(S.exposed_names())
+    assert (c["exposed"], c["exposed unseen"], c["exposed in the decision set"]) == (37, 34, 31)
+    assert (c["decide without the exposed"], c["H_cu decide without the exposed"]) == (184, 56)
+    ex = df[df["exposed"] & df["decide"]]
+    assert ex["tier"].value_counts().to_dict() == {"T3": 12, "T2": 11, "T1": 8}
+    assert sorted(ex.loc[ex["panel"], "name"]) == ["neos-4300652-rahue", "snp-02-004-104"]
+    assert int(ex["e_sample"].sum()) == 8
+
+
+def test_gams_values_are_the_published_decimals():
+    """GAMS's published P values are read round trip (`mipfeas.read_pi`): the strata file's p_cuopt / p_scip10 equal
+    Python's float of each published cell — pandas' default parser missed 173 of 233 by up to 2.2e-16."""
+    import csv
+    from itrea.analysis.mipfeas import GAMS_DIR, read_pi
+    if not (GAMS_DIR / "primalintegral.csv").exists():
+        pytest.skip("GAMS's archive is not on disk")
+    pub = {r["mps_name"]: r for r in csv.DictReader(open(GAMS_DIR / "primalintegral.csv"))}
+    pi = read_pi()
+    assert all(float(pi.loc[n, "cuopt-gb10"]) == float(pub[n]["cuopt-gb10"]) for n in pub)
+    df = S.read_strata(paths.DATASETS / "mipfeas_strata.csv")
+    assert all(p == float(pub[n]["cuopt-gb10"]) and q == float(pub[n]["scip"])
+               for n, p, q in zip(df["name"], df["p_cuopt"], df["p_scip10"]))
 
 
 def test_rederive_equals_the_committed_file(tmp_path):
