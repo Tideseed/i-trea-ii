@@ -177,18 +177,49 @@ def test_freeze_check_tag_must_be_an_ancestor(repo):
 
 
 def test_external_a9_jobs_are_sealed_until_prereg_v2(repo):
-    """D-021 R33: an external job (split ext) of an arm with the EA needs the tag prereg-v2 as an ancestor of HEAD; A0
-    and A6F's external jobs need prereg-v1 only."""
+    """D-021 R33: an external job (split ext) of an arm with the EA needs the tag prereg-v2 as an ancestor of HEAD AND
+    the configuration registered with it (configs/frozen-v2.yaml in the tagged commit, unchanged since; every A9 job's
+    config hash equal to it, no overrides): an A9 tier written on the development default is refused even after the
+    tag. A0 and A6F's external jobs need prereg-v1 only; every external job needs a clean tree under src/ and
+    configs/."""
     _git(repo, "tag", "prereg-v1")
     a9 = dict(_tjob(repo, split="ext"), arm="A9")
     a6f, a0 = dict(a9, arm="A6F", config=None), dict(a9, arm="A0", config=None)
-    assert "prereg_v2" not in pool.check_frozen([a6f, a0], root=repo)
+    out = pool.check_frozen([a6f, a0], root=repo)
+    assert "prereg_v2" not in out and out["ext_jobs"] == 2
     with pytest.raises(gates.GateError, match="R33.*prereg-v2"):
         pool.check_frozen([a6f, a9], root=repo)
     with pytest.raises(gates.GateError, match="prereg-v2"):
         pool.check_frozen([a9], allow_unfrozen=True, root=repo)                 # never bypassed
-    _git(repo, "tag", "prereg-v2")
-    assert pool.check_frozen([a6f, a9], root=repo)["prereg_v2"]
+    _git(repo, "tag", "prereg-v2")                                              # tagged without a registered config
+    with pytest.raises(gates.GateError, match="frozen-v2.yaml does not exist"):
+        pool.check_frozen([a6f, a9], root=repo)
+    # the C1 freeze, registered with the tag (another configuration than the development one the job carries)
+    v2 = EAConfig().with_overrides({"population.size": 96})
+    (repo / "configs" / "frozen-v2.yaml").write_text(yaml.safe_dump(v2.to_dict()))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "C1 freeze")
+    with pytest.raises(gates.GateError, match="not in the commit tagged prereg-v2"):
+        pool.check_frozen([a9], root=repo)
+    _git(repo, "tag", "-f", "prereg-v2")
+    with pytest.raises(gates.GateError, match="config hash .* != prereg-v2's"):     # the development default
+        pool.check_frozen([a6f, a9], root=repo)
+    good = dict(a9, config=str(repo / "configs" / "frozen-v2.yaml"))
+    out = pool.check_frozen([a6f, good], root=repo)
+    assert out["prereg_v2"] and out["frozen_v2_hash"] == v2.hash()
+    with pytest.raises(gates.GateError, match="overrides"):
+        pool.check_frozen([dict(good, overrides={"population.size": 64})], root=repo)
+    # the file changed after the tag
+    (repo / "configs" / "frozen-v2.yaml").write_text(yaml.safe_dump(EAConfig().to_dict()))
+    _git(repo, "commit", "-q", "-am", "edit after the tag")
+    with pytest.raises(gates.GateError, match="differs from the file registered"):
+        pool.check_frozen([good], root=repo)
+    _git(repo, "revert", "--no-edit", "HEAD")
+    assert pool.check_frozen([good], root=repo)["frozen_v2_hash"] == v2.hash()
+    # a dirty tree: refused for every external job, A0's and A6F's too
+    (repo / "src" / "x.py").write_text("x = 3\n")
+    with pytest.raises(gates.GateError, match="external .* clean"):
+        pool.check_frozen([a0], root=repo)
 
 
 def test_block_priority_groups():

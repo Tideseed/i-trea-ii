@@ -78,7 +78,7 @@ from pathlib import Path
 
 from itrea import paths
 from itrea.experiments.pair import ARMS, RunError, resolve_harness, stem
-from itrea.experiments.pool import MASTER_SEED, canonical_arms
+from itrea.experiments.pool import FROZEN_V2_CONFIG, MASTER_SEED, canonical_arms
 
 SCREEN_SEEDS = (900, 901)
 TUNING_SEED = 0                         # tuning seeds are 0–99
@@ -130,6 +130,7 @@ ITX_OUT = {k: f"jobs/itx-{k}.jsonl" for k in ("m1", "m2", "m3", "m4", "m5", "r13
 EXT_SPLIT = "ext"                                    # pool.EXT_SPLIT: A9's external jobs need prereg-v2 (R33)
 ITX_V1_SEED, ITX_PANEL_SEED, ITX_V1_BUDGET = 2000, 2001, 600.0     # R30, R11
 ITX_V1_HARNESS = "itx1"                              # pair.HARNESS_PRESETS: ext + R12's stop + cuOpt killed at the end
+ITX_A9_FROZEN = FROZEN_V2_CONFIG                     # A9's v1 configuration: the C1 freeze, registered with prereg-v2
 ITX_CUOPT = "26.10"                                  # v1's cuOpt (D-019); another version gets its own set and variant
 ITX_TIERS = ("T1", "T2", "T3", "T4", "T5")
 ITX_A0_SET, ITX_A0_VARIANT = "itx-a0", "v1"
@@ -676,16 +677,18 @@ def itx_stratum(r) -> str:
     return f"e-q{int(r['e_quartile'])}"
 
 
-def itx_v1(tier: str, cuopt: str = ITX_CUOPT, strata=None, a9_config: str = ITX_A9_CONFIG,
+def itx_v1(tier: str, cuopt: str = ITX_CUOPT, strata=None, a9_config: str = ITX_A9_FROZEN,
            budget: float = ITX_V1_BUDGET, data: Path | None = None) -> list[dict]:
     """D-021's v1 external tiers (R31) from datasets/mipfeas_strata.csv: T1 (H_cu unseen, 64), T2 (W-only unseen + the
     E-sample, 57), T3 (the rest of E unseen + the 15 development instances, 109) — blocks {A9, A6F} at seed 2000 —,
     T4 (the repeatability panel, 20: {A9, A6F} at seed 2001) and T5 (the panel: live A2F at seed 2000, one arm per
     block). Every job: 600 s, the `itx1` harness (ext + R12's stop + cuOpt killed at a definitive outcome), split "ext"
     (A9's need prereg-v2, R33), variant `v1c<tag>` (e.g. A9@v1c2610), set `itx-t<k>` for cuOpt 26.10 and
-    `itx-t<k>-c<tag>` for any other version; A9 on `a9_config` (the C1 freeze replaces the development default). The
-    two arms of a block run in AB / BA order by the block hash (the pool's Williams rows for two arms); the blocks of
-    a tier in the pool's seeded random order, strata interleaved (`itx_stratum`). The does-not-fit list is in no tier."""
+    `itx-t<k>-c<tag>` for any other version; A9 on `a9_config`, by default `configs/frozen-v2.yaml` — the C1 freeze,
+    registered with prereg-v2 — and a tier with A9 is refused while that file does not exist (no development default:
+    the pool refuses an external A9 job whose config does not hash to the registered file, R33). The two arms of a
+    block run in AB / BA order by the block hash (the pool's Williams rows for two arms); the blocks of a tier in the
+    pool's seeded random order, strata interleaved (`itx_stratum`). The does-not-fit list is in no tier."""
     from itrea.analysis.itx_strata import STRATA_CSV, read_strata
     if tier not in ITX_TIERS:
         raise JobError(f"tier {tier!r} is not one of {', '.join(ITX_TIERS)}")
@@ -700,6 +703,9 @@ def itx_v1(tier: str, cuopt: str = ITX_CUOPT, strata=None, a9_config: str = ITX_
         rows, seed, arms = df[df["t4"]], ITX_PANEL_SEED, ("A9", "A6F")
     else:
         rows, seed, arms = df[df["t5"]], ITX_V1_SEED, ("A2F",)
+    if "A9" in arms and not paths.resolve(a9_config).exists():
+        raise JobError(f"{a9_config} does not exist: tier {tier} runs A9 on the configuration registered with "
+                       f"prereg-v2 (the C1 freeze, {ITX_A9_FROZEN}); no tier with A9 is written before it")
     where = _miplib_paths(sorted(rows["name"]), data)
     out = []
     for _, r in rows.sort_values("name").iterrows():
@@ -844,7 +850,9 @@ def main(argv=None) -> int:
     v1.add_argument("--tier", required=True, choices=ITX_TIERS)
     v1.add_argument("--cuopt", default=ITX_CUOPT, help=f"cuOpt version tag (default {ITX_CUOPT}: set itx-t<k>, "
                                                         f"variant v1c2610; another version: set itx-t<k>-c<tag>)")
-    v1.add_argument("--a9-config", default=ITX_A9_CONFIG, help="A9's configuration (C1's freeze replaces the default)")
+    v1.add_argument("--a9-config", default=ITX_A9_FROZEN,
+                    help=f"A9's configuration (default {ITX_A9_FROZEN}, the C1 freeze registered with prereg-v2; the "
+                         f"pool refuses any other)")
     v1.add_argument("--strata", type=Path, default=None, help="default datasets/mipfeas_strata.csv")
     v1.add_argument("--data", type=Path, default=paths.DATA)
     v1.add_argument("--out", type=Path, required=True, help="no default: the v1 files are written when 26.10 is in")

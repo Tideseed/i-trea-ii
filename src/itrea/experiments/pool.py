@@ -66,7 +66,9 @@ run in increasing priority, each group in the seeded stratified order (`order_bl
 M6's loads before its measured runs); a block voided by `ref_rejected` (R12's stop at the proven optimum not confirmed
 by the exact checker) is rerun once, whole and first, with the stop off (`ref_stop_off` in its jobs, outside the run
 id; a resumed pool reads it from the set's void.jsonl); external jobs (split `ext`) of an arm with the EA need the tag
-`prereg-v2` as an ancestor of HEAD (R33, `check_frozen`).
+`prereg-v2` as an ancestor of HEAD and the configuration registered with it (`configs/frozen-v2.yaml`, unchanged since
+the tag; every A9 job's config hash equal to it, no overrides), and every external job needs a clean tree under src/
+and configs/ (R33, `check_frozen`).
 
 Resumable: run directories whose run.json says completed (or failed: a crash is kept, D-002 §6) are skipped. One pool
 at a time (RunLock). Log: logs/pool-<date>.log; status: logs/pool-status.json; voided runs: traces/raw/<set>/void/ and
@@ -115,6 +117,7 @@ E0_FLAG = "configs/e0-calibration.yaml"
 CONFIRM_SPLITS = ("test",)
 EXT_SPLIT = "ext"                         # D-021's external (ITX-1) v1 runs: the tiers and A0 (`make-jobs itx-v1`, `itx-a0`)
 PREREG_V2_TAG = "prereg-v2"               # D-021 R33: no A9 outcome on an unseen instance before this tag
+FROZEN_V2_CONFIG = "configs/frozen-v2.yaml"   # A9's v1 configuration (the C1 freeze), committed in the prereg-v2 commit
 QUIET_SPLITS = ("test", "screen")         # both local model servers must be stopped (D-002 §1, D-003)
 
 
@@ -363,15 +366,18 @@ def _order_group(blocks: list[Block], seed: int) -> list[Block]:
 
 # ---------------------------------------------------------------------------------------------- freeze check
 def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | None = None,
-                 frozen: str = FROZEN_CONFIG) -> dict:
+                 frozen: str = FROZEN_CONFIG, frozen_v2: str = FROZEN_V2_CONFIG) -> dict:
     """D-002 §1 / §1.8. `prereg-v1` (an ancestor of HEAD) precedes the first timed run on any candidate instance:
     test-split jobs, screening jobs and any job whose instance is a screening candidate need it, never bypassed;
     other non-toy jobs need it unless allow_unfrozen. Test and screening jobs also need a clean, committed tree under
     src/ and configs/; test jobs need the frozen configuration and no job-level overrides beyond a named ablation file
     (committed with the tag). Toy smoke jobs (outside data/, not named like a candidate) need nothing. D-021 R33:
     external jobs (split "ext") of an arm with the EA (A9) need the tag `prereg-v2` as an ancestor of HEAD — before it,
-    no A9 outcome on an unseen instance is run (A0 and A6F's external jobs need only prereg-v1). Raises GateError;
-    returns what was checked."""
+    no A9 outcome on an unseen instance is run (A0 and A6F's external jobs need only prereg-v1) — AND the configuration
+    registered with it: `configs/frozen-v2.yaml` (the C1 freeze) must exist, be byte-identical to the file in the
+    tagged commit, and every such job's configuration must hash to it, with no free overrides or ablation (as test jobs
+    against frozen-e2). Every external job (A0, A6F, A2F and A9 alike) needs a clean, committed tree under src/ and
+    configs/. Raises GateError; returns what was checked."""
     from itrea.experiments import make_jobs                 # lazy: make_jobs imports this module
     root = root or paths.ROOT
     names, roots = make_jobs.candidate_names(), make_jobs.data_roots()
@@ -394,7 +400,9 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
         if not record_env.is_ancestor(record_env.PREREG_TAG, "HEAD", root):
             raise gates.GateError(f"{record_env.PREREG_TAG} is not an ancestor of HEAD")
         out["prereg"] = record_env.tag_commit(record_env.PREREG_TAG, root)
-    ext_ea = [j for j in jobs if j.get("split") == EXT_SPLIT and pair.arm_spec(j).has_ea]
+    ext = [j for j in jobs if j.get("split") == EXT_SPLIT]
+    ext_ea = [j for j in ext if pair.arm_spec(j).has_ea]
+    out["ext_jobs"] = len(ext)
     if ext_ea:                    # D-021 R33 (sealing): A9's external runs only after prereg-v2 is tagged
         if record_env.tag_commit(PREREG_V2_TAG, root) is None or \
                 not record_env.is_ancestor(PREREG_V2_TAG, "HEAD", root):
@@ -402,11 +410,34 @@ def check_frozen(jobs: list[dict], allow_unfrozen: bool = False, root: Path | No
                                   f"({sorted({pair.arm_label(j) for j in ext_ea})}): D-021 R33 seals A9's outcomes on "
                                   f"the unseen instances until git tag {PREREG_V2_TAG} exists and is an ancestor of HEAD")
         out["prereg_v2"] = record_env.tag_commit(PREREG_V2_TAG, root)
-    if test or screen:
+        # ... and only on the configuration registered with the tag (the C1 freeze), never on a development default
+        fz = Path(root) / frozen_v2
+        if not fz.exists():
+            raise gates.GateError(f"{frozen_v2} does not exist: external EA jobs run only on the configuration "
+                                  f"registered with {PREREG_V2_TAG} (the C1 freeze, committed in the tagged commit)")
+        at_tag = record_env.file_at(PREREG_V2_TAG, frozen_v2, root)
+        if at_tag is None:
+            raise gates.GateError(f"{frozen_v2} is not in the commit tagged {PREREG_V2_TAG}: the configuration must be "
+                                  f"registered with the tag")
+        if at_tag != fz.read_bytes():
+            raise gates.GateError(f"{frozen_v2} differs from the file registered at {PREREG_V2_TAG}")
+        fh = EAConfig.from_yaml(fz).hash()
+        for j in ext_ea:
+            h = pair.base_config_hash(j)
+            if h != fh:
+                raise gates.GateError(f"external job {pair.stem(j['instance'])} {pair.arm_label(j)}: config hash {h} "
+                                      f"!= {PREREG_V2_TAG}'s {fh} ({frozen_v2}; write the tiers with "
+                                      f"`make-jobs itx-v1`, whose A9 default is that file)")
+            if j.get("overrides") or j.get("ablation"):
+                raise gates.GateError(f"external job {pair.stem(j['instance'])} {pair.arm_label(j)} carries overrides "
+                                      f"or an ablation ({j.get('overrides') or j.get('ablation')}); v1 runs the "
+                                      f"registered configuration only")
+        out["frozen_v2_hash"] = fh
+    if test or screen or ext:
         dirty = record_env.dirty_paths(root=root)
         if dirty is None or dirty:
-            raise gates.GateError(f"{'test' if test else 'screening'} jobs need a clean, committed tree under src/ and "
-                                  f"configs/ (dirty: {dirty})")
+            kind = "test" if test else "screening" if screen else "external (split ext)"
+            raise gates.GateError(f"{kind} jobs need a clean, committed tree under src/ and configs/ (dirty: {dirty})")
     if test:
         fz = Path(root) / frozen
         if not fz.exists():

@@ -7,6 +7,7 @@ from collections import Counter
 
 import pytest
 
+from itrea import paths
 from itrea.experiments import make_jobs as mj
 from itrea.experiments.pool import make_blocks
 
@@ -292,7 +293,8 @@ def test_itx_v1_tiers(tmp_path):
     from itrea.experiments import pair
     from itrea.experiments.pool import order_blocks
     data = _strata_data(tmp_path / "data")
-    tiers = {t: mj.itx_v1(t, data=data) for t in mj.ITX_TIERS}
+    cfg = mj.ITX_A9_CONFIG                     # a stand-in: configs/frozen-v2.yaml (the C1 freeze) does not exist yet
+    tiers = {t: mj.itx_v1(t, a9_config=cfg, data=data) for t in mj.ITX_TIERS}
     blocks = {t: make_blocks(v) for t, v in tiers.items()}
     assert {t: (len(v), len(blocks[t])) for t, v in tiers.items()} == \
         dict(T1=(128, 64), T2=(114, 57), T3=(218, 109), T4=(40, 20), T5=(20, 20))
@@ -313,7 +315,7 @@ def test_itx_v1_tiers(tmp_path):
     assert len(order_blocks(blocks["T2"])) == 57 and \
         len({b.stratum for b in blocks["T2"]}) == 5                               # W-only + 4 E quartiles
     ids = [pair.run_id_for(j) for j in every]
-    old = mj.itx_v1("T1", cuopt="26.08", data=data)
+    old = mj.itx_v1("T1", cuopt="26.08", a9_config=cfg, data=data)
     assert {j["set"] for j in old} == {"itx-t1-c2608"} and {j["variant"] for j in old} == {"v1c2608"}
     ids_old = [pair.run_id_for(j) for j in old]
     assert len(set(ids)) == len(ids) == 520 and not set(ids) & set(ids_old)
@@ -322,11 +324,22 @@ def test_itx_v1_tiers(tmp_path):
         mj.cuopt_tag("26.1")
     with pytest.raises(mj.JobError, match="tier"):
         mj.itx_v1("T6", data=data)
+    # review finding (sets): no development default — a tier with A9 needs the registered file; T5 (A2F only) does not
+    assert mj.ITX_A9_FROZEN == "configs/frozen-v2.yaml"
+    if not paths.resolve(mj.ITX_A9_FROZEN).exists():
+        for t in ("T1", "T2", "T3", "T4"):
+            with pytest.raises(mj.JobError, match="frozen-v2.yaml does not exist"):
+                mj.itx_v1(t, data=data)
+        assert len(mj.itx_v1("T5", data=data)) == 20
+        assert mj.main(["itx-v1", "--tier", "T1", "--data", str(data), "--out", str(tmp_path / "t1.jsonl")]) == 2
+    with pytest.raises(mj.JobError, match="does not exist"):
+        mj.itx_v1("T1", a9_config="configs/nothere.yaml", data=data)
     # memory per run under itx1 (D-021: A9 97, A2F 78, A6F 69 GB with the file mailbox)
     need = {j["arm"]: pair.job_budget(j).need_gb for j in tiers["T1"][:2] + tiers["T5"][:1]}
     assert need == dict(A9=97.0, A6F=69.0, A2F=78.0)
     out = tmp_path / "t4.jsonl"
-    assert mj.main(["itx-v1", "--tier", "T4", "--cuopt", "26.08", "--data", str(data), "--out", str(out)]) == 0
+    assert mj.main(["itx-v1", "--tier", "T4", "--cuopt", "26.08", "--a9-config", cfg, "--data", str(data), "--out",
+                    str(out)]) == 0
     assert len(out.read_text().splitlines()) == 40
 
 
