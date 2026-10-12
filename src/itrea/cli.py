@@ -15,7 +15,8 @@ the only place the mapping lives.
     itrea pair …               one run (smoke tests; the pool runs job files)
     itrea pool JOBS …          a job file under every D-002 / D-003 control
     itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0 | backoff1 |
-                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1)
+                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1) |
+                               itx-v1 --tier T1..T5 | itx-a0 | itx-m6 | itx-m6a (D-021 phase 2)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -27,6 +28,7 @@ the only place the mapping lives.
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
     itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
+    itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
     itrea bench-ls …           local-search benchmark (tools/bench_ls.py)
     itrea env                  the environment record (versions, hardware, git state)
@@ -47,7 +49,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pair": ("itrea.experiments.pair", (), "one run: launch, barrier, stop, exit codes, run.json"),
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
-                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13)"),
+                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13, itx-v1, itx-a0, itx-m6, itx-m6a)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
@@ -60,6 +62,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas calibration vs GAMS's cuOpt GB10 row: --arm A6F "
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
     "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
+    "itx-report": ("itrea.analysis.itx_report", (), "D-021 (ITX-1) v1 analysis: target, minimum, stratified estimates, "
+                   "race and A0 secondaries, geo-means, D-019 literal, published rows; --m6 lanes"),
     "exchange": ("itrea.experiments.exchange_ctl", (), "the itrea-redis container: up | down | status | flush RUN_ID"),
     "bench-ls": ("path:tools/bench_ls.py", (), "local-search benchmark"),
     "env": ("itrea.experiments.record_env", (), "environment record (versions, hardware, git state)"),
