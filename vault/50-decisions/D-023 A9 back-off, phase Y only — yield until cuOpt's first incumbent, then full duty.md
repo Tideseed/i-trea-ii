@@ -27,7 +27,7 @@ launch runs). Control = **bo1s** (bo1's values in shadow mode = today's behaviou
   run — the limit is relaxed here, before any run, and the latency is reported); M2 — chromaticindex's cuOpt first
   incumbent inside boY ≤ 2 × A6F's (both seeds); M3 — the EA's material leads under boY ≥ 0.8 × the control's on
   item_placement, loue, neos-960392 and crna (summed over seeds; with no ladder they should match up to noise); M4 — boY's
-  busy share in phase Y ≤ 0.6; M5 — the busy / paused accounting within 2 % and local-search cap hits per call within
+  busy share in phase Y ≤ 0.6 (pooled over the arm; clarification below); M5 — the busy / paused accounting within 2 % and local-search cap hits per call within
   +0.10 of the control's.
 - **Outcome:** D-018 stage 1's rules unchanged — T: chromaticindex d ≥ +0.30 and P ≤ 0.30; G: item_placement, ca, loue,
   crna, glass4, sing44 each d ≥ −band_i, neos-960392 ΔP ≥ −max(0.01, spread), guard mean d ≥ −0.05, every guard where
@@ -41,3 +41,17 @@ launch runs). Control = **bo1s** (bo1's values in shadow mode = today's behaviou
 - **Analysis:** `itrea backoff-report` gains a stage `1y` (written and tested before the window): D-018 stage 1's
   outcome rules unchanged, with the treatment `A9@boY`, set `backoff2`, and the mechanism rules M1–M5 exactly as stated
   here (D-018's own M1 / M3 / M5 are printed beside, for comparison).
+
+## Clarifications before any run (2026-10-12 13:1x, AgentRA, after the review of the build; no backoff2 run exists)
+- **M4 is read pooled over the arm:** Σ `phase_y.exit_busy_s` / Σ `phase_y.exit_t` over every boY run (a phase Y that
+  never ended: `length_s` and `busy_per_level["Y"]`) ≤ 0.6. Per-run shares are reported, not gating: a phase Y shorter
+  than ~2 × `burst_s` ends before the first sleep falls due and has share 1.0 by construction. This reading was in the
+  code (`backoff-report --stage 1y`, 4369b6f) before any backoff2 run; on D-018 stage 1's bo1 runs it gives 0.553
+  (all 28, the failed one kept; 0.573 over the 27 completed), while 20 of the 28 per-run shares exceed 0.6 by that
+  construction — so the reading decides, and is recorded here rather than only in the code.
+- **D-022's outcome sets the harness of the two A9 arms only:** A6F runs under ext in either outcome (D-021 R13 — gaps 0
+  for every cuOpt process; R6 — A6F is our cuOpt alone; D-022's reject clause covers only A9's rows), so A6F's runs are
+  the same reference under both outcomes (`itrea make-jobs backoff2 --harness ext|r13-off`).
+- **The harness is checked:** `backoff-report --stage 1y [--harness ext|r13-off]` requires one resolved harness on every
+  A9 run of the set (boY and the control, every attempt), ext on every A6F run, and — given `--harness` — D-022's
+  outcome on the A9 runs; otherwise the verdict is INVALID. The report names the harness it found.

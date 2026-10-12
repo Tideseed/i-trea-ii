@@ -36,3 +36,33 @@ configuration. R14 is measured inert (M1, 2026-10-11: cuOpt CPU-s per wall-s 5.0
   neos-3004026-krka), where the treatment can only gain.
 - **Analysis:** `itrea build-runs`, then a short script `tools/d022_report.py` written before the window (it reads only
   the run table).
+
+## Clarifications before any run (2026-10-12 13:1x, AgentRA, after the review of `tools/d022_report.py`; no itx-r13 run exists)
+Readings the record left open, fixed in the script and here before the window; one is a rule the record did not have
+(the follow-up's terminal case), stated as such and open to Berk.
+- **The INCONCLUSIVE follow-up** (`tools/d022_report.py --followup`): runs = the instances the seeds-0–1 report names
+  (worse than −band_i on exactly one seed) — or all 17 when it names none — × seeds 2–3 × the same three arms and
+  harnesses, 120 s, one block per instance × seed, in their own set `itx-r13f` (`itrea make-jobs itx-r13f --instances
+  …|all`). band_i stays the one seeds 0–1 gave. A rerun instance's d is the bounded d on its means over seeds 0–3, and
+  it is "worse on both seeds" when d_s < −band_i on both seeds 2 and 3; the other instances keep their seeds-0–1 d; the
+  mean is over the 17. Validity as for seeds 0–1, on the follow-up's runs. **Reject** if the mean d ≤ −0.05 or a rerun
+  instance is worse on both seeds 2 and 3; **adopt** if the mean d ≥ −0.02; **otherwise R13 + R14 are not adopted**
+  for A9 (non-inferiority not shown: the reject consequence) and no further seeds run. That terminal rule was not in
+  the record; it follows D-018 / D-023's "otherwise not adopted" and is Berk's to overrule.
+- **Each reading reads only its own runs:** the 17 instances × the three arms × its seeds × 120 s, not synthetic, not in
+  a voided block — the failed runs and the voids included (a void's key comes from its rerun's row or from the voided
+  directory's own run.json; a void whose key cannot be read is counted). Runs of other seeds in `itx-r13` do not
+  change the seeds-0–1 verdict.
+- **The harness is a validity leg:** every run's resolved harness (run.json `config.harness`) is its arm's — ext for
+  A9@r13x and A6F@r13x, {ext, cuopt_gap_zero false, cuopt_env_unset false} for A9@r13 — else INVALID (the gap leg and
+  R14 alone cannot tell the control from A9 without any harness).
+- **Failed runs read as D-002 §6 keeps crashes (`keep`):** a void whose rerun failed is closed by the kept crash; a kept
+  crash that died before writing its EA or cuOpt summary (a SIGKILL writes none — D-021 R29 keeps an EA killed at its
+  cap as an A9 outcome) is listed as "crashed before the record" instead of failing the P / gene-dtype or gap leg; its
+  harness is still checked. Completed runs without those records still fail the legs.
+- **A run without P(120)** on any of the three arms (A6F included: band_i needs its seed pair) makes the verdict
+  INCOMPLETE, naming the run.
+- **C1's weak-set numbers in D-013 terms:** improved k of |W_B|, mean P before → after, mean d with its bootstrap
+  interval and Wilcoxon, worst P — over every weak instance with both arms' runs, those where both arms have P = 1
+  included at d = 0 (D-013's own table counts rail01 1.0 → 1.0; `backoff.d013_report` does the same). `stats.compare`,
+  which leaves them out, gives only the all-instance line; the instances it leaves out are printed.
