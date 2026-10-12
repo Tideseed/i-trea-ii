@@ -66,6 +66,15 @@ metric cut at the budget, no silent reference fallback. What is new, and why:
   `harness` (the job's resolved harness as JSON, "" without one). For EA arms `config_hash` stays the EA
   configuration's hash, so A9 with and without a harness share it; `run_hash` tells them apart (prereg compares it
   for EA-arm runs that carry a harness).
+- **The run record (D-021, appended columns; `record_cols`):** the fan governor's state and cap at the start and the end
+  (`fan_start_state` / `fan_start_cap`, `fan_end_*`), `acpi_start_c`, the hottest ACPI zone during the run
+  (`acpi_during_max_c`), `void_info` (run.json's record of what decided nothing, as JSON), the project CUDA cache's
+  compile-on-clock flag and count (`cuda_compiled_on_clock`, `cuda_cache_n_on_clock`), `stop_kind` (run.json `stop`:
+  budget | partner_end | ref_reached | abort | interrupted | start_failed | runner_error; "none" = every process ended
+  by itself, "" = no record) and R12's stop (`ref_stop_enabled`, `ref_stop_t`, `ref_stop_role`, `ref_stop_check`:
+  confirmed | rejected | ""). A run R12 stopped at the proven optimum (`ref_reached`) is read like a run that reached
+  T: the processes the runner killed then are `stopped_by_runner` (not crashes), and every metric holds its last
+  checked incumbent to T.
 - **GPU-health voiding:** a GPU run whose `run.json["gpu_health"]` verdict is "void" (median busy SM clock < 2,000 MHz
   or foreign GPU processes in > 2 % of samples; `itrea.experiments.gpu_health`) sets `gpu_void`, and every run of its
   block (set × instance × seed × budget: a void run of one set never voids another set's runs of the same instance,
@@ -724,6 +733,40 @@ def _counter(s: dict, key: str) -> float:
     return _fl(v)
 
 
+def record_cols(run: Run) -> dict:
+    """D-021's per-run record from run.json (phase 1 keys, phase 2 columns; module docstring): the fan governor's state
+    and cap at the start and the end, the start temperature and the hottest ACPI zone while the run held the box, the
+    void bookkeeping (`void_info` as JSON, the causes that decided nothing), the project CUDA cache's compile-on-clock
+    flag, the stop kind and R12's stop. Runs without these keys leave the columns missing (NaN / -1 / "" / False)."""
+    rj = run.run_json
+
+    def fan(k):
+        st = rj.get(k)
+        return st if isinstance(st, dict) else {}
+    fs, fe = fan("fan_state_start"), fan("fan_state_end")
+    acpi = rj.get("acpi_during") if isinstance(rj.get("acpi_during"), dict) else {}
+    vi = rj.get("void_info") if isinstance(rj.get("void_info"), dict) else None
+    cc = rj.get("cuda_cache") if isinstance(rj.get("cuda_cache"), dict) else {}
+    out = dict(fan_start_state=str(fs.get("state") or ""), fan_start_cap=_int(fs.get("cap"), -1),
+               fan_end_state=str(fe.get("state") or ""), fan_end_cap=_int(fe.get("cap"), -1),
+               acpi_start_c=_fl(rj.get("acpi_start_c")), acpi_during_max_c=_fl(acpi.get("max_c")),
+               void_info=json.dumps(vi, sort_keys=True, default=str) if vi else "",
+               cuda_compiled_on_clock=bool(cc.get("compiled_on_clock") or rj.get("compiled_on_clock_cuda")),
+               cuda_cache_n_on_clock=_int(cc.get("n_on_clock"), -1))
+    if "stop" in rj:          # "none": the run started and every process ended by itself (no stop was written)
+        st = rj.get("stop")
+        out["stop_kind"] = str(st.get("kind") or "") if isinstance(st, dict) else ("none" if rj.get("t0") is not None
+                                                                                      else "")
+    rs = rj.get("ref_stop") if isinstance(rj.get("ref_stop"), dict) else None
+    if rs is not None:
+        tr = rs.get("trigger") if isinstance(rs.get("trigger"), dict) else {}
+        chk = rs.get("check") if isinstance(rs.get("check"), dict) else None
+        out.update(ref_stop_enabled=bool(rs.get("enabled")), ref_stop_t=_fl(tr.get("t")),
+                   ref_stop_role=str(tr.get("role") or ""),
+                   ref_stop_check="" if chk is None else ("confirmed" if chk.get("ok") else "rejected"))
+    return out
+
+
 def frontier_stats(run: Run, T: float) -> dict:
     fr = [e for e in run.events.get(EA_ROLE, []) if e.get("kind") == "frontier" and _fl(e.get("t")) <= T]
     out = dict(frontier_size=math.nan, frontier_hv=math.nan, frontier_mean_pairwise=math.nan,
@@ -927,6 +970,7 @@ def build(raw_root: str | os.PathLike = TRACES / "raw", out_dir: str | os.PathLi
         row.update(_resource_cols(run))
         row.update(frontier_stats(run, T))
         row.update(callback_stats(run, T))
+        row.update(record_cols(run))
         rows.append(row)
 
     # the uncoupled portfolio (D-002 v3 H2): pointwise best of A0 and A5 of the same block. It inherits every
@@ -1189,6 +1233,12 @@ RUN_COLUMNS = {
     "frontier_size": "float", "frontier_hv": "float", "frontier_mean_pairwise": "float", "frontier_max_dist": "float",
     "frontier_mean_dist_to_inc": "float", "cb_first_s": "float", "cb_first_solving_s": "float",
     "cb_max_gap_s": "float", "no_exchange_window": "bool",
+    # D-021 (appended 2026-10-12, phase 2; every column above unchanged): the run record's thermal / fan / void / cache
+    # keys, the stop kind and R12's stop (`record_cols`)
+    "fan_start_state": "str", "fan_start_cap": "int", "fan_end_state": "str", "fan_end_cap": "int",
+    "acpi_start_c": "float", "acpi_during_max_c": "float", "void_info": "str", "cuda_compiled_on_clock": "bool",
+    "cuda_cache_n_on_clock": "int", "stop_kind": "str", "ref_stop_enabled": "bool", "ref_stop_t": "float",
+    "ref_stop_role": "str", "ref_stop_check": "str",
 }
 
 

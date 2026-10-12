@@ -462,3 +462,51 @@ def test_harness_and_run_hash_columns_and_prereg(tmp_path):
     probs = [x for x in PR.check_registered(frame, pd.DataFrame(), {"A9": "eahash000000"}, git_check=False)
              if "A9" in x and "solver-side" not in x]
     assert len(probs) == 1 and "1 A9 run(s)" in probs[0] and "withharness0" in probs[0]
+
+
+D021_APPENDED = ["fan_start_state", "fan_start_cap", "fan_end_state", "fan_end_cap", "acpi_start_c",
+                 "acpi_during_max_c", "void_info", "cuda_compiled_on_clock", "cuda_cache_n_on_clock", "stop_kind",
+                 "ref_stop_enabled", "ref_stop_t", "ref_stop_role", "ref_stop_check"]
+
+
+def test_d021_record_columns_are_appended(tmp_path):
+    """D-021's run-record keys become columns at the END of the schema (every earlier column keeps its place): fan
+    state and cap at both ends, the start and in-run temperatures, void_info, the CUDA cache flag, the stop kind and
+    R12's stop. A run that R12 stopped at the proven optimum is read like a run to T: no crash (the cuOpt the runner
+    killed is stopped_by_runner) and its last checked incumbent is held to T in P and pt_gams."""
+    assert list(B.RUN_COLUMNS)[-len(D021_APPENDED):] == D021_APPENDED
+    assert list(B.RUN_COLUMNS).index("no_exchange_window") == len(B.RUN_COLUMNS) - len(D021_APPENDED) - 1
+    p, mps = toy_problem(tmp_path)
+    raw, out = tmp_path / "raw", tmp_path / "datasets"
+    out.mkdir()
+    fan = lambda st, cap: dict(state=st, cap=cap, iso="2026-10-12T10:00:00+02:00", epoch=1.0, raw="x")  # noqa: E731
+    rj = dict(fan_state_start=fan("auto", 0), fan_state_end=fan("max", 1), acpi_start_c=41.5,
+              acpi_during=dict(max_c=66.0, samples=10, period_s=5.0), void_info=dict(gpu_cap=dict(median_sm_mhz=2392.0)),
+              cuda_cache=dict(compiled_on_clock=False, n_on_clock=0), t0=1.0,
+              stop=dict(kind="ref_reached", t=3.2, reason="ref_reached: ..."),
+              ref_stop=dict(enabled=True, z=7.0, trigger=dict(role="cuopt", k=1, t=3.0),
+                            check=dict(ok=True)),
+              processes=[dict(role="cuopt", exit_code=-9, killed="SIGKILL (definitive outcome)",
+                              stopped_by_runner=True)], status="completed")
+    make_run(raw, p, mps, "A6F", 0, 10, {"cuopt": [(1.0, X_85, "self"), (3.0, X_70, "self")]},
+             exit_codes={"cuopt": -9}, run_json_extra=rj)
+    make_run(raw, p, mps, "A6", 0, 10, {"cuopt": [(1.0, X_85, "self")]}, run_json_extra=dict(stop=None, t0=1.0))
+    make_run(raw, p, mps, "A2", 0, 10, {"cuopt": [(1.0, X_85, "self")]})
+    df, _ = B.build(raw, out, log=lambda *a: None)
+    assert list(df.columns)[-len(D021_APPENDED):] == D021_APPENDED
+    r = df.set_index("arm")
+    a = r.loc["A6F"]
+    assert (a["fan_start_state"], a["fan_start_cap"], a["fan_end_state"], a["fan_end_cap"]) == ("auto", 0, "max", 1)
+    assert (a["acpi_start_c"], a["acpi_during_max_c"]) == (41.5, 66.0)
+    assert json.loads(a["void_info"]) == {"gpu_cap": {"median_sm_mhz": 2392.0}} and not a["cuda_compiled_on_clock"]
+    assert (a["stop_kind"], a["ref_stop_enabled"], a["ref_stop_t"], a["ref_stop_role"], a["ref_stop_check"]) == \
+        ("ref_reached", True, 3.0, "cuopt", "confirmed")
+    assert not a["crashed"] and a["status"] == "completed"
+    # held to T: gamma(7.0 vs ref 7.0) = 0 from t = 3 to T = 10, as for a run that reached T
+    ref = a["ref"]
+    from itrea.analysis import metrics as M
+    assert a["pt_gams"] == pytest.approx(M.gams_integral([(1.0, 8.5), (3.0, 7.0)], ref, 1, 10.0).value, abs=1e-15)
+    assert a["pt"] == pytest.approx(M.primal_integral([(1.0, 8.5), (3.0, 7.0)], ref, 1, 10.0).value, abs=1e-15)
+    assert r.loc["A6", "stop_kind"] == "none" and r.loc["A2", "stop_kind"] == ""        # ended by itself / no record
+    assert r.loc["A2", "fan_start_cap"] == -1 and np.isnan(r.loc["A2", "acpi_start_c"])
+    assert r.loc["A2", "ref_stop_check"] == "" and not r.loc["A2", "ref_stop_enabled"]
