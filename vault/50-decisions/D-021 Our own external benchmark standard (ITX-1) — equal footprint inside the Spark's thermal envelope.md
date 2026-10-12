@@ -461,3 +461,44 @@ non-start is predicted (R29's A9-outcome path stays for what the plan cannot see
   needs no E0 flag — the pair layout's `--cpu-lanes` does.
 - Not enforced: the pool does not compare the installed cuOpt version with a job's variant tag (`v1c2610`); the v1
   window's checklist must.
+
+## Phase 2 review fixes (2026-10-12 14:0x, AgentRA, branch dev-itx2; not merged)
+An adversarial review of phase 2 confirmed 12 findings (1 blocker, 3 major, 8 minor); each is fixed with a test. No
+rule above changes: the code now does what R10, R12, R21, R31 and R33 say. Every pre-existing arm's plan is still
+byte-identical old vs new (the base's 35,337 plan records and 961 pool blocks, re-run after the fixes).
+- **R31 / R19 (blocker):** with T3 incomplete, the minimum and the R10 reading came from the plain mean over the pairs
+  present. `itx-report` now reads the minimum on a stated basis: "full" (every decision pair present); "stratified"
+  (T3 incomplete, census + E-sample complete: (a) the stratified guard >= −0.05, harm shown iff its interval's upper end
+  < −0.05; (b) the stratified count of solutions found A9 − A6F >= 0); "incomplete" otherwise. In the reviewer's case
+  (A9 +0.5 on H_cu-unseen, 0 on W-only, −0.7 on the E-sample, T3 not run) the plain guard was +0.033 and the stratified
+  −0.287: the minimum now reads "not met", harm shown.
+- **R10 / R32 (major):** the target is read only on the complete H_cu-unseen (T1 is never cut); with a pair missing,
+  the target and the minimum read "incomplete (n of N)", never "met". Completeness is reported per basis (decision set,
+  census + E-sample, T3); a gap in T1 is no longer called a T3 gap.
+- **R33, sealing (major):** the v1 writer's A9 default was the development configuration and the pool checked only
+  the tag. Now `make-jobs itx-v1` writes A9 on `configs/frozen-v2.yaml` (the C1 freeze, committed in the commit tagged
+  `prereg-v2`) and refuses an A9 tier while that file does not exist; the pool refuses an external A9 job unless the
+  file equals the tagged one and the job's configuration hashes to it (no overrides); every external job needs a clean
+  tree under `src/` and `configs/`; `itx-report` takes only runs with the registered itx1 harness and, for A9, that
+  configuration (`--frozen` for a development reading). Not done: re-deriving each run's full run hash (it also folds
+  in the lane's footprint) in the analysis.
+- **R33, reading (major + minor):** the strata file gains `exposed` = D-020's calibration sample ∪ M3's probe (37; 34
+  unseen; 31 in the decision set: T1 8, T2 11, T3 12) and `itx-report` gives every decisive aggregate and reading again
+  without them (184 decision instances, 56 of H_cu-unseen). Choice (AgentRA, open to Berk): all 8 probe instances are
+  flagged (the 3 on the does-not-fit list are out of every decision anyway); a further pre-tag exposure joins the list
+  before prereg-v2.
+- **The strata file's floats (minor):** GAMS's `primalintegral.csv` is now read round trip; `p_cuopt` / `p_scip10` are
+  the published decimals (173 / 135 values moved by ≤ 2.2e-16). Every set, sample and tier is unchanged. **New sha256
+  `c0221d429f3368c4181177cbd33b3b3717ddad8946bf712ca5440f6fc4ab35e5`** (replaces `d2ad90ee…` above; not yet registered).
+- **R33, A0's hash (minor):** new harness switch `scoped_hash` (in `itx1`): an arm without cuOpt hashes only the keys
+  that act on it, so a change to cuOpt's settings before the tag (C1, R13's test) leaves A0's run ids and runs
+  standing — "A0 stands if the SCIP harness hash is unchanged" is now a property of the run id.
+- **R12's trigger (minor):** the runner's trigger is the earliest qualifying record over every process (as M0's replay
+  judges), not the first role read in a poll; run.json lists every role's candidate.
+- **R21 (minor):** `--bca` adds BCa intervals to every mean d_ε (target, guard, secondaries), not only the ratio.
+- **R10 (minor):** "met on the call clock only" carries each arm's median / p90 start-up and the launch clock's figure.
+- **R3 / R8 (minor):** the target's figures on H_cu at P ≥ 0.5 (30) and live A2F vs the computed race on the panel are
+  reported beside.
+- **R16 (minor):** `gams_trc`'s docstring no longer claims bit-exact read-back by GAMS's `read_csv` (pandas' default
+  parser: within ~1e-12 relative; exact with `float_precision="round_trip"`).
+- **Window skill (minor):** the CPU windows' memory is 4 × 9 + 20 = 56 GB (one lane 29), not "4 × 29".

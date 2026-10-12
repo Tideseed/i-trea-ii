@@ -56,12 +56,18 @@ description: >
   budget, config path and overrides; the pool applies the Williams arm order per block from hash(instance, seed,
   20261005) and runs blocks in random order with strata interleaved.
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13`; phase 2 `itx-v1 --tier T1..T5
-  [--cuopt 26.10] [--a9-config <C1's frozen file>] --out F` (the v1 tiers; split `ext`, preset `itx1`, labels
-  `<arm>@v1c<tag>`, sets `itx-t<k>` — a 26.08 run gets `-c2608` in its set and variant, so it never shares a run id
-  with 26.10), `itx-a0`, `itx-m6`, `itx-m6a`. Their instance sets come only from the committed
-  `datasets/mipfeas_strata.csv` (`tools/derive_mipfeas_strata.py --check` re-derives it; never edit it by hand: it is
-  hashed in prereg-v2). R33: no A9 external job before the tag `prereg-v2` (the pool refuses it). A job-level
-  `priority` (integers, on every job of the file) orders block groups; `position` orders the arms inside a block.
+  [--cuopt 26.10] --out F` (the v1 tiers; split `ext`, preset `itx1`, labels `<arm>@v1c<tag>`, sets `itx-t<k>` — a
+  26.08 run gets `-c2608` in its set and variant, so it never shares a run id with 26.10), `itx-a0`, `itx-m6`,
+  `itx-m6a`. A9's configuration is `configs/frozen-v2.yaml` (the C1 freeze, committed in the commit tagged
+  `prereg-v2`); the writer refuses a tier with A9 while that file does not exist (`--a9-config` names another file for
+  a dry run only — the pool refuses it). Their instance sets come only from the committed `datasets/mipfeas_strata.csv`
+  (`tools/derive_mipfeas_strata.py --check` re-derives it; never edit it by hand: it is hashed in prereg-v2; its
+  `exposed` column is R33's list — add any further pre-tag exposure there, by its constants, before the tag). R33:
+  the pool refuses an external A9 job unless `prereg-v2` is an ancestor of HEAD, `configs/frozen-v2.yaml` equals the
+  tagged file and the job's config hashes to it; every external job needs a clean tree under `src/` and `configs/`.
+  `itx1` hashes A0's runs on their SCIP-side harness only (`scoped_hash`), so a change to cuOpt's settings before the
+  tag leaves A0's runs standing. A job-level `priority` (integers, on every job of the file) orders block groups;
+  `position` orders the arms inside a block.
 - Commit the job file before the run; record its SHA-256 in the journal.
 
 ## 4. Run

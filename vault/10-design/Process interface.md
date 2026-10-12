@@ -1,4 +1,4 @@
-# Process interface — how a pair run is put together (contract, 2026-10-05; updated 2026-10-10 to the built code; 2026-10-11: arm A6m and the whole-box lane, D-020; then ITX-1's arms A6F / A2F, the harness, named scopes and new void causes, D-021); 2026-10-12: D-021 phase 2 — R12's stop at the proven optimum, cuOpt killed at a definitive outcome, preset itx1, job priority, R33's gate
+# Process interface — how a pair run is put together (contract, 2026-10-05; updated 2026-10-10 to the built code; 2026-10-11: arm A6m and the whole-box lane, D-020; then ITX-1's arms A6F / A2F, the harness, named scopes and new void causes, D-021); 2026-10-12: D-021 phase 2 — R12's stop at the proven optimum, cuOpt killed at a definitive outcome, preset itx1, job priority, R33's gate; review fixes the same day — the earliest trigger across roles, `scoped_hash`, R33 on the registered configuration
 
 A **run** = one (instance, arm, seed, budget). The runner (`itrea.experiments.pair`) creates a run directory
 `traces/raw/<set>/<run_id>/` and a mailbox directory `/dev/shm/itrea/<run_id>/`, writes `order.json` (canonical names,
@@ -241,16 +241,17 @@ never from literals.
   the plain `A6F` for `itrea mipfeas-report --arm A6F`). The skill `itrea-window` lists them with their memory needs.
 
 ## ITX-1 phase 2: the stop at the proven optimum, cuOpt's kill, the v1 jobs (2026-10-12, [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]])
-- **Two optional harness switches** (`pair.HARNESS_OPTIONAL`), false by default and present in the resolved harness
-  only when true — so `ext`, a dict that sets them false and every phase-1 job resolve and hash as before (old vs new
-  `plan()` over every committed job file × every arm × nine option sets, 35,337 records, and the pool's 961 blocks:
-  byte-identical, scope units and properties included):
+- **Three optional harness switches** (`pair.HARNESS_OPTIONAL`), false by default and present in the resolved
+  harness only when true — so `ext`, a dict that sets them false and every phase-1 job resolve and hash as before (old
+  vs new `plan()` over every committed job file of the base × every arm × nine option sets, 35,337 records, and the
+  pool's 961 blocks: byte-identical, scope units and properties included; re-checked after the review fixes):
   | key | itx1 | effect |
   |---|---|---|
   | `ref_stop` | true | R12: the run ends at the proven optimum (below) |
   | `cuopt_kill_on_end` | true | after a definitive outcome every cuOpt process still running is SIGKILLed at once |
+  | `scoped_hash` | true | the run hash takes only the harness keys that act on the arm's processes (`pair.hashed_harness`): an arm without a cuOpt process (A0, A3x) drops every `cuopt_*` key (`pair.CUOPT_ONLY_KEYS`); arms with cuOpt hash the whole harness. R33: "A0 stands if the SCIP harness hash is unchanged at the tag" — a change to cuOpt's settings before prereg-v2 leaves A0's run ids, and so its runs, standing. run.json `config.harness` keeps the whole resolved harness; `solver_settings.harness` is the hashed part |
 
-  Preset **`itx1`** = ext + both: the v1 tier jobs (`make-jobs itx-v1`) and A0's external jobs (`itx-a0`).
+  Preset **`itx1`** = ext + all three: the v1 tier jobs (`make-jobs itx-v1`) and A0's external jobs (`itx-a0`).
 - **R12, `ref_stop`** (`pair.RefMonitor`, `pair.ref_reached`, `pair.check_ref_trigger`). Eligible: an instance under
   `data/miplib` whose MIPLIB solu line is `=opt=` (`pair.miplib_stop_ref`; supportcase22's `=best=`, PGLib-UC and ML4CO
   never; tests inject a toy's optimum through `PairOptions.ref_lookup`). Before t0 the runner reads z* and the
@@ -259,7 +260,11 @@ never from literals.
   whose names it cannot map is left out with the reason), recomputes obj = c·x + offset from each stored vector and
   stops the run at the first record stamped before T with GAMS's gamma round((obj − z*)/max(|obj|, |z*|, 1), 6) <= 0
   **and** Berthold's gap <= 1e-9: `stop` kind `ref_reached`, `stop` written to the mailbox, cuOpt SIGKILLed under
-  `cuopt_kill_on_end`. Each `.part` file is opened once and the descriptor kept (the process unlinks the file after
+  `cuopt_kill_on_end`. "First" is by the time stamp over every process, not by the order the roles are read (review
+  fix 2026-10-12): each poll keeps every role's first qualifying record (its candidate) and, while no trigger is set,
+  takes the earliest (ties: the earlier role of the arm) — in A9 cuOpt's record of z*, the EA's re-record of the same
+  vector and SCIP's re-record of the EA's post usually land in one poll, and the trigger is cuOpt's, as M0's replay
+  judges. Once set it never changes; after the stop `drain()` reads what was left into the candidates. Each `.part` file is opened once and the descriptor kept (the process unlinks the file after
   writing its `.npz`; the descriptor still reads every byte). After the processes ended (a killed one's `.part`
   recovered into its `.npz`), the triggering record is checked by the independent exact checker with the other
   library's parse, and its exact objective must meet the stop too; otherwise the run is **void `ref_rejected`** (after
@@ -270,7 +275,8 @@ never from literals.
   within 1e-10 on every recorded run and GAMS trace). run.json `ref_stop`: `enabled` / `reason` (off: the attempt's
   `ref_stop_off`, or not eligible), `z`, `kind`, `source`, `sense`, `gap_tol`, `poll_s`, the records read per role
   (`roles.<role>.records / last_t / error`), `trigger` (role, record k, t, obj recomputed, obj reported, gamma, gap,
-  `detected_t`) and `check` (ok, reason, producer, reader, feasible, obj_recomputed, gamma_exact, gap_exact,
+  `detected_t`), `candidates` (every role's first qualifying record by t, `after_trigger` for one read only after the
+  trigger was chosen) and `check` (ok, reason, producer, reader, feasible, obj_recomputed, gamma_exact, gap_exact,
   checker_version); None when the harness has no `ref_stop`.
 - **`cuopt_kill_on_end`.** A definitive outcome (`pair.definitive_stop`) is `ref_reached` or a `partner_end` whose
   `stop.proven` is true (a process ended with exit 0 and an exit reason in DEFINITIVE — not a crash): every cuOpt
@@ -282,12 +288,18 @@ never from literals.
   two values in one block, is refused. `itx-a0`: H_cu ∪ W_SCIP unseen first; `itx-m6`: three loads, the three measured
   runs, then the other loads.
 - **R33's gate** (`pool.check_frozen`): an external job (split `ext`) of an arm with the EA (A9) needs the tag
-  `prereg-v2` as an ancestor of HEAD — no A9 outcome on an unseen instance before it; A0 and A6F's external jobs need
-  prereg-v1 only.
-- **Jobs.** `itrea make-jobs itx-v1 --tier T1|T2|T3|T4|T5 [--cuopt 26.10] [--a9-config …] --out FILE` (sets
-  `itx-t1` … `itx-t5`, `-c<tag>` for another cuOpt version; labels `A9@v1c2610`, `A6F@v1c2610`, `A2F@v1c2610`;
-  seed 2000, T4 2001; split `ext`; written only once 26.10 is in), `itx-a0` (`jobs/itx-a0.jsonl`, A0@v1 × 230,
+  `prereg-v2` as an ancestor of HEAD — no A9 outcome on an unseen instance before it — and the configuration
+  registered with it (review fix 2026-10-12): `configs/frozen-v2.yaml` (`pool.FROZEN_V2_CONFIG`, the C1 freeze) must
+  exist, be byte-identical to the file in the tagged commit (`record_env.file_at`), and every such job's base
+  configuration hash must equal its hash, with no overrides or ablation. Every external job — A0, A6F, A2F and A9 —
+  needs a clean, committed tree under `src/` and `configs/`. A0 and A6F's external jobs need prereg-v1 only. The
+  analysis takes only runs that carry the registered settings (`itx_report.registered_fault`).
+- **Jobs.** `itrea make-jobs itx-v1 --tier T1|T2|T3|T4|T5 [--cuopt 26.10] --out FILE` (sets `itx-t1` … `itx-t5`,
+  `-c<tag>` for another cuOpt version; labels `A9@v1c2610`, `A6F@v1c2610`, `A2F@v1c2610`; seed 2000, T4 2001; split
+  `ext`; written only once 26.10 is in; A9 on `configs/frozen-v2.yaml` — a tier with A9 is refused while that file does
+  not exist; `--a9-config` names another file for a dry run, which the pool refuses), `itx-a0` (`jobs/itx-a0.jsonl`,
+  A0@v1 × 230,
   `--layout screen --cpu-lanes 4`), `itx-m6` / `itx-m6a` (`jobs/itx-m6.jsonl`, `jobs/itx-m6a.jsonl`, `--layout screen
   --cpu-lanes 4` / `1`; the screen layout's single-core X925 lanes need no E0 flag, the pair layout's `--cpu-lanes`
   does). The instance sets come from `datasets/mipfeas_strata.csv` (`itrea.analysis.itx_strata`). Memory under itx1
-  = under ext: A9 97, A2F 78, A6F 69 GB; A0 29 per lane.
+  = under ext: A9 97, A2F 78, A6F 69 GB; A0 9 GB per lane plus the 20-GB reserve once (4 lanes: 56 GB).
