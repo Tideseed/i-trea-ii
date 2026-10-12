@@ -29,6 +29,8 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
     python -m itrea.experiments.make_jobs mipfeas-cal [--out jobs/mipfeas-cal-26.08.jsonl]
     python -m itrea.experiments.make_jobs itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13   [--out jobs/itx-<k>.jsonl]
+    python -m itrea.experiments.make_jobs itx-a0 | itx-m6 | itx-m6a                       [--out jobs/itx-<k>.jsonl]
+    python -m itrea.experiments.make_jobs itx-v1 --tier T1 [--cuopt 26.10] --out FILE
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -56,6 +58,12 @@ D-020's 30 x A6F ext — the plain label, for `itrea mipfeas-report --arm A6F` �
 (itx-m5: the 15 development / class-probe instances among MIPfeas's 233 x A9@m5 ext, 600 s; 15) and `itx-r13` (itx-r13:
 the 17 x seeds 0–1 x {A9@r13 = ext with R13 and R14 off, A9@r13x and A6F@r13x under ext}, 120 s, one block per
 instance x seed; 102). Each set's own variant keeps every run id distinct from every other set's (run ids carry no set).
+
+D-021 phase 2 (`itx-v1`, `itx-a0`, `itx-m6`, `itx-m6a`; the instance sets from datasets/mipfeas_strata.csv): the v1
+tiers T1–T5 (`itx_v1`: blocks {A9, A6F} at seed 2000, T4 the panel at 2001, T5 live A2F on the panel at 2000 in its
+own blocks; the `itx1` harness, 600 s, split "ext", variant v1c<cuOpt tag>, sets itx-t1 … itx-t5 for cuOpt 26.10 —
+written only once 26.10 is in, `--out` has no default), A0 on the 230 (`itx_a0`, jobs/itx-a0.jsonl: H_cu ∪ W_SCIP
+unseen first by the jobs' `priority`) and M6 (`itx_m6` / `itx_m6a`, jobs/itx-m6.jsonl, jobs/itx-m6a.jsonl).
 """
 from __future__ import annotations
 
@@ -117,8 +125,20 @@ ITX_M2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru")
 # R29: the 8 instances whose RSS exceeded 14.4 GiB in GAMS's cuOpt run
 ITX_M3_INSTANCES = ("eilA101-2", "irp", "nw04", "proteindesign121hz512p9", "proteindesign122trx11p8",
                     "snp-02-004-104", "square47", "supportcase6")
-ITX_OUT = {k: f"jobs/itx-{k}.jsonl" for k in ("m1", "m2", "m3", "m4", "m5", "r13")}
-OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position")
+ITX_OUT = {k: f"jobs/itx-{k}.jsonl" for k in ("m1", "m2", "m3", "m4", "m5", "r13", "a0", "m6", "m6a")}
+# D-021 phase 2: the v1 external runs (tiers T1-T5 on cuOpt 26.10, A0) and M6 (the A0 window's lanes)
+EXT_SPLIT = "ext"                                    # pool.EXT_SPLIT: A9's external jobs need prereg-v2 (R33)
+ITX_V1_SEED, ITX_PANEL_SEED, ITX_V1_BUDGET = 2000, 2001, 600.0     # R30, R11
+ITX_V1_HARNESS = "itx1"                              # pair.HARNESS_PRESETS: ext + R12's stop + cuOpt killed at the end
+ITX_CUOPT = "26.10"                                  # v1's cuOpt (D-019); another version gets its own set and variant
+ITX_TIERS = ("T1", "T2", "T3", "T4", "T5")
+ITX_A0_SET, ITX_A0_VARIANT = "itx-a0", "v1"
+# M6: SCIP's node throughput alone vs beside 3 busy lanes on 3 development instances x 60 s (the fastest-node ones
+# that SCIP does not solve in 120 s: 1,251 / 897 / 575 nodes/s in the development A0 runs), inside 30+ min of 4 busy
+# lanes (the other 14 development / class-probe instances x 600 s)
+ITX_M6_MEASURED = ("neos-2657525-crna", "fhnw-binpack4-48", "glass4")
+ITX_M6_BUDGET, ITX_M6_LOAD_BUDGET, ITX_M6_LOADS_FIRST = 60.0, 600.0, 3
+OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position", "priority")
 
 
 class JobError(ValueError):
@@ -633,6 +653,115 @@ def itx_r13(budget: float = 120.0, seeds=(0, 1), set_: str = "itx-r13", tables=I
     return _sorted(out)
 
 
+# ------------------------------------------------------------------------------------- D-021 (ITX-1) phase 2: v1
+def cuopt_tag(version: str) -> str:
+    """"26.10" -> "2610": the cuOpt version in a v1 set name and variant (run ids carry neither the set nor the
+    installed cuOpt, so a 26.08 and a 26.10 run of one job must differ in their variant)."""
+    if not re.fullmatch(r"\d\d\.\d\d", str(version)):
+        raise JobError(f"cuOpt version {version!r} is not of the form YY.MM (e.g. 26.10)")
+    return str(version).replace(".", "")
+
+
+def itx_stratum(r) -> str:
+    """The pool's interleaving stratum of a strata-table row: T1 by GAMS's cuOpt P (>= 0.5 or none / below), T2 W-only
+    or the E quartile, T3 the E quartile or development, the panel by its group."""
+    if r["tier"] == "T1":
+        return "hcu-p05" if r["H_cu_p05"] else "hcu-p01"
+    if r["dev"]:
+        return "dev"
+    if r["W_only"]:
+        return "wonly"
+    if r["H_cu"]:
+        return "hcu"
+    return f"e-q{int(r['e_quartile'])}"
+
+
+def itx_v1(tier: str, cuopt: str = ITX_CUOPT, strata=None, a9_config: str = ITX_A9_CONFIG,
+           budget: float = ITX_V1_BUDGET, data: Path | None = None) -> list[dict]:
+    """D-021's v1 external tiers (R31) from datasets/mipfeas_strata.csv: T1 (H_cu unseen, 64), T2 (W-only unseen + the
+    E-sample, 57), T3 (the rest of E unseen + the 15 development instances, 109) — blocks {A9, A6F} at seed 2000 —,
+    T4 (the repeatability panel, 20: {A9, A6F} at seed 2001) and T5 (the panel: live A2F at seed 2000, one arm per
+    block). Every job: 600 s, the `itx1` harness (ext + R12's stop + cuOpt killed at a definitive outcome), split "ext"
+    (A9's need prereg-v2, R33), variant `v1c<tag>` (e.g. A9@v1c2610), set `itx-t<k>` for cuOpt 26.10 and
+    `itx-t<k>-c<tag>` for any other version; A9 on `a9_config` (the C1 freeze replaces the development default). The
+    two arms of a block run in AB / BA order by the block hash (the pool's Williams rows for two arms); the blocks of
+    a tier in the pool's seeded random order, strata interleaved (`itx_stratum`). The does-not-fit list is in no tier."""
+    from itrea.analysis.itx_strata import STRATA_CSV, read_strata
+    if tier not in ITX_TIERS:
+        raise JobError(f"tier {tier!r} is not one of {', '.join(ITX_TIERS)}")
+    tag = cuopt_tag(cuopt)
+    df = read_strata(strata or STRATA_CSV)
+    k = int(tier[1])
+    set_ = f"itx-t{k}" + ("" if cuopt == ITX_CUOPT else f"-c{tag}")
+    variant = f"v1c{tag}"
+    if tier in ("T1", "T2", "T3"):
+        rows, seed, arms = df[df["tier"] == tier], ITX_V1_SEED, ("A9", "A6F")
+    elif tier == "T4":
+        rows, seed, arms = df[df["t4"]], ITX_PANEL_SEED, ("A9", "A6F")
+    else:
+        rows, seed, arms = df[df["t5"]], ITX_V1_SEED, ("A2F",)
+    where = _miplib_paths(sorted(rows["name"]), data)
+    out = []
+    for _, r in rows.sort_values("name").iterrows():
+        n = r["name"]
+        for arm in arms:
+            out.append(job(where[n], set_, arm, seed, budget, name=n, config=a9_config if arm == "A9" else None,
+                           stratum=itx_stratum(r), split=EXT_SPLIT, block=f"{n}__s{seed}__{set_}", variant=variant,
+                           harness=ITX_V1_HARNESS))
+    return _sorted(out)
+
+
+def itx_a0(strata=None, budget: float = ITX_V1_BUDGET, seed: int = ITX_V1_SEED, set_: str = ITX_A0_SET,
+           data: Path | None = None) -> list[dict]:
+    """D-021's A0 = SCIP alone on one X925 core (R7), harness-matched to A9's SCIP (the `itx1` harness, R12's stop
+    included): the 233 minus the does-not-fit list (230) x 600 s, seed 2000, split "ext" (A0 may run before prereg-v2,
+    R33: only validity is read), label A0@v1, one block per instance. H_cu ∪ W_SCIP unseen first (`priority` 0: what
+    the decisions on A0 need — the computed race on H_cu-unseen and A9 vs A0 on W_SCIP-unseen), the rest after
+    (priority 1); inside each, the pool's seeded order, strata interleaved. CPU-only: run on 4 single-core X925 lanes
+    (`--layout screen --cpu-lanes 4`, or 3 if M6 says so), both model servers stopped (a harness)."""
+    from itrea.analysis.itx_strata import STRATA_CSV, read_strata
+    df = read_strata(strata or STRATA_CSV)
+    rows = df[~df["does_not_fit"]]
+    where = _miplib_paths(sorted(rows["name"]), data)
+    out = []
+    for _, r in rows.sort_values("name").iterrows():
+        n = r["name"]
+        first = bool(r["unseen"] and (r["H_cu"] or r["W_SCIP"]))
+        out.append(job(where[n], set_, "A0", seed, budget, name=n, config=None, stratum=itx_stratum(r),
+                       split=EXT_SPLIT, block=f"{n}__s{int(seed)}__{set_}", variant=ITX_A0_VARIANT,
+                       harness=ITX_V1_HARNESS, priority=0 if first else 1))
+    return _sorted(out)
+
+
+def itx_m6(set_: str = "itx-m6", seed: int = ITX_SEED, tables=INSTANCE_TABLES) -> list[dict]:
+    """M6 (D-021), the A0 window's opening, with 4 single-core lanes (`--layout screen --cpu-lanes 4`): 14 load runs
+    (A0@m6L: the development / class-probe instances other than M6's three, 600 s) keep the lanes busy for 30+ min —
+    the heat reading: keep 4 lanes if the hottest zone stays < 85 °C, else 3 — and the 3 measured runs (A0@m6b,
+    ITX_M6_MEASURED x 60 s) run while 3 load runs hold the other lanes: `priority` 0 = the first 3 loads, 1 = the
+    measured runs, 2 = the other 11 loads. Their nodes/s against `itx-m6a` (alone) decides the lane count: more than
+    3 % slower -> fewer lanes (`itrea itx-report --m6`). Seed 0, the ext harness (no R12 stop: the loads must run their
+    full length), split dev."""
+    names = development_names(tables)
+    loads = [n for n in names if n not in ITX_M6_MEASURED]
+    where = instance_paths(names, tables)
+    out = []
+    for i, n in enumerate(loads):
+        pr = 0 if i < ITX_M6_LOADS_FIRST else 2
+        out.append(_itx(where[n], n, set_, "A0", seed, ITX_M6_LOAD_BUDGET, "m6L", ITX_EXT, stratum="m6-load",
+                        priority=pr))
+    for n in ITX_M6_MEASURED:
+        out.append(_itx(where[n], n, set_, "A0", seed, ITX_M6_BUDGET, "m6b", ITX_EXT, stratum="m6-measured",
+                        priority=1))
+    return _sorted(out)
+
+
+def itx_m6a(set_: str = "itx-m6a", seed: int = ITX_SEED, tables=INSTANCE_TABLES) -> list[dict]:
+    """M6's reference: the 3 measured instances x A0@m6a x 60 s, alone on one lane (`--layout screen --cpu-lanes 1`,
+    nothing beside), the ext harness, seed 0, split dev."""
+    where = instance_paths(ITX_M6_MEASURED, tables)
+    return _sorted([_itx(where[n], n, set_, "A0", seed, ITX_M6_BUDGET, "m6a", ITX_EXT) for n in ITX_M6_MEASURED])
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -697,11 +826,28 @@ def main(argv=None) -> int:
                 "m5": "D-021 M5 A9 preview: the 15 dev / class-probe instances in the 233 x A9 ext, 600 s (15 runs)",
                 "r13": "D-021 R13 + R14 test: 17 x seeds 0-1 x {A9 ext without R13/R14, A9 ext, A6F ext}, 120 s "
                        "(102 runs)"}
+    itx_help.update({
+        "a0": "D-021 A0 (SCIP alone, itx1 harness): the 233 minus the does-not-fit list x 600 s, seed 2000, H_cu ∪ "
+              "W_SCIP unseen first (230 runs; 4 CPU lanes: --layout screen --cpu-lanes 4)",
+        "m6": "D-021 M6: 14 development loads x 600 s + 3 measured x 60 s beside 3 busy lanes (17 runs; "
+              "--layout screen --cpu-lanes 4)",
+        "m6a": "D-021 M6's reference: the 3 measured instances x 60 s alone (3 runs; --layout screen --cpu-lanes 1)"})
     itx = {k: sub.add_parser(f"itx-{k}", help=h) for k, h in itx_help.items()}
     for k, p in itx.items():
         p.add_argument("--out", type=Path, default=paths.ROOT / ITX_OUT[k])
-        if k in ("m3", "m4", "m5"):
+        if k in ("m3", "m4", "m5", "a0"):
             p.add_argument("--data", type=Path, default=paths.DATA)
+        if k == "a0":
+            p.add_argument("--strata", type=Path, default=None, help="default datasets/mipfeas_strata.csv")
+    v1 = sub.add_parser("itx-v1", help="D-021 v1 external tier T1..T5 ({A9, A6F} x seed 2000; T4 the panel at 2001; "
+                                       "T5 live A2F on the panel), itx1 harness, 600 s, split ext")
+    v1.add_argument("--tier", required=True, choices=ITX_TIERS)
+    v1.add_argument("--cuopt", default=ITX_CUOPT, help=f"cuOpt version tag (default {ITX_CUOPT}: set itx-t<k>, "
+                                                        f"variant v1c2610; another version: set itx-t<k>-c<tag>)")
+    v1.add_argument("--a9-config", default=ITX_A9_CONFIG, help="A9's configuration (C1's freeze replaces the default)")
+    v1.add_argument("--strata", type=Path, default=None, help="default datasets/mipfeas_strata.csv")
+    v1.add_argument("--data", type=Path, default=paths.DATA)
+    v1.add_argument("--out", type=Path, required=True, help="no default: the v1 files are written when 26.10 is in")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -738,6 +884,14 @@ def main(argv=None) -> int:
             jobs = itx_m5(data=a.data)
         elif a.cmd == "itx-r13":
             jobs = itx_r13()
+        elif a.cmd == "itx-a0":
+            jobs = itx_a0(a.strata, data=a.data)
+        elif a.cmd == "itx-m6":
+            jobs = itx_m6()
+        elif a.cmd == "itx-m6a":
+            jobs = itx_m6a()
+        elif a.cmd == "itx-v1":
+            jobs = itx_v1(a.tier, a.cuopt, a.strata, a.a9_config, data=a.data)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:

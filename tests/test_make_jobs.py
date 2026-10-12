@@ -197,8 +197,9 @@ def test_itx_job_files_are_the_writers_output(tmp_path):
     """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes; D-020's A6m writer stays (its file
     left jobs/ when M4 replaced it) (skipped without the instances)."""
     from itrea import paths
+    from itrea.analysis.itx_strata import read_strata
     from itrea.analysis.mipfeas import SAMPLE
-    need = set(SAMPLE) | set(mj.ITX_M3_INSTANCES)
+    need = set(SAMPLE) | set(mj.ITX_M3_INSTANCES) | set(read_strata()["name"])
     if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in need) or \
             not (paths.DATA / "miplib" / "benchmark-v2.test").is_file():
         pytest.skip("the MIPLIB 2017 instances are not under data/")
@@ -270,3 +271,90 @@ def test_itx_writers(tmp_path):
     (tmp_path / "data" / "miplib" / "solu.txt").write_text("=inf= filler0\n")
     with pytest.raises(mj.JobError, match="233"):
         mj.mipfeas_233(tmp_path / "data")
+
+
+def _strata_data(root):
+    """A fake data/ holding an (empty) instance file for every name of the committed strata table."""
+    from itrea.analysis.itx_strata import read_strata
+    inst = root / "miplib" / "inst"
+    inst.mkdir(parents=True)
+    for n in read_strata()["name"]:
+        (inst / f"{n}.mps.gz").write_bytes(b"")
+    return root
+
+
+def test_itx_v1_tiers(tmp_path):
+    """D-021 phase 2's tier writer on the committed strata: T1 64 / T2 57 / T3 109 blocks of {A9, A6F} at seed 2000,
+    T4 the 20 panel blocks at 2001, T5 live A2F on the panel at 2000 (one arm per block); the itx1 harness, 600 s,
+    split ext; the cuOpt version in the variant (and in the set unless 26.10), so a 26.08 and a 26.10 run never share
+    an id; AB / BA by the block hash; the does-not-fit list in no tier."""
+    from itrea.analysis.itx_strata import DOES_NOT_FIT
+    from itrea.experiments import pair
+    from itrea.experiments.pool import order_blocks
+    data = _strata_data(tmp_path / "data")
+    tiers = {t: mj.itx_v1(t, data=data) for t in mj.ITX_TIERS}
+    blocks = {t: make_blocks(v) for t, v in tiers.items()}
+    assert {t: (len(v), len(blocks[t])) for t, v in tiers.items()} == \
+        dict(T1=(128, 64), T2=(114, 57), T3=(218, 109), T4=(40, 20), T5=(20, 20))
+    every = [j for v in tiers.values() for j in v]
+    assert {j["harness"] for j in every} == {"itx1"} and {j["split"] for j in every} == {"ext"}
+    assert {j["budget"] for j in every} == {600.0} and {j["variant"] for j in every} == {"v1c2610"}
+    assert {t: {j["set"] for j in v} for t, v in tiers.items()} == {t: {f"itx-t{t[1]}"} for t in mj.ITX_TIERS}
+    assert {j["seed"] for t in ("T1", "T2", "T3", "T5") for j in tiers[t]} == {2000} and \
+        {j["seed"] for j in tiers["T4"]} == {2001}
+    assert {j["arm"] for j in tiers["T5"]} == {"A2F"} and \
+        all(sorted(r.label for r in b.runs) == ["A6F@v1c2610", "A9@v1c2610"] for b in blocks["T1"])
+    assert all(j["config"] == mj.ITX_A9_CONFIG for j in every if j["arm"] == "A9")
+    assert all(j["config"] is None for j in every if j["arm"] != "A9")
+    assert not {j["name"] for j in every} & set(DOES_NOT_FIT)
+    assert {j["name"] for j in tiers["T4"]} == {j["name"] for j in tiers["T5"]}
+    first = [b.runs[0].label.split("@")[0] for b in blocks["T1"] + blocks["T2"] + blocks["T3"]]
+    assert 0.35 < first.count("A9") / len(first) < 0.65                           # AB / BA by the block hash
+    assert len(order_blocks(blocks["T2"])) == 57 and \
+        len({b.stratum for b in blocks["T2"]}) == 5                               # W-only + 4 E quartiles
+    ids = [pair.run_id_for(j) for j in every]
+    old = mj.itx_v1("T1", cuopt="26.08", data=data)
+    assert {j["set"] for j in old} == {"itx-t1-c2608"} and {j["variant"] for j in old} == {"v1c2608"}
+    ids_old = [pair.run_id_for(j) for j in old]
+    assert len(set(ids)) == len(ids) == 520 and not set(ids) & set(ids_old)
+    assert mj.cuopt_tag("26.10") == "2610"
+    with pytest.raises(mj.JobError, match="YY.MM"):
+        mj.cuopt_tag("26.1")
+    with pytest.raises(mj.JobError, match="tier"):
+        mj.itx_v1("T6", data=data)
+    # memory per run under itx1 (D-021: A9 97, A2F 78, A6F 69 GB with the file mailbox)
+    need = {j["arm"]: pair.job_budget(j).need_gb for j in tiers["T1"][:2] + tiers["T5"][:1]}
+    assert need == dict(A9=97.0, A6F=69.0, A2F=78.0)
+    out = tmp_path / "t4.jsonl"
+    assert mj.main(["itx-v1", "--tier", "T4", "--cuopt", "26.08", "--data", str(data), "--out", str(out)]) == 0
+    assert len(out.read_text().splitlines()) == 40
+
+
+def test_itx_a0_and_m6(tmp_path):
+    """A0 on the 233 minus the list (230) under itx1 at seed 2000, H_cu ∪ W_SCIP unseen first (priority 0: 81, then
+    149); M6: 3 loads, then the 3 measured runs, then 11 loads (priorities 0 / 1 / 2), and its 3 runs alone."""
+    from itrea.analysis.itx_strata import DOES_NOT_FIT, read_strata
+    from itrea.experiments import pair
+    from itrea.experiments.pool import order_blocks
+    data = _strata_data(tmp_path / "data")
+    a0 = mj.itx_a0(data=data)
+    df = read_strata().set_index("name")
+    assert len(a0) == 230 and not {j["name"] for j in a0} & set(DOES_NOT_FIT)
+    assert {(j["arm"], j["variant"], j["seed"], j["budget"], j["harness"], j["split"], j["set"]) for j in a0} == \
+        {("A0", "v1", 2000, 600.0, "itx1", "ext", "itx-a0")}
+    p0 = {j["name"] for j in a0 if j["priority"] == 0}
+    want = {n for n, r in df.iterrows() if r["unseen"] and (r["H_cu"] or r["W_SCIP"]) and not r["does_not_fit"]}
+    assert p0 == want and len(p0) == 81 and sum(j["priority"] == 1 for j in a0) == 149
+    order = order_blocks(make_blocks(a0))
+    assert [b.priority for b in order] == [0] * 81 + [1] * 149
+    assert pair.job_budget(a0[0]).need_gb == 29.0                                   # 9 GiB SCIP + the 20 GB reserve
+    m6, m6a = mj.itx_m6(), mj.itx_m6a()
+    assert len(m6) == 17 and len(m6a) == 3 and {j["harness"] for j in m6 + m6a} == {"ext"}
+    order = order_blocks(make_blocks(m6))
+    assert [b.priority for b in order] == [0] * 3 + [1] * 3 + [2] * 11
+    assert {b.name for b in order[3:6]} == set(mj.ITX_M6_MEASURED) and \
+        {b.runs[0].job["budget"] for b in order[3:6]} == {60.0}
+    assert {j["budget"] for j in m6 if j["variant"] == "m6L"} == {600.0}
+    assert {j["name"] for j in m6a} == set(mj.ITX_M6_MEASURED) and {j["variant"] for j in m6a} == {"m6a"}
+    ids = [pair.run_id_for(j) for j in a0 + m6 + m6a]
+    assert len(set(ids)) == len(ids)
