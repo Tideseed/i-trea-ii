@@ -122,8 +122,8 @@ PAIR_CPU_LANES = (pair.Lane("c1", (7, 8)), pair.Lane("c2", (9, 15)), pair.Lane("
 # nine, not ten: D-003's gate (Σ 9 GiB caps + 20 GB reserve) must fit MemAvailable (~108 GB, both servers stopped)
 SCREEN_LANES = tuple(pair.Lane(f"x{c}", (c,)) for c in (5, 6, 7, 8, 9, 15, 16, 17, 18))
 FULL_ARMS = tuple(a for a, spec in pair.ARMS.items() if spec.lane == "full")     # ("A6m",): the whole-box lane's arms
-REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory", "external_kill")   # rerun once (thermal_watch:
-                                                                                      # as a thermal void)
+# rerun once (thermal_watch: as a thermal void); ref_rejected's rerun runs with R12's stop off (D-021 phase 2)
+REQUEUE_CAUSES = ("gpu_cap", "compiled_on_clock", "cuopt_memory", "external_kill", "ref_rejected")
 A6M_MEM_GB = dict(cuopt_mem_gb=24.0, gpu_mem_gb=36.0)    # D-020: A6m's host MemoryMax and RMM limit (GAMS's max RSS
                                                          # <= 16 GB on the sample, 49 GB at most over the 233)
 # harness settings a run may not change from PairOptions() defaults, per split (D-002 §1.2 / §1.8, D-003)
@@ -235,6 +235,8 @@ class Block:
     thermal_voids: int = 0              # times the thermal pause voided it (capped by max_thermal_requeues)
     voids: dict = field(default_factory=dict)   # D-021 causes: times each voided it (capped by max_cause_requeues)
     wait_auto: bool = False             # requeued after a cap void: its next run waits for the fan on AUTO (R25)
+    ref_stop_off: str | None = None     # D-021 R12: voided by `ref_rejected` — its rerun runs without the stop (the
+                                        # reason travels in the job as `ref_stop_off`, outside the run id)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -747,10 +749,32 @@ class Pool:
                 continue
             if any(s is not None for s in st):
                 self._move_block_aside(b, "split block (resume)" if any(finished) else "stale run (resume)")
+            prior = self._ref_rejected_before(b, popts)
+            if prior:                              # D-021 R12: a resumed block keeps its rerun's stop off (and cap)
+                b.ref_stop_off = f"rerun after ref_rejected in {prior} (void.jsonl, resume)"
+                b.voids["ref_rejected"] = max(1, b.voids.get("ref_rejected", 0))
             for r in b.runs:                       # orphaned mailboxes of an earlier attempt
                 done = pair.clear_stale(r.job, popts, wait_s=self.o.stale_wait_s)
                 if done["killed"] or done["mailbox_removed"]:
                     self.log(f"cleared stale state of {done['run_id']}: {done}")
+
+    def _ref_rejected_before(self, b: Block, popts: pair.PairOptions) -> str | None:
+        """The run id of an earlier attempt of this block voided by `ref_rejected` (the set's void.jsonl), or None: on
+        resume its rerun still runs with R12's stop off."""
+        ids = {pair.run_id_for(r.job, popts) for r in b.runs}
+        p = Path(popts.traces_dir) / "raw" / b.set / "void.jsonl"
+        try:
+            lines = p.read_text().splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("run_id") in ids and str(d.get("reason") or "").startswith("ref_rejected"):
+                return str(d["run_id"])
+        return None
 
     def _move_block_aside(self, b: Block, reason: str) -> None:
         """Move every run directory of the block to void/ (evidence) and log it in void.jsonl. Processes of an earlier
@@ -1107,9 +1131,10 @@ class Pool:
                 self.log(f"[{lane.name}] {late}; block {b.id} is partly run, so it continues (a stop never splits a "
                          f"block)")
         popts = self._popts(lane)
-        self.log(f"[{lane.name}] start {pair.run_id_for(r.job, popts)} (block {r.block.id}, position "
-                 f"{r.job.get('position')})")
-        rec = pair.run_pair(r.job, popts)
+        job = dict(r.job, ref_stop_off=r.block.ref_stop_off) if r.block.ref_stop_off else r.job
+        self.log(f"[{lane.name}] start {pair.run_id_for(job, popts)} (block {r.block.id}, position "
+                 f"{r.job.get('position')})" + (" with R12's stop off" if r.block.ref_stop_off else ""))
+        rec = pair.run_pair(job, popts)
         st = rec["status"]
         if st == "void":
             with self.cv:
@@ -1133,6 +1158,8 @@ class Pool:
                                     else ("thermal_watch", rec["run_id"], time.time()), cause or "thermal")
                 elif cause in REQUEUE_CAUSES:          # D-021: requeued once, then skipped and listed
                     r.block.requeue, r.block.requeue_cause = True, cause
+                    if cause == "ref_rejected":        # R12: the rerun of the whole block runs without the stop
+                        r.block.ref_stop_off = f"rerun after ref_rejected in {rec['run_id']}"
                     if cause == "gpu_cap":
                         r.block.wait_auto = True
                         self._heat_void(("gpu_cap", rec["run_id"], time.time()), cause)

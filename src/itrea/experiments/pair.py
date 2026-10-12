@@ -60,6 +60,25 @@ ITX-1 (D-021), on the GPU lane g0 whose cores are F (X925 5–6 + A725 1–3 + t
   the fan governor's state at the start and the end (`fan_state_start` / `fan_state_end`) and the start temperature
   (`acpi_start_c`, R28).
 
+D-021 phase 2 (two optional harness switches, absent from the resolved harness — and so from the run hash — unless on;
+preset `itx1` = ext + both, carried by the v1 tier jobs and A0's external jobs):
+- **`ref_stop` (R12, stop at the proven optimum):** for an instance MIPLIB lists as `=opt=` (`miplib_stop_ref`; never
+  supportcase22's `=best=`, never PGLib-UC or ML4CO) the runner reads z* and the objective (c, offset) before t0 —
+  no process receives z* — and while the clock runs tails every process's incumbent records (`RefMonitor`: the
+  `.part` files and `names.json`, cuOpt's in A6F / A2F / A9 included), recomputes obj = c·x + offset from each stored
+  vector and ends the run (stop kind `ref_reached`, `stop` written to the mailbox) at the first record before T whose
+  GAMS gamma round((obj − z*)/max(|obj|, |z*|, 1), 6) is <= 0 AND whose Berthold gap is <= 1e-9 (`ref_reached`). After
+  the processes ended, the triggering incumbent is checked by the independent exact checker (`check_ref_trigger`);
+  unconfirmed, the run is void (`ref_rejected`) and the pool reruns its block once with the stop off (`ref_stop_off`
+  in the job, a runtime switch outside the run id). Processes killed after the stop are `stopped_by_runner` (not
+  crashes), and the last checked incumbent is held to T in every metric, so `pt_gams` and Berthold's P are those of a
+  run to T (M0's replay checks it). run.json `ref_stop`: the reference, the records read per role, the trigger, the
+  check;
+- **`cuopt_kill_on_end`:** after a definitive outcome (`definitive_stop`: a partner's proof — exit 0 with an exit
+  reason in DEFINITIVE — or ref_reached; not a partner's crash) every cuOpt process still running is SIGKILLed at once
+  (`killed` "SIGKILL (definitive outcome)", stopped_by_runner) instead of after kill_after_s + 10 s; without the
+  switch the runner behaves as before.
+
 Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
     python -m itrea.experiments.pair --instance /tmp/toy.mps --arm A0 --seed 0 --budget 10 --set smoke
@@ -79,10 +98,12 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -92,6 +113,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
+import numpy as np
 import yaml
 
 from itrea import paths
@@ -125,14 +147,25 @@ REDIS_URL = "redis://127.0.0.1:6390/0"
 # Absent = the runner as before (no key enters the hash); present = the resolved dict (every key below) enters the run
 # hash. cuOpt keys act on every cuOpt process of the arm (A9, A6F, A2F, A6, A2, H2); cuda_cache on every process.
 HARNESS_KEYS = ("cuopt_gap_zero", "cuopt_env_unset", "cuopt_rmm_gb", "cuopt_host_gb", "cuda_cache", "cuopt_memory_void")
+# D-021 phase 2: optional switches, false by default and present in the resolved dict ONLY when true, so a harness that
+# leaves them off (every phase-1 job, preset "ext", or a dict setting them false) resolves — and hashes — as before.
+#   ref_stop           R12: the run ends when its best incumbent reaches the proven optimum (`RefMonitor`; MIPLIB =opt=
+#                      references only), stop kind `ref_reached`
+#   cuopt_kill_on_end  after a definitive outcome (a partner's proof, ref_reached) every cuOpt process still running is
+#                      SIGKILLed at once (it has no interrupt API) instead of after kill_after_s + 10 s
+HARNESS_OPTIONAL = ("ref_stop", "cuopt_kill_on_end")
 HARNESS_PRESETS: dict[str, dict] = {
     # R13 gaps 0, R14 cuOpt's thread variables unset, R29 cuOpt RMM 24 GB separate from the EA's pool and host
     # MemoryMax 24 GB, R15 the project-own CUDA JIT cache for every process; a confirmed cap hit of cuOpt voids the run
     # (R29; M3's memory probe sets cuopt_memory_void false: the cap hit is its measurement, recorded, not voided)
     "ext": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
                 cuopt_memory_void=True),
+    # ITX-1's v1 external runs (D-021 phase 2): ext + R12's stop at the proven optimum + cuOpt killed at a definitive
+    # outcome; the tier jobs (`make-jobs itx-v1`) and A0's external jobs (`itx-a0`) carry it
+    "itx1": dict(cuopt_gap_zero=True, cuopt_env_unset=True, cuopt_rmm_gb=24.0, cuopt_host_gb=24.0, cuda_cache=True,
+                 cuopt_memory_void=True, ref_stop=True, cuopt_kill_on_end=True),
 }
-_HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache", "cuopt_memory_void")
+_HARNESS_BOOL = ("cuopt_gap_zero", "cuopt_env_unset", "cuda_cache", "cuopt_memory_void") + HARNESS_OPTIONAL
 SCOPE_STOP_TIMEOUT = "5s"   # every run scope: systemd's stop (thermal-watch's `systemctl stop`) kills within 5 s, not 90
 RMM_CAP_SHARE = 0.8         # an RMM allocation error counts as cuOpt's cap only when its peak reached this share of the
                             # limit (R29's 0.8 x cap reading)
@@ -344,6 +377,13 @@ class PairOptions:
     check_memory: bool = True                  # the memory gate before launch (the pool also checks)
     record_snapshots: bool = True              # gates.snapshot() before/after (systemctl, /proc scan)
     log: Callable[[str], None] = print
+    # D-021 R12 (a harness with ref_stop): where the stop's reference comes from — a callable job -> (StopRef | None,
+    # why); None = `miplib_stop_ref` (MIPLIB 2017 =opt= lines only; tests inject a toy's optimum) — how often the
+    # runner reads the incumbent records, and whether the triggering incumbent is checked exactly after the run (off
+    # only in tests that test something else)
+    ref_lookup: Callable[[dict], tuple] | None = None
+    ref_poll_s: float = 0.5
+    ref_check: bool = True
 
 
 # ----------------------------------------------------------------------------------------------- identity
@@ -407,29 +447,36 @@ def base_config_hash(job: dict) -> str:
 
 
 def resolve_harness(spec) -> dict | None:
-    """The job-level harness (D-021) resolved to every key of HARNESS_KEYS, or None when the job has none. `spec` is a
-    preset name ("ext") or a dict {"preset": name (default "ext"), <key>: value, ...} that overrides the preset's keys
-    (M3: {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}; M1's env-only contrast: {"preset": "ext",
-    "cuopt_env_unset": false}). Unknown names or keys and wrongly typed values raise RunError. Sizes become floats, so
-    40 and 40.0 give one hash."""
+    """The job-level harness (D-021) resolved to every key of HARNESS_KEYS — plus each switch of HARNESS_OPTIONAL that
+    is on (an optional switch that is off is absent, so it leaves the dict and the run hash as they were) — or None
+    when the job has none. `spec` is a preset name ("ext", "itx1") or a dict {"preset": name (default "ext"), <key>:
+    value, ...} that overrides the preset's keys (M3: {"preset": "ext", "cuopt_rmm_gb": 40, "cuopt_host_gb": 40}; M1's
+    env-only contrast: {"preset": "ext", "cuopt_env_unset": false}; {"preset": "ext", "ref_stop": true}). Unknown names
+    or keys and wrongly typed values raise RunError. Sizes become floats, so 40 and 40.0 give one hash."""
     if spec is None:
         return None
     if isinstance(spec, str):
         if spec not in HARNESS_PRESETS:
             raise RunError(f"unknown harness {spec!r} (presets: {', '.join(HARNESS_PRESETS)})")
-        return {k: HARNESS_PRESETS[spec][k] for k in HARNESS_KEYS}
+        pre = HARNESS_PRESETS[spec]
+        out = {k: pre[k] for k in HARNESS_KEYS}
+        out.update({k: True for k in HARNESS_OPTIONAL if pre.get(k)})     # optional switches only when on
+        return out
     if not isinstance(spec, dict):
         raise RunError(f"harness must be a preset name or a dict, not {spec!r}")
     d = dict(spec)
     out = resolve_harness(d.pop("preset", "ext"))
-    unknown = sorted(set(d) - set(HARNESS_KEYS))
+    unknown = sorted(set(d) - set(HARNESS_KEYS) - set(HARNESS_OPTIONAL))
     if unknown:
-        raise RunError(f"unknown harness keys {unknown} (known: {', '.join(HARNESS_KEYS)})")
+        raise RunError(f"unknown harness keys {unknown} (known: {', '.join(HARNESS_KEYS + HARNESS_OPTIONAL)})")
     for k, v in d.items():
         if k in _HARNESS_BOOL:
             if not isinstance(v, bool):
                 raise RunError(f"harness {k} must be true or false, not {v!r}")
-            out[k] = v
+            if k in HARNESS_OPTIONAL and not v:
+                out.pop(k, None)                  # off = absent: the same dict, and hash, as a harness without it
+            else:
+                out[k] = v
         else:
             if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
                 raise RunError(f"harness {k} must be a positive number of GB, not {v!r}")
@@ -1001,6 +1048,178 @@ def _count_files(d: Path) -> int | None:
     return n
 
 
+# ------------------------------------------------------------------------------- R12: stop at the proven optimum
+REF_STOP_GAP = 1e-9                   # D-021 R12: Berthold's gap at the stop, beside GAMS's rounded gamma <= 0
+_PART_HDR = struct.Struct("<ddBi")    # a .part record's header (solvers.common / ea.engine): t, obj, source, nnz
+
+
+@dataclass(frozen=True)
+class StopRef:
+    """R12's reference: z* in the user's sense of an instance MIPLIB lists as proven optimal. Read by the runner
+    before the clock starts; no process ever receives it."""
+    value: float
+    kind: str
+    source: str
+
+
+def miplib_stop_ref(job: dict, solu_path: str | os.PathLike | None = None) -> tuple[StopRef | None, str]:
+    """R12's eligibility and reference: (StopRef, "") for a MIPLIB 2017 instance (a path under data/miplib) whose line
+    in MIPLIB's solu file is `=opt=`; (None, why) otherwise — `=best=` (supportcase22: never), no line, or any other
+    dataset (PGLib-UC, ML4CO: never)."""
+    from itrea.benchmarks import references as R
+    inst = str(job["instance"])
+    if not R.is_miplib(None, inst):
+        return None, f"{inst} is not a MIPLIB 2017 instance (R12 applies to MIPLIB =opt= references only)"
+    name = stem(inst)
+    try:
+        solu = R.read_solu(solu_path)
+    except (OSError, ValueError) as e:
+        return None, f"no MIPLIB solu file ({e})"
+    e = solu.get(name)
+    if e is None:
+        return None, f"{name} has no line in MIPLIB's solu file"
+    if e.kind != "opt" or not e.has_value:
+        return None, f"{name} is {e.kind} in MIPLIB's solu file (R12 needs a proven optimum, =opt=)"
+    return StopRef(float(e.value), "opt", "MIPLIB 2017 solu (=opt=)"), ""
+
+
+def ref_reached(obj: float, z: float, sense: int = 1, gap_tol: float = REF_STOP_GAP) -> tuple[bool, float, float]:
+    """R12's test of one objective against z*: GAMS's gamma, round((obj − z*)/max(|obj|, |z*|, 1), 6) in the objective's
+    sense (`metrics.gams_gap`), is <= 0 AND Berthold's gap (`metrics.primal_gap`) is <= gap_tol — the second guards
+    z* near 0, where GAMS's denominator of 1 alone would stop at an absolute difference of 5e-7. An objective better
+    than z* passes both (gamma 0, gap 0). Returns (reached, gamma, gap)."""
+    from itrea.analysis import metrics as M
+    g, _ = M.gams_gap(obj, z, sense)
+    b, _ = M.primal_gap(obj, z, sense)
+    return bool(g <= 0.0 and b <= gap_tol), float(g), float(b)
+
+
+class RefMonitor:
+    """D-021 R12 inside the runner. While the clock runs it tails every process's crash-safe incumbent records
+    (`<role>.incumbents.part`, the format of `solvers.common.SolverProcess.record_incumbent` and `ea.engine`), maps
+    each vector by `<role>.names.json` onto the runner's variable order, recomputes the objective c·x + offset from the
+    stored vector (c and offset were read before t0, from the runner's own parse) and reports the first record stamped
+    before `t_max` (the budget) that meets `ref_reached`. Each .part file is opened once and the descriptor kept: the
+    process unlinks the file after writing its .npz, and an open descriptor still reads every byte. A role whose names
+    the runner cannot map, or whose records do not parse, is left out with the reason (`summary`) — never a crash of
+    the run."""
+
+    def __init__(self, run_dir: Path, roles, names, c, offset: float, sense: int, ref: StopRef, t_max: float,
+                 gap_tol: float = REF_STOP_GAP):
+        self.run_dir = Path(run_dir)
+        self.index = {str(n): j for j, n in enumerate(names)}
+        self.c = np.asarray(c, dtype=np.float64)
+        self.offset, self.sense, self.ref, self.t_max, self.gap_tol = float(offset), int(sense), ref, float(t_max), \
+            float(gap_tol)
+        self.st = {r: dict(fh=None, buf=b"", k=0, cl=None, error=None, last_t=None) for r in roles}
+        self.trigger: dict | None = None
+        self.records = 0
+
+    def poll(self) -> dict | None:
+        """Read what the processes appended since the last call; the trigger (once found, always the same) or None."""
+        for role, st in self.st.items():
+            if st["error"] is None:
+                try:
+                    self._read(role, st)
+                except Exception as e:  # noqa: BLE001 — a fault of this reader leaves the role out, nothing else
+                    st["error"] = f"{type(e).__name__}: {e}"[:300]
+        return self.trigger
+
+    def _read(self, role: str, st: dict) -> None:
+        if st["cl"] is None:
+            p = self.run_dir / f"{role}.names.json"
+            if not p.exists():
+                return                                    # not recording yet (the EA starts its log at t0)
+            local = json.loads(p.read_text())
+            idx = [self.index.get(str(n)) for n in local]
+            miss = sum(1 for i in idx if i is None)
+            if miss:
+                raise ValueError(f"{miss} of {len(local)} variable names of {role} are unknown to the runner")
+            st["cl"] = self.c[np.asarray(idx, dtype=np.int64)] if idx else np.zeros(0)
+        if st["fh"] is None:
+            try:
+                st["fh"] = open(self.run_dir / f"{role}.incumbents.part", "rb")
+            except FileNotFoundError:
+                return
+        data = st["fh"].read()
+        if not data:
+            return
+        buf, off, H, cl = st["buf"] + data, 0, _PART_HDR.size, st["cl"]
+        while len(buf) - off >= H:
+            t, obj, src, nnz = _PART_HDR.unpack_from(buf, off)
+            if nnz < 0 or nnz > cl.size:
+                raise ValueError(f"record {st['k']} of {role}: {nnz} non-zeros for {cl.size} variables")
+            end = off + H + 12 * nnz
+            if end > len(buf):
+                break                                     # the rest of this record is still being written
+            ix = np.frombuffer(buf, dtype="<i4", count=nnz, offset=off + H)
+            val = np.frombuffer(buf, dtype="<f8", count=nnz, offset=off + H + 4 * nnz)
+            if nnz and (int(ix.min()) < 0 or int(ix.max()) >= cl.size):
+                raise ValueError(f"record {st['k']} of {role}: an index outside the variables")
+            o = float(np.dot(cl[ix], val)) + self.offset
+            k = st["k"]
+            st["k"] += 1
+            st["last_t"] = t
+            self.records += 1
+            if self.trigger is None and t < self.t_max and math.isfinite(o):
+                ok, g, b = ref_reached(o, self.ref.value, self.sense, self.gap_tol)
+                if ok:
+                    self.trigger = dict(role=role, k=k, t=t, obj=o, obj_reported=obj, source=int(src), gamma=g, gap=b)
+            off = end
+        st["buf"] = buf[off:]
+
+    def close(self) -> None:
+        for st in self.st.values():
+            if st["fh"] is not None:
+                try:
+                    st["fh"].close()
+                except OSError:
+                    pass
+                st["fh"] = None
+
+    def summary(self) -> dict:
+        return dict(records=self.records, trigger=self.trigger,
+                    roles={r: dict(records=st["k"], last_t=st["last_t"], error=st["error"]) for r, st in self.st.items()})
+
+
+def check_ref_trigger(run_dir: Path, trig: dict, instance: str, ref: StopRef, sense: int, arm: str,
+                      gap_tol: float = REF_STOP_GAP) -> dict:
+    """R12's confirmation, after the processes ended: the incumbent that triggered the stop is taken from its role's
+    `<role>.incumbents.npz` (recovered from the .part file for a killed process) — record k, or the record with the
+    same time and reported objective —, checked by the independent exact checker (`check_solutions`, the other
+    library's parse) and its EXACT objective must meet `ref_reached` too. Returns {ok, reason, ...}; ok False makes the
+    run void (`ref_rejected`: rerun once with the stop off). A model the checker cannot read is not a confirmation."""
+    from itrea.analysis import check_solutions as CS
+    from itrea.trace import load_incumbents
+    role, k = trig["role"], int(trig["k"])
+    out: dict = dict(role=role, k=k, ok=False)
+    try:
+        names, recs = load_incumbents(run_dir / f"{role}.incumbents.npz")
+    except (OSError, ValueError, KeyError) as e:
+        return dict(out, reason=f"no stored incumbents for {role}: {type(e).__name__}: {e}"[:300])
+    same = lambda r: r[0] == trig["t"] and r[1] == trig["obj_reported"]      # noqa: E731
+    if not (k < len(recs) and same(recs[k])):
+        hits = [i for i, r in enumerate(recs) if same(r)]
+        if not hits:
+            return dict(out, reason=f"the triggering record ({role} #{k}, t {trig['t']:.6f}) is not among the "
+                                    f"{len(recs)} stored incumbents")
+        k = out["k_stored"] = hits[0]
+    t, obj, src, x = recs[k]
+    try:
+        prod = CS.producer_of(role, _summary(run_dir, role), arm)
+        model = CS.ModelCache(1).get(instance, CS.reader_for(prod))
+        r = CS.check_named(model, names, x, obj)
+    except Exception as e:  # noqa: BLE001 — unchecked is not confirmed
+        return dict(out, reason=f"unchecked: {type(e).__name__}: {e}"[:300])
+    oc = float(r["obj_recomputed"])
+    reached, g, b = ref_reached(oc, ref.value, sense, gap_tol) if math.isfinite(oc) else (False, math.nan, math.nan)
+    ok = bool(r["ok"] and reached)
+    why = "" if ok else (f"the checker rejects it ({r['reason']})" if not r["ok"] else
+                         f"its exact objective {oc!r} does not meet the stop (gamma {g:g}, gap {b:.3g})")
+    return dict(out, ok=ok, reason=why, producer=prod, reader=model.reader, feasible=bool(r["feasible"]),
+                obj_recomputed=oc, gamma_exact=g, gap_exact=b, checker_version=CS.CHECKER_VERSION)
+
+
 # --------------------------------------------------------------------------------------------------- run
 def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     """Run one job; returns the run record (also written to <run_dir>/run.json). Raises RunError (nothing launched)
@@ -1029,6 +1248,21 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     # keep only what the record needs: the parsed arrays would otherwise sit in the (unbudgeted) runner for the
     # whole run, once per lane
     names, sense, prob_summary = list(prob.names), prob.sense, prob.summary()
+    # D-021 R12: the stop's reference and the objective (c, offset) are read here, before the clock; no process
+    # receives either. `ref_stop_off` (set by the pool on the rerun of a block voided by `ref_rejected`) is a runtime
+    # switch outside the run id.
+    ref_rec, stop_ref, obj_c, obj_off = None, None, None, 0.0
+    if harness is not None and harness.get("ref_stop"):
+        if job.get("ref_stop_off"):
+            ref_rec = dict(enabled=False, reason=f"off for this attempt: {job['ref_stop_off']}")
+        else:
+            stop_ref, why = (opts.ref_lookup or miplib_stop_ref)(job)
+            if stop_ref is None:
+                ref_rec = dict(enabled=False, reason=f"not eligible: {why}")
+            else:
+                ref_rec = dict(enabled=True, reason="", z=stop_ref.value, kind=stop_ref.kind, source=stop_ref.source,
+                               sense=sense, gap_tol=REF_STOP_GAP, poll_s=opts.ref_poll_s)
+                obj_c, obj_off = np.array(prob.c, dtype=np.float64), float(prob.offset)
     del prob
 
     procs = plan(job, opts, run_dir, spec, cfg)
@@ -1074,6 +1308,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     # D-021 R28: the start temperature and the fan governor's state at the start (and at the end, below)
     rec["acpi_start_c"] = (rec["gates_before"] or {}).get("acpi_max_c")
     rec["fan_state_start"] = gates.fan_state() if opts.record_snapshots else None
+    rec["ref_stop"] = ref_rec                          # D-021 R12 (None: the job's harness has no ref_stop)
     if harness is not None and harness["cuda_cache"]:
         opts.cuda_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1094,6 +1329,7 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     t0 = None
     cache_t0 = None
     stop_info: dict | None = None
+    monitor: RefMonitor | None = None
     opts.cupy_cache_dir.mkdir(parents=True, exist_ok=True)
     try:
         # ---------------------------------------------------------------- launch
@@ -1152,7 +1388,9 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
             t0 = mb.release()
             rec["t0"], rec["t0_epoch"] = t0, time.time()
             t_end = t0 + float(job["budget"]) + opts.grace_s
-            next_acpi = 0.0
+            next_acpi = next_ref = 0.0
+            if stop_ref is not None:
+                monitor = RefMonitor(run_dir, arm.roles, names, obj_c, obj_off, sense, stop_ref, float(job["budget"]))
             while True:
                 alive = [p for p in procs if p.poll() is None]
                 if not alive:
@@ -1173,13 +1411,23 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
                 if now >= t_end:
                     stop_info = dict(reason="budget + grace", t=now - t0, kind="budget")
                     break
+                if monitor is not None and now >= next_ref:      # D-021 R12: the proven optimum reached
+                    next_ref = now + opts.ref_poll_s
+                    trig = monitor.poll()
+                    if trig is not None:
+                        stop_info = dict(reason=f"ref_reached: {trig['role']} incumbent #{trig['k']} at "
+                                                f"t {trig['t']:.3f} s, objective {trig['obj']!r} (z* {stop_ref.value!r},"
+                                                f" gamma {trig['gamma']:g}, gap {trig['gap']:.3g})",
+                                         t=time.monotonic() - t0, kind="ref_reached")
+                        break
                 ended = [p for p in procs if p.exit_code is not None]
                 decisive = [p for p in ended if p.exit_code != 0 or _exit_reason(run_dir, p.role) in DEFINITIVE]
                 if decisive and opts.stop_partners_on_exit:
                     stop_info = dict(reason=", ".join(
                         f"{p.role} ended rc={p.exit_code}" + (f" ({_exit_reason(run_dir, p.role)})" if p.exit_code == 0
                                                               else "") for p in decisive), t=now - t0,
-                        kind="partner_end")
+                        kind="partner_end",
+                        proven=any(p.exit_code == 0 and _exit_reason(run_dir, p.role) in DEFINITIVE for p in decisive))
                     break
                 time.sleep(0.2)
         else:
@@ -1213,6 +1461,13 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
                         p.signal(signal.SIGKILL)
                 _wait_or_kill(procs, ABORT_KILL_AFTER_S)
             else:
+                if harness is not None and harness.get("cuopt_kill_on_end") and definitive_stop(stop_info):
+                    # D-021 phase 2: the outcome is decided (a partner's proof, or R12's ref_reached) and cuOpt cannot
+                    # be interrupted — SIGKILL it at once instead of after kill_after_s + 10 s (stopped_by_runner)
+                    for p in procs:
+                        if p.spec.kind == "cuopt" and p.popen is not None and p.poll() is None:
+                            p.killed = "SIGKILL (definitive outcome)"
+                            p.signal(signal.SIGKILL)
                 _wait_or_kill(procs, opts.kill_after_s)
         if sampler is not None and own_sampler:
             sampler.stop()
@@ -1229,8 +1484,10 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
         # A process the runner killed because a partner ended the race (a proven outcome, or a crash that keeps its
         # own rc) is stopped_by_runner, not a crash of its own: cuOpt cannot be interrupted, so after a partner's
         # proof it is SIGKILLed after kill_after_s; build_runs must not count it in the per-arm crash numbers.
+        # A run that R12 stopped at the proven optimum (`ref_reached`) is treated the same way: the processes the
+        # runner killed then are stopped_by_runner, and the run's last checked incumbent is held to T in every metric.
         for p in procs:
-            p.stopped_by_runner = bool(p.killed and (stop_info or {}).get("kind") == "partner_end")
+            p.stopped_by_runner = bool(p.killed and (stop_info or {}).get("kind") in ("partner_end", "ref_reached"))
         rec["processes"] = [_proc_record(p, t0) for p in procs]
         rec["exit_codes"] = {p.role: p.exit_code for p in procs}
         for p in procs:   # a crashed process: its crash-safe .part file becomes <role>.incumbents.npz, so the
@@ -1240,6 +1497,18 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
                     recover_incumbents(run_dir, p.role)
                 except Exception as e:  # noqa: BLE001 — recovery is best effort; the reason is recorded
                     reasons.append(f"recover {p.role} incumbents: {e!r}")
+        if monitor is not None:                          # D-021 R12: what the runner read, and the confirmation
+            monitor.close()
+            ref_rec.update(monitor.summary())
+            trig = monitor.trigger
+            if trig is not None and (stop_info or {}).get("kind") == "ref_reached":
+                trig["detected_t"] = round(float(stop_info["t"]), 6)
+                if opts.ref_check:
+                    try:
+                        ref_rec["check"] = check_ref_trigger(run_dir, trig, job["instance"], stop_ref, sense,
+                                                             arm_label(job))
+                    except Exception as e:  # noqa: BLE001 — an unconfirmed stop voids the run
+                        ref_rec["check"] = dict(ok=False, reason=f"check failed: {type(e).__name__}: {e}"[:300])
         rec["wall_s"] = (max((p.exit_mono or time.monotonic()) for p in procs) - t0) if t0 else None
         # GPU health over the timed window
         if sampler is not None:
@@ -1291,7 +1560,15 @@ def run_pair(job: dict, opts: PairOptions | None = None) -> dict:
     return rec
 
 
-VOID_ORDER = ("thermal_watch", "gpu_cap", "cuopt_memory", "external_kill", "compiled_on_clock")   # by precedence
+VOID_ORDER = ("thermal_watch", "gpu_cap", "cuopt_memory", "external_kill", "compiled_on_clock",
+              "ref_rejected")                                                                       # by precedence
+
+
+def definitive_stop(stop_info: dict | None) -> bool:
+    """The run's outcome is decided: R12's ref_reached, or a partner that ended with a proven outcome (exit 0 and an
+    exit reason in DEFINITIVE) — not a partner's crash."""
+    s = stop_info or {}
+    return s.get("kind") == "ref_reached" or (s.get("kind") == "partner_end" and bool(s.get("proven")))
 
 
 def cuda_cache_on_clock(d: Path, t0_epoch: float | None) -> dict:
@@ -1419,7 +1696,10 @@ def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc]
       host cap (`cap_kill`: an arm outcome for SCIP / the EA, cuopt_memory or an arm outcome for cuOpt) nor
       thermal-watch's stop;
     - compiled_on_clock (R15, with a harness whose cuda_cache is on): an entry of the project's CUDA cache, or of the
-      EA's CuPy cache, written after t0 (the same terms for both GPU codes)."""
+      EA's CuPy cache, written after t0 (the same terms for both GPU codes);
+    - ref_rejected (R12, a harness with ref_stop): the incumbent that triggered the stop at the proven optimum is not
+      confirmed by `check_ref_trigger` (the exact checker rejects it, its exact objective misses the stop, or it could
+      not be checked); the pool reruns the block once with the stop off."""
     out: list[tuple[str, str]] = []
     info: dict = {}
     capped: dict[str, str] = {}            # once per process: reading a scope's Result resets the scope
@@ -1501,6 +1781,10 @@ def void_checks(job: dict, arm: ArmSpec, harness: dict | None, procs: list[Proc]
             why.append(f"CuPy cache grew after t0 ({cp.get('files_at_t0')} -> {cp.get('files_at_end')} files)")
         if why:
             out.append(("compiled_on_clock", "; ".join(why)))
+    chk = (rec.get("ref_stop") or {}).get("check")
+    if chk is not None and not chk.get("ok"):           # D-021 R12: the stop was not confirmed by the exact checker
+        out.append(("ref_rejected", f"the incumbent that triggered the stop at the proven optimum is not confirmed: "
+                                    f"{chk.get('reason')}"))
     return sorted(out, key=lambda x: VOID_ORDER.index(x[0])), info
 
 

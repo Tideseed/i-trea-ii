@@ -586,6 +586,44 @@ def test_d021_voids_requeue_once_then_skip(env, monkeypatch, cause):
     assert any(auto_waits) == (cause == "gpu_cap")
 
 
+def test_ref_rejected_reruns_the_block_once_with_the_stop_off(env, monkeypatch):
+    """D-021 R12: a block voided by ref_rejected (the stop's incumbent not confirmed) is rerun first and whole with
+    `ref_stop_off` in every job of the rerun — the same run ids —, once; a resumed pool finds the earlier void in the
+    set's void.jsonl and keeps the stop off."""
+    tmp_path, fake, insts = env
+    jobs = [dict(j, harness="itx1") for j in _jobs(insts, ["A6F", "A9"])]
+    first: dict = {}
+    seen = []
+
+    def script(i, job):
+        first.setdefault("block", job["block"])
+        seen.append((job["block"], job["arm"], job.get("ref_stop_off")))
+        if job["block"] == first["block"] and job["arm"] == "A6F" and not job.get("ref_stop_off"):
+            return "void", "ref_rejected", None
+        return "completed", None, None
+    run_pair, calls = _fake_run_pair(tmp_path, script)
+    monkeypatch.setattr(pair, "run_pair", run_pair)
+    p = pool.Pool(jobs, popts(tmp_path, fake, governor=False, max_heat_voids=0))
+    monkeypatch.setattr(gates, "check_serving_stopped", lambda *a, **k: None)
+    assert p.run() == 0 and p.halt_reason is None
+    assert p.counts["requeues"] == {"ref_rejected": 1} and not p.counts["blocks_skipped_cause"]
+    reruns = [s for s in seen if s[0] == first["block"] and s[2]]
+    assert len(reruns) == 2 and all("rerun after ref_rejected" in s[2] for s in reruns)       # the whole block
+    assert all(s[2] is None for s in seen if s[0] != first["block"])
+    po = popts(tmp_path, fake).pair_opts
+    j0 = next(j for j in jobs if j["block"] == first["block"])
+    assert pair.run_id_for(dict(j0, ref_stop_off="x"), po) == pair.run_id_for(j0, po)
+    # resume: the rerun's directories are gone (interrupted), the void.jsonl line remains
+    import shutil
+    for d in (tmp_path / "traces" / "raw" / "pytest").iterdir():
+        if d.is_dir() and d.name != "void" and d.name.startswith(Path(j0["instance"]).stem):
+            shutil.rmtree(d)
+    seen.clear()
+    p = pool.Pool(jobs, popts(tmp_path, fake, governor=False, max_heat_voids=0))
+    assert p.run() == 0
+    assert seen and all(s[2] and "void.jsonl, resume" in s[2] for s in seen if s[0] == first["block"])
+
+
 def test_thermal_watch_void_requeues_as_thermal(env, monkeypatch):
     tmp_path, fake, insts = env
     run_pair, calls = _fake_run_pair(tmp_path, lambda i, j: ("void", "thermal_watch", None) if i == 0
