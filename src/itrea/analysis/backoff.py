@@ -13,6 +13,7 @@ highest attempt.
 
     itrea backoff-report --stage 0 [--set backoff0] [--runs datasets/runs.parquet] [--json out.json]
     itrea backoff-report --stage 1 [--set backoff1] [--stage0-set backoff0] [--json out.json]
+    itrea backoff-report --stage 1y [--set backoff2] [--failed both|keep|exclude] [--json out.json]
 
 Stage 0 (seed 2; chromaticindex1024-7, sing44, comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}; ca and
 glass4 x A9@bo0; sing44 x A2, the zero-duty reference of rule (b), D-018 amendment: 18 runs). Readouts: S_first =
@@ -50,6 +51,30 @@ noise rule (a guard failing by the letter while bo1 never left level 0 and phase
 sing44 fallbacks, "T fails with M2 failing" and "inside the band" are classified and printed. Adopt only if T, G, F,
 the mean guard and M1–M5 hold. The D-013 weak-set report, the relay latency (cuOpt send -> SCIP incumbent made from
 it) and the HiGHS LP-point arrival are reported, not judged.
+
+Stage 1y (D-023, phase Y only; 2026-10-12, fixed before any run): A9@boY (bo1's values, active, the ladder disabled by
+patience 100000 s) vs the control A9@bo1s, same-day A6F (cuOpt alone on A9's footprint, D-021) in A6's place, set
+backoff2, the 14 instances x seeds 0–1, under D-022's harness. Outcome: D-018 stage 1's rules unchanged — T, G (noise
+rule, guard-set mean, "still beats A6F"), the ladder targets, F, the mean guard; band_i on the control or A6F — the
+same code as stage 1 with the arms as parameters. Mechanism, D-023 exactly:
+  - M1: phase Y ends within 1.0 s of the first posted partner incumbent on every boY run where a partner posted (the
+    runs without a post are listed as n/a, as in D-018);
+  - M2: chromaticindex's cuOpt first incumbent inside boY <= 2 x A6F's on both seeds (censoring as in D-018's M2);
+  - M3: the EA's material leads under boY >= 0.8 x the control's on item_placement, loue, neos-960392 and crna,
+    each SUMMED over the two seeds (no first-lead or level-0 limb);
+  - M4: boY's busy share in phase Y <= 0.6, read POOLED over the arm: the sum of the summaries' `phase_y.exit_busy_s`
+    over the sum of `phase_y.exit_t` (wall) over every boY run (a phase Y that never ended: `length_s` and
+    `busy_per_level["Y"]`). Not per run: no sleep falls due before the token bucket's credit reaches −burst_s, so a
+    phase Y shorter than ~0.5 s has share 1.0 by construction (bo1's stage-1 runs: 9 of 14 at seed 0); the per-run
+    shares are printed;
+  - M5: the busy / paused accounting of every boY `rclock` event within 2 % (D-018's accounting leg) and local-search
+    cap hits per call within +0.10 of the same-seed control's.
+D-018's own M1 (0.5 s), M3 (per seed, with the first-lead and level-0 limbs) and M5 (every leg, cap hits +0) are
+computed on the same runs and printed beside (`mechanism_d018`, not gating). Adopt boY only if M1–M5, T, G, the
+ladder, F and the mean guard all hold: D-023 asks every outcome rule to hold and lists the ladder targets among them,
+whereas D-018 stage 1 (design §5) reported the ladder without gating — stage 1 keeps that. Failed runs: both readings
+(`--failed both`, the default for 1y): kept as D-002 §6 keeps crashes in full, the excluded reading's verdict beside.
+In 1y's result the effect keys keep stage 1's names (`*_bo1` = boY, `*_bo0` = the control, `*_A6` = A6F).
 """
 from __future__ import annotations
 
@@ -70,6 +95,7 @@ from itrea.trace import read_events
 # ----------------------------------------------------------------------------------------------- the design's names
 A6, A2, BO0, BO1 = "A6", "A2", "A9@bo0", "A9@bo1"
 CTRL1 = "A9@bo1s"                         # stage-1 control: bo1's values in shadow mode (2026-10-09; its would-be timeline is bo1's)
+BOY, A6F = "A9@boY", "A6F"                # stage 1y (D-023): the treatment (phase Y only); cuOpt alone on A9's F
 FORCED = {"A9@bof50": 0.5, "A9@bof25": 0.25, "A9@bof12": 0.125}
 DUTIES = (0.5, 0.25, 0.125)
 STAGE0_SEED = 2
@@ -102,6 +128,9 @@ P960_MIN, FLOOR_DP = 0.01, 0.005
 M1_S, M2_X, M3_LEADS, M3_FIRST_S, M3_FIRST_F, M3_L0 = 0.5, 2.0, 0.8, 2.0, 0.10, 0.90
 M4_LATE, M4_FROM, M4_SHARE, M4_STEPS, M4_UTIL = 30.0, 60.0, 0.1, 0.5, 3
 M5_ACC, M5_STOP = 0.02, 0.25
+# stage-1y thresholds (D-023, fixed before any run): M1's phase-Y exit latency relaxed to 1.0 s; M3 on leads summed
+# over the seeds; M4 the arm's busy share in phase Y; M5 cap hits per call within +0.10 of the control's
+Y_M1_S, Y_M3_LEADS, Y_M4_SHARE, Y_M5_CAP = 1.0, 0.8, 0.6, 0.10
 REL_TOL = 1e-9
 
 
@@ -616,12 +645,13 @@ def _d(R, inst, arm, ctrl, col="pt") -> tuple[float, float, float]:
     return effect_d(pc, pa), pa, pc
 
 
-def _band(R, inst) -> float:
+def _band(R, inst, ctrl: str = CTRL1, a6: str = A6) -> float:
     """band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference of the CONTROL or of A6) (D-018). The control
     is CTRL1 since 2026-10-09; until 2026-10-11 this read BO0, which stage 1 never runs, so every band fell back to A6's
-    spread (or 0.05) — fixed before the stage-1 verdict was recorded (journal 2026-10-11)."""
+    spread (or 0.05) — fixed before the stage-1 verdict was recorded (journal 2026-10-11). Stage 1y: the same control,
+    A6F in A6's place."""
     vals = []
-    for arm in (CTRL1, A6):
+    for arm in (ctrl, a6):
         p = _pmeans(R, inst, arm)
         if 0 in p and 1 in p:
             vals.append(bounded(p[0], p[1]))
@@ -636,47 +666,48 @@ def _all_inc(inc, run_id, T) -> list[tuple[float, float]]:
     return sorted(zip(g["t"].astype(float), g["obj_recomputed"].astype(float)))
 
 
-def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff1", root: Path = ROOT,
-           stage0_set: str | None = "backoff0") -> dict:
-    """The stage-1 criteria (module docstring). Returns {mechanism, outcome, classification, reports, verdict}."""
-    R = load(runs, set_name, root)
-    notes: list[str] = []
-    missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BO1, A6) for s in STAGE1_SEEDS if (i, a, s) not in R]
-    d_min = None
-    for (i, a, s), r in R.items():
-        if a == BO1 and r.bo:
-            d_min = 2.0 ** -int(r.bo.get("levels", 2))
-            break
-    # ------------------------------------------------------------------------ effects
+def _effects(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
+    """Per instance of STAGE1: d of the treatment vs the control (seed means), both against the cuOpt-alone arm, the
+    band. The keys keep stage 1's names: `*_bo1` = the treatment, `*_bo0` = the control, `*_A6` = the cuOpt-alone arm
+    (A6F in stage 1y)."""
     eff = {}
     for i in STAGE1:
-        d, pa, pc = _d(R, i, BO1, CTRL1)
-        d0a6, _, _ = _d(R, i, CTRL1, A6)
-        d1a6, _, _ = _d(R, i, BO1, A6)
-        p0 = _pmeans(R, i, CTRL1)
-        eff[i] = dict(d=d, p_bo1=pa, p_bo0=pc, dP=pc - pa if _fin(pa) and _fin(pc) else math.nan, band=_band(R, i),
-                      d_bo0_vs_A6=d0a6, d_bo1_vs_A6=d1a6,
+        d, pa, pc = _d(R, i, treat, ctrl)
+        d0a6, _, _ = _d(R, i, ctrl, a6)
+        d1a6, _, _ = _d(R, i, treat, a6)
+        p0 = _pmeans(R, i, ctrl)
+        eff[i] = dict(d=d, p_bo1=pa, p_bo0=pc, dP=pc - pa if _fin(pa) and _fin(pc) else math.nan,
+                      band=_band(R, i, ctrl, a6), d_bo0_vs_A6=d0a6, d_bo1_vs_A6=d1a6,
                       bo0_spread=abs(p0[0] - p0[1]) if 0 in p0 and 1 in p0 else math.nan)
-    # ------------------------------------------------------------------------ mechanism
-    mech: dict = {}
-    # M1
-    m1 = []
+    return eff
+
+
+def _m1_rows(R, treat: str = BO1, limit_s: float = M1_S) -> tuple[list[dict], list[dict]]:
+    """M1's rows: phase Y of every treatment run ends within `limit_s` of the first posted partner incumbent; and the
+    runs where no partner posted (the rule does not apply: n/a)."""
+    m1, na = [], []
     for i in STAGE1:
         for s in STAGE1_SEEDS:
-            r = R.get((i, BO1, s))
+            r = R.get((i, treat, s))
             if r is None:
                 continue
             tp = r.first_post()
             if not _fin(tp):
+                na.append(dict(instance=i, seed=s, exit_t=r.phase_y()[0], reason=r.phase_y()[1]))
                 continue
             tx, why = r.phase_y()
-            ok = _fin(tx) and tx <= tp + M1_S
+            ok = _fin(tx) and tx <= tp + limit_s
             m1.append(dict(instance=i, seed=s, partner_t=tp, exit_t=tx, reason=why, ok=bool(ok)))
-    mech["M1"] = dict(ok=bool(m1) and all(x["ok"] for x in m1), rows=m1)
-    # M2
+    return m1, na
+
+
+def _m2(R, treat: str = BO1, a6: str = A6, tlabel: str = "bo1", alabel: str = "A6") -> dict:
+    """M2: chromaticindex's cuOpt first incumbent inside the treatment <= M2_X x the cuOpt-alone arm's, both seeds (a
+    censored treatment time fails unless the reference's is censored too — reported). Row keys keep stage 1's names
+    (`t_bo1` = the treatment, `t_A6` = the cuOpt-alone arm)."""
     m2 = []
     for s in STAGE1_SEEDS:
-        r, a = R.get((CHROMATIC, BO1, s)), R.get((CHROMATIC, A6, s))
+        r, a = R.get((CHROMATIC, treat, s)), R.get((CHROMATIC, a6, s))
         if r is None or a is None:
             m2.append(dict(seed=s, ok=False, why="missing run"))
             continue
@@ -686,16 +717,22 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
             m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=False, why="no cuOpt time"))
         elif cb and ca:
             m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=True,
-                           why="both censored: cuOpt found nothing in bo1 nor in A6 (reported, not failed)"))
+                           why=f"both censored: cuOpt found nothing in {tlabel} nor in {alabel} (reported, not "
+                               "failed)"))
         else:
             m2.append(dict(seed=s, t_bo1=tb, t_A6=ta, ok=bool(not cb and (ca or tb <= M2_X * ta)),
-                           why="bo1 censored" if cb else None))
-    mech["M2"] = dict(ok=all(x["ok"] for x in m2), rows=m2)
-    # M3
+                           why=f"{tlabel} censored" if cb else None))
+    return dict(ok=all(x["ok"] for x in m2), rows=m2)
+
+
+def _m3_d018(R, treat: str = BO1, ctrl: str = CTRL1) -> dict:
+    """D-018's M3: per seed, the treatment's material leads >= M3_LEADS x the control's, its first lead not later than
+    the control's + max(M3_FIRST_S, M3_FIRST_F x it), and on item_placement level 0 for >= M3_L0 of the time up to the
+    control's last lead."""
     m3 = []
     for i in M3_SET:
         for s in STAGE1_SEEDS:
-            r, c = R.get((i, BO1, s)), R.get((i, CTRL1, s))
+            r, c = R.get((i, treat, s)), R.get((i, ctrl, s))
             if r is None or c is None:
                 m3.append(dict(instance=i, seed=s, ok=False, why="missing run"))
                 continue
@@ -715,64 +752,55 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
                 ok = ok and ok_l0
             row["ok"] = bool(ok)
             m3.append(row)
-    mech["M3"] = dict(ok=all(x["ok"] for x in m3), rows=m3)
-    # M4
-    m4, util = [], {}
-    for i in M4_SET:
-        u1, u0 = [], []
-        for s in STAGE1_SEEDS:
-            r, c = R.get((i, BO1, s)), R.get((i, CTRL1, s))
-            if r is None or c is None:
-                continue
-            if any(t > M4_LATE for t in c.leads()):
-                m4.append(dict(instance=i, seed=s, applies=False))
-                continue
-            sh1, st1 = r.window_rates(M4_FROM)
-            _, st0 = c.window_rates(M4_FROM)
-            ok_sh = _fin(sh1) and d_min is not None and sh1 <= d_min + M4_SHARE
-            ok_st = _fin(st1) and _fin(st0) and st1 <= M4_STEPS * st0
-            m4.append(dict(instance=i, seed=s, applies=True, busy_share=sh1, steps_bo1=st1, steps_bo0=st0,
-                           share_ok=bool(ok_sh), steps_ok=bool(ok_st), ok=bool(ok_sh and ok_st)))
-            u1.append(r.mean_util())
-            u0.append(c.mean_util())
-        if u1:
-            util[i] = dict(bo1=float(np.nanmean(u1)), bo0=float(np.nanmean(u0)),
-                           lower=bool(np.nanmean(u1) < np.nanmean(u0)))
-    app = [x for x in m4 if x.get("applies")]
-    need = min(M4_UTIL, _ceil(0.75 * len(util))) if util else 0
-    n_lower = sum(1 for v in util.values() if v["lower"])
-    mech["M4"] = dict(ok=all(x["ok"] for x in app) and n_lower >= need, rows=m4, util=util,
-                      util_lower=n_lower, util_needed=need, D_min=d_min)
-    # M5
+    return dict(ok=all(x["ok"] for x in m3), rows=m3)
+
+
+def _cap_per_call(v: RunView) -> float:
+    """Local-search cap hits per call of a run's EA (0 without calls)."""
+    sm = v.summary()
+    n = _f(sm.get("ls_calls"))
+    return _f(sm.get("ls_cap_hits", 0)) / n if n > 0 else 0.0
+
+
+def _accounting_rows(r: RunView, i: str, s: int) -> tuple[list[dict], list[dict]]:
+    """M5's accounting legs on one treatment run's `rclock` events: generation seconds + paused seconds = the
+    governor's wall seconds within max(M5_ACC x wall, 1 ms), and the repair clock's overhead o = gen − capped-call
+    seconds never negative."""
+    acc, o_s = [], []
+    for e in r.kind("rclock"):
+        if "bo_wall_s" not in e:
+            continue
+        w, g, p = _f(e.get("bo_wall_s")), _f(e.get("gen_s")), _f(e.get("bo_paused_s"))
+        if _fin(w) and abs(g + p - w) > max(M5_ACC * w, 1e-3):
+            acc.append(dict(instance=i, seed=s, gen=e.get("gen"), wall=w, gen_s=g, paused=p))
+        cf = sum(_f(c.get("s")) for c in (e.get("calls") or []) if c.get("cf"))
+        if _fin(g) and g - cf < -1e-3:
+            o_s.append(dict(instance=i, seed=s, gen=e.get("gen"), o_raw=g - cf))
+    return acc, o_s
+
+
+def _m5_d018(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
+    """D-018's M5: accounting, o >= 0, cap hits per call not above the control's, no overrun past the stop, every
+    incumbent checked, GPU health ok."""
     m5 = dict(accounting=[], o_s=[], cap_hits=[], overrun=[], checked=[], gpu=[])
     for (i, a, s), r in sorted(R.items()):
-        if a not in (CTRL1, BO1, A6):
+        if a not in (ctrl, treat, a6):
             continue
-        if a in (CTRL1, BO1):
+        if a in (ctrl, treat):
             if int(r.get("n_inc_unchecked", 0)) > 0 or int(r.get("n_inc_failed", 0)) > 0:
                 m5["checked"].append(dict(instance=i, arm=a, seed=s, unchecked=r.get("n_inc_unchecked"),
                                           failed=r.get("n_inc_failed")))
         if str(r.get("gpu_health", "ok") or "ok") not in ("ok",) or bool(r.get("gpu_void", False)):
             m5["gpu"].append(dict(instance=i, arm=a, seed=s, gpu_health=r.get("gpu_health")))
-        if a != BO1:
+        if a != treat:
             continue
-        for e in r.kind("rclock"):
-            if "bo_wall_s" not in e:
-                continue
-            w, g, p = _f(e.get("bo_wall_s")), _f(e.get("gen_s")), _f(e.get("bo_paused_s"))
-            if _fin(w) and abs(g + p - w) > max(M5_ACC * w, 1e-3):
-                m5["accounting"].append(dict(instance=i, seed=s, gen=e.get("gen"), wall=w, gen_s=g, paused=p))
-            cf = sum(_f(c.get("s")) for c in (e.get("calls") or []) if c.get("cf"))
-            if _fin(g) and g - cf < -1e-3:
-                m5["o_s"].append(dict(instance=i, seed=s, gen=e.get("gen"), o_raw=g - cf))
-        c = R.get((i, CTRL1, s))
+        acc, o_s = _accounting_rows(r, i, s)
+        m5["accounting"] += acc
+        m5["o_s"] += o_s
+        c = R.get((i, ctrl, s))
         if c is not None:
-            def per_call(v):
-                sm = v.summary()
-                n = _f(sm.get("ls_calls"))
-                return _f(sm.get("ls_cap_hits", 0)) / n if n > 0 else 0.0
-            if per_call(r) > per_call(c) + 1e-12:
-                m5["cap_hits"].append(dict(instance=i, seed=s, bo1=per_call(r), bo0=per_call(c)))
+            if _cap_per_call(r) > _cap_per_call(c) + 1e-12:
+                m5["cap_hits"].append(dict(instance=i, seed=s, bo1=_cap_per_call(r), bo0=_cap_per_call(c)))
         sm = r.summary()
         wall, budget = _f(sm.get("wall_s")), _f(r.get("budget"))
         stop = r.run_json().get("stop") or {}
@@ -782,27 +810,19 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
         slack = _f(r.bo.get("max_launch_s")) + M5_STOP
         if _fin(wall) and _fin(end_ref) and wall - end_ref > (slack if _fin(slack) else M5_STOP):
             m5["overrun"].append(dict(instance=i, seed=s, wall=wall, end_ref=end_ref, slack=slack))
-    mech["M5"] = dict(ok=not any(m5.values()), **m5)
-    # M6 (reported): the control's would-be first step down against its first lead, guard instances
-    m6 = []
-    for i in GUARDS:
-        for s in STAGE1_SEEDS:
-            c = R.get((i, CTRL1, s))
-            if c is None:
-                continue
-            te, be = c.first_escalation()
-            m6.append(dict(instance=i, seed=s, would_escalate_t=te, would_escalate_busy=be, first_lead=c.first_lead(),
-                           before_lead=bool(_fin(te) and (not _fin(c.first_lead()) or te < c.first_lead()))))
-    mech["M6"] = dict(rows=m6)
-    mech_ok = all(mech[k]["ok"] for k in ("M1", "M2", "M3", "M4", "M5"))
-    # ------------------------------------------------------------------------ outcome
+    return dict(ok=not any(m5.values()), **m5)
+
+
+def _outcome(R, inc, eff: dict, treat: str = BO1, a6: str = A6) -> tuple[dict, list, list, list]:
+    """D-018 stage 1's outcome rules: T, G (with the noise rule, the guard-set mean and "still beats A6"), the ladder
+    targets, F and the mean guard over the 11 non-floor instances. Returns (out, guard rows, ladder rows, noise)."""
     out: dict = {}
     e = eff[CHROMATIC]
     out["T"] = dict(ok=bool(_fin(e["d"]) and e["d"] >= T_D and _fin(e["p_bo1"]) and e["p_bo1"] <= T_P),
                     d=e["d"], p_bo1=e["p_bo1"])
 
     def noise(i) -> bool:
-        rs = [R.get((i, BO1, s)) for s in STAGE1_SEEDS]
+        rs = [R.get((i, treat, s)) for s in STAGE1_SEEDS]
         rs = [r for r in rs if r is not None]
         return bool(rs) and all(r.max_level_p() == 0 and _fin(r.phase_y()[0]) and r.phase_y()[0] < 1.0 for r in rs)
     g_rows, noise_list = [], []
@@ -839,24 +859,30 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
     for i in FLOOR:
         e = eff[i]
         row = dict(instance=i, dP=e["dP"], ok=bool(_fin(e["dP"]) and abs(e["dP"]) <= FLOOR_DP))
-        row["seconds"] = floor_seconds(R, inc, i)
+        row["seconds"] = floor_seconds(R, inc, i, treat=treat, a6=a6)
         f_rows.append(row)
     out["F"] = dict(ok=all(r["ok"] for r in f_rows), rows=f_rows)
     nf = [eff[i]["d"] for i in STAGE1 if i not in FLOOR and _fin(eff[i]["d"])]
     out["mean_guard"] = dict(ok=bool(nf and float(np.mean(nf)) >= 0.0), mean_d=float(np.mean(nf)) if nf else math.nan,
                              n=len(nf))
-    # ------------------------------------------------------------------------ classification of failures
+    return out, g_rows, l_rows, noise_list
+
+
+def _classify(R, runs: pd.DataFrame, eff: dict, out: dict, m2_ok: bool, g_rows, l_rows, noise_list,
+              stage0_set: str | None, root: Path, treat: str = BO1, ctrl: str = CTRL1, tlabel: str = "bo1") -> list:
+    """The failure classes D-018 names (the ca / glass4 / sing44 fallbacks, "T fails with M2 failing", "inside the
+    band")."""
     cls: list[str] = []
     ca_row = next(r for r in g_rows if r["instance"] == CA)
     if not ca_row["ok"] and CA not in noise_list:
-        cls.append(classify_ca(R, runs, stage0_set, root))
+        cls.append(classify_ca(R, runs, stage0_set, root, treat=treat, ctrl=ctrl, tlabel=tlabel))
     for i in (GLASS4, SING44):
         row = next(r for r in g_rows if r["instance"] == i)
         if not row["ok"] and i not in noise_list:
-            if any(_esc_before_lead(R.get((i, BO1, s))) for s in STAGE1_SEEDS):
+            if any(_esc_before_lead(R.get((i, treat, s))) for s in STAGE1_SEEDS):
                 po = None
                 for s in STAGE1_SEEDS:
-                    r = R.get((i, BO1, s))
+                    r = R.get((i, treat, s))
                     if r is not None and r.bo:
                         po = _f(r.bo.get("patience_own_s"))
                 nxt = min(po + 10.0, 50.0) if _fin(po) else None
@@ -864,13 +890,83 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
                            f"{nxt} (+10, <= 50)")
             else:
                 cls.append(f"{i} guard failed without a step down before its first lead (no pre-stated fallback)")
-    if not out["T"]["ok"] and not mech["M2"]["ok"]:
+    if not out["T"]["ok"] and not m2_ok:
         cls.append("T fails with M2 failing: duty does not restore cuOpt at run level although stage 0 said it "
                    "would. STOP and report; MPS needs Berk.")
     inside = [i for i in TARGET + LADDER if _fin(eff[i]["d"]) and abs(eff[i]["d"]) <= eff[i]["band"]
               and not (out["T"]["ok"] if i in TARGET else next(r for r in l_rows if r["instance"] == i)["ok"])]
     if inside:
         cls.append("inside the band: seeds 3 and 4 on " + ", ".join(inside) + ", same rules")
+    return cls
+
+
+def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff1", root: Path = ROOT,
+           stage0_set: str | None = "backoff0") -> dict:
+    """The stage-1 criteria (module docstring). Returns {mechanism, outcome, classification, reports, verdict}."""
+    R = load(runs, set_name, root)
+    notes: list[str] = []
+    missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BO1, A6) for s in STAGE1_SEEDS if (i, a, s) not in R]
+    d_min = None
+    for (i, a, s), r in R.items():
+        if a == BO1 and r.bo:
+            d_min = 2.0 ** -int(r.bo.get("levels", 2))
+            break
+    # ------------------------------------------------------------------------ effects
+    eff = _effects(R, BO1, CTRL1, A6)
+    # ------------------------------------------------------------------------ mechanism
+    mech: dict = {}
+    # M1
+    m1, _ = _m1_rows(R, BO1, M1_S)
+    mech["M1"] = dict(ok=bool(m1) and all(x["ok"] for x in m1), rows=m1)
+    # M2
+    mech["M2"] = _m2(R, BO1, A6)
+    # M3
+    mech["M3"] = _m3_d018(R, BO1, CTRL1)
+    # M4
+    m4, util = [], {}
+    for i in M4_SET:
+        u1, u0 = [], []
+        for s in STAGE1_SEEDS:
+            r, c = R.get((i, BO1, s)), R.get((i, CTRL1, s))
+            if r is None or c is None:
+                continue
+            if any(t > M4_LATE for t in c.leads()):
+                m4.append(dict(instance=i, seed=s, applies=False))
+                continue
+            sh1, st1 = r.window_rates(M4_FROM)
+            _, st0 = c.window_rates(M4_FROM)
+            ok_sh = _fin(sh1) and d_min is not None and sh1 <= d_min + M4_SHARE
+            ok_st = _fin(st1) and _fin(st0) and st1 <= M4_STEPS * st0
+            m4.append(dict(instance=i, seed=s, applies=True, busy_share=sh1, steps_bo1=st1, steps_bo0=st0,
+                           share_ok=bool(ok_sh), steps_ok=bool(ok_st), ok=bool(ok_sh and ok_st)))
+            u1.append(r.mean_util())
+            u0.append(c.mean_util())
+        if u1:
+            util[i] = dict(bo1=float(np.nanmean(u1)), bo0=float(np.nanmean(u0)),
+                           lower=bool(np.nanmean(u1) < np.nanmean(u0)))
+    app = [x for x in m4 if x.get("applies")]
+    need = min(M4_UTIL, _ceil(0.75 * len(util))) if util else 0
+    n_lower = sum(1 for v in util.values() if v["lower"])
+    mech["M4"] = dict(ok=all(x["ok"] for x in app) and n_lower >= need, rows=m4, util=util,
+                      util_lower=n_lower, util_needed=need, D_min=d_min)
+    # M5
+    mech["M5"] = _m5_d018(R, BO1, CTRL1, A6)
+    # M6 (reported): the control's would-be first step down against its first lead, guard instances
+    m6 = []
+    for i in GUARDS:
+        for s in STAGE1_SEEDS:
+            c = R.get((i, CTRL1, s))
+            if c is None:
+                continue
+            te, be = c.first_escalation()
+            m6.append(dict(instance=i, seed=s, would_escalate_t=te, would_escalate_busy=be, first_lead=c.first_lead(),
+                           before_lead=bool(_fin(te) and (not _fin(c.first_lead()) or te < c.first_lead()))))
+    mech["M6"] = dict(rows=m6)
+    mech_ok = all(mech[k]["ok"] for k in ("M1", "M2", "M3", "M4", "M5"))
+    # ------------------------------------------------------------------------ outcome
+    out, g_rows, l_rows, noise_list = _outcome(R, inc, eff, BO1, A6)
+    # ------------------------------------------------------------------------ classification of failures
+    cls = _classify(R, runs, eff, out, mech["M2"]["ok"], g_rows, l_rows, noise_list, stage0_set, root, BO1, CTRL1)
     # ------------------------------------------------------------------------ reports
     reports = dict(d013=d013_report(R, runs, STAGE1), relay=relay_latency(R), lp_arrival=lp_arrival(R))
     adopt = mech_ok and out["T"]["ok"] and out["G"]["ok"] and out["F"]["ok"] and out["mean_guard"]["ok"]
@@ -886,6 +982,129 @@ def stage1(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backof
                 verdict=verdict, notes=notes, missing=missing)
 
 
+# ================================================================================================= stage 1y (D-023)
+def _phase_y_share(r: RunView) -> tuple[float, float, str]:
+    """(wall seconds, busy seconds) of a run's phase Y and its exit reason, from the EA summary's `phase_y` block: the
+    exit's wall time `exit_t` and busy time `exit_busy_s` (the governor's own record of the exit). A phase Y that
+    never ended (reason "never") is read from `length_s` and `busy_per_level["Y"]`. NaN when the run has no record."""
+    py = r.bo.get("phase_y") if isinstance(r.bo.get("phase_y"), dict) else {}
+    w, b = _f(py.get("exit_t")), _f(py.get("exit_busy_s"))
+    if not _fin(w):
+        w = _f(py.get("length_s"))
+        b = _f((r.bo.get("busy_per_level") or {}).get("Y"))
+    return w, b, str(py.get("reason") or "")
+
+
+def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
+            stage0_set: str | None = "backoff0") -> dict:
+    """D-023: A9@boY (phase Y only) vs the control A9@bo1s, same-day A6F; D-018 stage 1's outcome rules unchanged and
+    D-023's mechanism rules M1–M5 (module docstring). D-018's own M1 / M3 / M5 on the same runs are returned under
+    `mechanism_d018` (reported, not gating). Returns the stage-1 keys plus `mechanism_d018`."""
+    R = load(runs, set_name, root)
+    notes: list[str] = []
+    missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BOY, A6F) for s in STAGE1_SEEDS if (i, a, s) not in R]
+    eff = _effects(R, BOY, CTRL1, A6F)
+    mech: dict = {}
+    # M1: phase Y ends within 1.0 s of the first partner incumbent, every boY run where a partner posted
+    m1, m1_na = _m1_rows(R, BOY, Y_M1_S)
+    mech["M1"] = dict(ok=bool(m1) and all(x["ok"] for x in m1), rows=m1, n_a=m1_na, limit_s=Y_M1_S)
+    # M2: chromaticindex's cuOpt first incumbent inside boY <= 2 x A6F's, both seeds
+    mech["M2"] = _m2(R, BOY, A6F, "boY", "A6F")
+    # M3: material leads under boY >= 0.8 x the control's, summed over the seeds, on the four lead instances
+    m3 = []
+    for i in M3_SET:
+        nr = nc = 0
+        miss = []
+        for s in STAGE1_SEEDS:
+            r, c = R.get((i, BOY, s)), R.get((i, CTRL1, s))
+            if r is None or c is None:
+                miss.append(s)
+                continue
+            nr += len(r.leads())
+            nc += len(c.leads())
+        ok = not miss and nr >= Y_M3_LEADS * nc
+        m3.append(dict(instance=i, leads_boY=nr, leads_ctrl=nc, ratio=nr / nc if nc else math.nan,
+                       missing_seeds=miss, ok=bool(ok)))
+    mech["M3"] = dict(ok=all(x["ok"] for x in m3), rows=m3)
+    # M4: boY's busy share in phase Y <= 0.6, pooled over the arm's runs (per run reported)
+    m4, no_rec = [], []
+    for (i, a, s), r in sorted(R.items()):
+        if a != BOY:
+            continue
+        w, b, why = _phase_y_share(r)
+        if not (_fin(w) and _fin(b)):
+            no_rec.append(dict(instance=i, seed=s))
+            continue
+        m4.append(dict(instance=i, seed=s, wall_s=w, busy_s=b, share=b / w if w > 0 else math.nan, reason=why))
+    W, B = sum(x["wall_s"] for x in m4), sum(x["busy_s"] for x in m4)
+    share = B / W if W > 0 else math.nan
+    mech["M4"] = dict(ok=bool(_fin(share) and share <= Y_M4_SHARE), busy_share=share, wall_s=W, busy_s=B,
+                      limit=Y_M4_SHARE, rows=m4, no_record=no_rec)
+    # M5: the busy / paused accounting within 2 %, and cap hits per call within +0.10 of the control's
+    acc, cap = [], []
+    for (i, a, s), r in sorted(R.items()):
+        if a != BOY:
+            continue
+        acc += _accounting_rows(r, i, s)[0]
+        c = R.get((i, CTRL1, s))
+        if c is not None and _cap_per_call(r) > _cap_per_call(c) + Y_M5_CAP + 1e-9:
+            cap.append(dict(instance=i, seed=s, boY=_cap_per_call(r), ctrl=_cap_per_call(c)))
+    mech["M5"] = dict(ok=not acc and not cap, accounting=acc, cap_hits=cap, cap_slack=Y_M5_CAP)
+    mech_ok = all(mech[k]["ok"] for k in ("M1", "M2", "M3", "M4", "M5"))
+    # D-018's own M1 / M3 / M5 on the same runs, for comparison (not gating)
+    d1, _ = _m1_rows(R, BOY, M1_S)
+    d018 = dict(M1=dict(ok=bool(d1) and all(x["ok"] for x in d1), rows=d1, limit_s=M1_S),
+                M3=_m3_d018(R, BOY, CTRL1), M5=_m5_d018(R, BOY, CTRL1, A6F))
+    # outcome: D-018 stage 1's rules unchanged; the ladder targets gate here (D-023: every outcome rule must hold)
+    out, g_rows, l_rows, noise_list = _outcome(R, inc, eff, BOY, A6F)
+    cls = _classify(R, runs, eff, out, mech["M2"]["ok"], g_rows, l_rows, noise_list, stage0_set, root, BOY, CTRL1,
+                    "boY")
+    reports = dict(d013=d013_report(R, runs, STAGE1, a6=A6F, arms=(CTRL1, BOY)),
+                   relay=relay_latency(R, (CTRL1, BOY)), lp_arrival=lp_arrival(R, (CTRL1, BOY)))
+    gates = ("T", "G", "ladder", "F", "mean_guard")
+    adopt = mech_ok and all(out[k]["ok"] for k in gates)
+    if missing:
+        verdict = f"INCOMPLETE: {len(missing)} missing runs (first: {missing[:3]})"
+    elif adopt:
+        verdict = ("ADOPT boY as A9's development default: M1–M5 (D-023), T, G, the ladder targets, F and the mean "
+                   "guard hold")
+    else:
+        failed = [k for k in ("M1", "M2", "M3", "M4", "M5") if not mech[k]["ok"]] + \
+                 [k for k in gates if not out[k]["ok"]]
+        verdict = "DO NOT ADOPT boY: failed " + ", ".join(failed)
+    notes.append("the ladder targets gate the verdict here; D-018 stage 1 reported them without gating (design §5: "
+                 "adopt if T, G, F, the mean guard and M1–M5 hold) — D-023 asks every outcome rule to hold")
+    notes.append(f"M4 reads the arm's pooled phase-Y busy share (sum of exit_busy_s / sum of exit_t over every boY "
+                 f"run); a phase Y shorter than ~2 x burst_s ends before the first sleep falls due, so a per-run share "
+                 f"is 1.0 by construction there (per run listed)")
+    return dict(stage="1y", set=set_name, effects=eff, mechanism=mech, mechanism_d018=d018, outcome=out,
+                classification=cls, reports=reports, verdict=verdict, notes=notes, missing=missing)
+
+
+def run_stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
+                stage0_set: str | None = "backoff0", failed: str = "both") -> dict:
+    """Stage 1y under a reading of the set's failed runs (D-023: "read as D-002 §6 keeps crashes, reported both
+    ways"): "keep" (kept, truncated at the crash, as build-runs scores them), "exclude" (missing: the verdict is then
+    INCOMPLETE) or "both" (the kept reading in full, the excluded reading's verdict and missing runs under
+    `exclude_reading`). Without failed runs the readings coincide and one is returned."""
+    sel = (runs["set"] == set_name) & (runs["status"] == "failed")
+    failed_ids = sorted(runs.loc[sel, "run_id"].astype(str))
+    if failed == "exclude" or not failed_ids:
+        res = stage1y(runs, inc, set_name, root, stage0_set)
+        res["kept_failed"] = []
+        if failed_ids:
+            res["notes"].append(f"{len(failed_ids)} failed runs excluded (reading 'exclude'): {failed_ids}")
+        return res
+    kept = runs.copy()
+    kept.loc[sel, "status"] = "completed"
+    res = stage1y(kept, inc, set_name, root, stage0_set)
+    res["kept_failed"] = failed_ids
+    if failed == "both":
+        ex = stage1y(runs, inc, set_name, root, stage0_set)
+        res["exclude_reading"] = dict(verdict=ex["verdict"], missing=ex["missing"])
+    return res
+
+
 def _esc_before_lead(r: RunView | None) -> bool:
     if r is None:
         return False
@@ -894,18 +1113,19 @@ def _esc_before_lead(r: RunView | None) -> bool:
     return bool(_fin(te) and (not _fin(tl) or te < tl))
 
 
-def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None, root: Path = ROOT) -> str:
-    """The design's ca diagnosis from the events: (P) bo1 stepped down before the EA's first ca lead -> next test
-    patience_search_s = 1.25 x the control's lag; (Y) no such step and phase Y >= 10 s -> D_Y one step up, accepted
-    only if stage 0 showed S_first <= 3 at that duty (duty 1 = stage 0's bo0, the shadow run); otherwise
+def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None, root: Path = ROOT, treat: str = BO1,
+                ctrl: str = CTRL1, tlabel: str = "bo1") -> str:
+    """The design's ca diagnosis from the events: (P) the treatment stepped down before the EA's first ca lead -> next
+    test patience_search_s = 1.25 x the control's lag; (Y) no such step and phase Y >= 10 s -> D_Y one step up,
+    accepted only if stage 0 showed S_first <= 3 at that duty (duty 1 = stage 0's bo0, the shadow run); otherwise
     unclassified."""
-    rs = [R.get((CA, BO1, s)) for s in STAGE1_SEEDS]
-    cs = [R.get((CA, CTRL1, s)) for s in STAGE1_SEEDS]
+    rs = [R.get((CA, treat, s)) for s in STAGE1_SEEDS]
+    cs = [R.get((CA, ctrl, s)) for s in STAGE1_SEEDS]
     if any(_esc_before_lead(r) for r in rs):
         lags = [c.first_lead() - c.first_post() for c in cs if c is not None and _fin(c.first_lead())
                 and _fin(c.first_post())]
         nxt = 1.25 * max(lags) if lags else None
-        return (f"ca guard failed, class (P): bo1 stepped down before the EA's first ca lead — next test "
+        return (f"ca guard failed, class (P): {tlabel} stepped down before the EA's first ca lead — next test "
                 f"patience_search_s = 1.25 x the control's lag = {nxt}, nothing else changed")
     ylen = [r.phase_y()[0] for r in rs if r is not None and _fin(r.phase_y()[0])]
     if ylen and max(ylen) >= 10.0:
@@ -932,12 +1152,12 @@ def classify_ca(R, runs: pd.DataFrame, stage0_set: str | None, root: Path = ROOT
     return "ca guard failed, unclassified (neither a step down before the first lead nor phase Y >= 10 s)"
 
 
-def floor_seconds(R, inc, inst: str) -> dict:
+def floor_seconds(R, inc, inst: str, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
     """fhnw / krka: seconds to cuOpt's first incumbent (checked); radiationm: seconds to within 0.1 % of same-seed A6's
-    final best (any process of the run)."""
+    final best (any process of the run). Stage 1y: A6F in A6's place."""
     out = {}
     for s in STAGE1_SEEDS:
-        for a in (CTRL1, BO1, A6):
+        for a in (ctrl, treat, a6):
             r = R.get((inst, a, s))
             if r is None:
                 continue
@@ -945,8 +1165,8 @@ def floor_seconds(R, inc, inst: str) -> dict:
                 t = r.cuopt_t_first()
                 out[f"{a} s{s}"] = "none" if math.isinf(t) else t      # censored: cuOpt found nothing
                 continue
-            a6 = R.get((inst, A6, s))
-            best = _f(a6.get("cuopt_best_obj", a6.get("best_obj"))) if a6 is not None else math.nan
+            ref = R.get((inst, a6, s))
+            best = _f(ref.get("cuopt_best_obj", ref.get("best_obj"))) if ref is not None else math.nan
             if not _fin(best):
                 out[f"{a} s{s}"] = math.nan
                 continue
@@ -957,16 +1177,17 @@ def floor_seconds(R, inc, inst: str) -> dict:
     return out
 
 
-def d013_report(R, runs: pd.DataFrame, insts) -> dict:
-    """D-013: for SCIP (A0, from any set at the same budget) and cuOpt (same-day A6), the weak set W_B (P_B >= 0.5,
-    seed mean) and both A9 arms on it: share improved, mean P, mean d, worst P; and the mean d over all (guard)."""
+def d013_report(R, runs: pd.DataFrame, insts, a6: str = A6, arms=(CTRL1, BO1)) -> dict:
+    """D-013: for SCIP (A0, from any set at the same budget) and cuOpt (same-day A6; A6F in stage 1y), the weak set
+    W_B (P_B >= 0.5, seed mean) and both A9 arms on it: share improved, mean P, mean d, worst P; and the mean d over all
+    (guard)."""
     out = {}
     budgets = {float(r.get("budget")) for r in R.values() if _fin(r.get("budget"))}
-    for B, label in (("A0", "SCIP"), (A6, "cuOpt")):
+    for B, label in (("A0", "SCIP"), (a6, "cuOpt")):
         pb = {}
         for i in insts:
-            if B == A6:
-                p = _pmeans(R, i, A6)
+            if B == a6:
+                p = _pmeans(R, i, a6)
             else:
                 df = runs[(runs["instance"] == i) & (runs["arm"] == "A0") & (runs["status"] == "completed")]
                 if budgets and "budget" in df:
@@ -976,7 +1197,7 @@ def d013_report(R, runs: pd.DataFrame, insts) -> dict:
                 pb[i] = float(np.mean(list(p.values())))
         weak = [i for i, v in pb.items() if v >= 0.5]
         res = dict(weak_set=weak, n_with_baseline=len(pb))
-        for arm in (CTRL1, BO1):
+        for arm in arms:
             pa = {i: float(np.mean(list(_pmeans(R, i, arm).values()))) for i in pb if _pmeans(R, i, arm)}
             ds = {i: effect_d(pb[i], pa[i]) for i in pa}
             w = [i for i in weak if i in pa]
@@ -990,11 +1211,11 @@ def d013_report(R, runs: pd.DataFrame, insts) -> dict:
     return out
 
 
-def relay_latency(R) -> dict:
+def relay_latency(R, arms=(CTRL1, BO1)) -> dict:
     """Median seconds from a cuOpt `send` to the SCIP incumbent recorded with source "cuopt" for the same objective,
     per A9 arm."""
     out = {}
-    for arm in (CTRL1, BO1):
+    for arm in arms:
         lat = []
         for (i, a, s), r in R.items():
             if a != arm:
@@ -1011,11 +1232,11 @@ def relay_latency(R) -> dict:
     return out
 
 
-def lp_arrival(R) -> dict:
+def lp_arrival(R, arms=(CTRL1, BO1)) -> dict:
     """Median arrival time of the HiGHS LP point in the EA (`lp` events, state done), per A9 arm (a confound: a sleeping
     EA frees its core for the LP worker)."""
     out = {}
-    for arm in (CTRL1, BO1):
+    for arm in arms:
         ts = [_f(e.get("t")) for (i, a, s), r in R.items() if a == arm for e in r.kind("lp")
               if e.get("state") == "done"]
         out[arm] = dict(n=len(ts), median_s=float(np.median(ts)) if ts else math.nan)
@@ -1139,6 +1360,81 @@ def print_stage1(res: dict, out=sys.stdout) -> None:
     p("VERDICT: " + res["verdict"])
 
 
+def print_stage1y(res: dict, out=sys.stdout) -> None:
+    p = lambda *a: print(*a, file=out)  # noqa: E731
+    p(f"Stage 1y (D-023, phase Y only) — {BOY} (active, no ladder) vs {CTRL1} (shadow control), same-day {A6F}, "
+      f"set {res['set']}")
+    for n in res.get("kept_failed", []):
+        p(f"   kept as failed (D-002 §6: kept, truncated at the crash): {n}")
+    p("instance                       P ctrl  P boY   d       band   d ctrl|A6F d boY|A6F")
+    for i, e in res["effects"].items():
+        p(f"{i:<30} {_fmt(e['p_bo0']):<7} {_fmt(e['p_bo1']):<7} {_fmt(e['d']):<7} {_fmt(e['band'], 2):<6} "
+          f"{_fmt(e['d_bo0_vs_A6']):<10} {_fmt(e['d_bo1_vs_A6'])}")
+    m, d18 = res["mechanism"], res["mechanism_d018"]
+    hold = lambda ok: "holds" if ok else "FAILS"  # noqa: E731
+    bad1 = [(r["instance"], r["seed"], _fmt(r["exit_t"] - r["partner_t"] if _fin(r["exit_t"]) else math.nan, 2))
+            for r in m["M1"]["rows"] if not r["ok"]]
+    lat = [r["exit_t"] - r["partner_t"] for r in m["M1"]["rows"] if _fin(r["exit_t"])]
+    p(f"M1 (exit within {m['M1']['limit_s']:g} s of the first partner incumbent): {hold(m['M1']['ok'])} — "
+      f"{len(m['M1']['rows'])} runs, max latency {_fmt(max(lat) if lat else math.nan, 2)} s"
+      + (f", failing {bad1}" if bad1 else "") + f"; n/a (no partner post) {len(m['M1']['n_a'])}"
+      + (f" {[(r['instance'], r['seed']) for r in m['M1']['n_a']]}" if m["M1"]["n_a"] else ""))
+    noted = [f"seed {r['seed']}: {r['why']}" for r in m["M2"]["rows"] if r.get("ok") and r.get("why")]
+    p(f"M2 (chromaticindex cuOpt first incumbent <= {M2_X:g} x A6F's): {hold(m['M2']['ok'])} — "
+      + ", ".join(f"s{r['seed']} {_fmt(r.get('t_bo1'), 2)} vs {_fmt(r.get('t_A6'), 2)} s"
+                  + (f" ({r['why']})" if r.get("why") and not r.get("ok") else "") for r in m["M2"]["rows"])
+      + (f" (reported: {'; '.join(noted)})" if noted else ""))
+    p(f"M3 (leads summed over seeds >= {Y_M3_LEADS:g} x the control's): {hold(m['M3']['ok'])} — "
+      + ", ".join(f"{r['instance']} {r['leads_boY']} vs {r['leads_ctrl']}"
+                  + (f" (missing seeds {r['missing_seeds']})" if r["missing_seeds"] else "") for r in m["M3"]["rows"]))
+    hi = [(r["instance"], r["seed"], _fmt(r["share"], 2), _fmt(r["wall_s"], 2)) for r in m["M4"]["rows"]
+          if _fin(r["share"]) and r["share"] > Y_M4_SHARE]
+    p(f"M4 (boY's pooled busy share in phase Y <= {Y_M4_SHARE:g}): {hold(m['M4']['ok'])} — "
+      f"{_fmt(m['M4']['busy_s'], 2)} busy / {_fmt(m['M4']['wall_s'], 2)} s = {_fmt(m['M4']['busy_share'], 3)} over "
+      f"{len(m['M4']['rows'])} runs; per run above {Y_M4_SHARE:g} (instance, seed, share, phase-Y s): {hi}"
+      + (f"; no phase-Y record {[(r['instance'], r['seed']) for r in m['M4']['no_record']]}"
+         if m["M4"]["no_record"] else ""))
+    p(f"M5 (accounting within {M5_ACC:.0%}; cap hits per call <= the control's + {Y_M5_CAP:g}): {hold(m['M5']['ok'])}"
+      f" — accounting breaches {len(m['M5']['accounting'])}, cap-hit breaches "
+      f"{[(r['instance'], r['seed'], _fmt(r['boY'], 2), _fmt(r['ctrl'], 2)) for r in m['M5']['cap_hits']]}")
+    b3 = [(r["instance"], r["seed"]) for r in d18["M3"]["rows"] if not r["ok"]]
+    b5 = [f"{k}: {len(v)}" for k, v in d18["M5"].items() if isinstance(v, list) and v]
+    lat18 = [(r["instance"], r["seed"]) for r in d18["M1"]["rows"] if not r["ok"]]
+    p(f"D-018's own rules on these runs (reported, not gating): M1 at {M1_S:g} s {hold(d18['M1']['ok'])} {lat18}; "
+      f"M3 per seed (leads, first lead, level-0 share) {hold(d18['M3']['ok'])} {b3}; M5 (every leg, cap hits +0) "
+      f"{hold(d18['M5']['ok'])} {b5}")
+    o = res["outcome"]
+    p(f"T: {hold(o['T']['ok'])} (chromaticindex d {_fmt(o['T']['d'])}, P {_fmt(o['T']['p_bo1'])})")
+    p(f"G: {hold(o['G']['ok'])} (guard mean d {_fmt(o['G']['mean_d'])}; neos-960392 dP "
+      f"{_fmt(o['G']['neos960']['dP'])} >= {_fmt(o['G']['neos960']['limit'])}; failing "
+      f"{[r['instance'] for r in o['G']['rows'] if not r['ok']]}; noise {o['G']['noise']}; still beating A6F "
+      f"{[(b['instance'], b['ok']) for b in o['G']['still_beats_A6']]})")
+    p(f"ladder targets (a gate in 1y): {'hold' if o['ladder']['ok'] else 'FAIL'} "
+      f"(mean d {_fmt(o['ladder']['mean_d'])}; failing {[r['instance'] for r in o['ladder']['rows'] if not r['ok']]})")
+    p(f"F: {hold(o['F']['ok'])} ({[(r['instance'], _fmt(r['dP'], 4)) for r in o['F']['rows']]})")
+    for r in o["F"]["rows"]:
+        p(f"   {r['instance']} seconds: " + ", ".join(f"{k} {_fmt(v, 2)}" for k, v in r["seconds"].items()))
+    p(f"mean guard (11 non-floor): {hold(o['mean_guard']['ok'])} (mean d {_fmt(o['mean_guard']['mean_d'])})")
+    rep = res["reports"]
+    for b, v in rep["d013"].items():
+        p(f"D-013 {b}: weak set {v['weak_set']}; " + "; ".join(
+            f"{arm}: improved {v[arm]['improved']}, P {_fmt(v[arm]['mean_P_B'])} -> {_fmt(v[arm]['mean_P_arm'])}, "
+            f"mean d {_fmt(v[arm]['mean_d_weak'])}, worst {_fmt(v[arm]['worst_P'])}, all-mean d "
+            f"{_fmt(v[arm]['mean_d_all'])}" for arm in (CTRL1, BOY)))
+    p("relay latency (cuOpt send -> SCIP incumbent): " + ", ".join(
+        f"{a} median {_fmt(v['median_s'], 2)} s (n {v['n']})" for a, v in rep["relay"].items()))
+    p("HiGHS LP point arrival: " + ", ".join(f"{a} median {_fmt(v['median_s'], 2)} s (n {v['n']})"
+                                             for a, v in rep["lp_arrival"].items()))
+    for c in res["classification"]:
+        p("classification: " + c)
+    for n in res["notes"]:
+        p("note: " + n)
+    p("VERDICT: " + res["verdict"])
+    ex = res.get("exclude_reading")
+    if ex:
+        p(f"VERDICT with the failed runs excluded (the other reading, D-023): {ex['verdict']}")
+
+
 def _jsonable(v):
     if isinstance(v, dict):
         return {str(k): _jsonable(x) for k, x in v.items()}
@@ -1156,18 +1452,21 @@ def _jsonable(v):
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="itrea backoff-report", description="A9 GPU back-off: stage-0 / stage-1 rules "
-                                 "of D-018 applied to the run table and the run directories")
-    ap.add_argument("--stage", type=int, choices=(0, 1), required=True)
-    ap.add_argument("--set", dest="set_", default=None, help="run set (default backoff0 / backoff1)")
-    ap.add_argument("--stage0-set", default="backoff0", help="stage 1: the stage-0 set (ca's class-(Y) fallback)")
+                                 "of D-018 and stage 1y (D-023, phase Y only) applied to the run table and the run "
+                                 "directories")
+    ap.add_argument("--stage", choices=("0", "1", "1y"), required=True,
+                    help="0 / 1: D-018's calibration and test; 1y: D-023 (A9@boY vs A9@bo1s + A6F, set backoff2)")
+    ap.add_argument("--set", dest="set_", default=None, help="run set (default backoff0 / backoff1 / backoff2)")
+    ap.add_argument("--stage0-set", default="backoff0", help="stage 1 / 1y: the stage-0 set (ca's class-(Y) fallback)")
     ap.add_argument("--runs", default=str(DATASETS / "runs.parquet"))
     ap.add_argument("--incumbents", default=str(DATASETS / "incumbents_checked.parquet"))
     ap.add_argument("--root", default=str(ROOT), help="root of the run_dir paths in the run table")
     ap.add_argument("--json", default=None, help="also write the result as JSON here")
-    ap.add_argument("--failed", choices=("exclude", "keep"), default="exclude",
+    ap.add_argument("--failed", choices=("exclude", "keep", "both"), default=None,
                     help="stage 1: failed runs are excluded (default: the verdict needs every run completed) or kept "
                          "as D-002 §6 keeps crashes — truncated at the crash, as build-runs already scores them "
-                         "(stated deviation of 2026-10-11: cuOpt's RMM limit hit on ca seed 1)")
+                         "(stated deviation of 2026-10-11: cuOpt's RMM limit hit on ca seed 1); stage 1y: default "
+                         "both — the kept reading in full (D-023) and the excluded reading's verdict beside it")
     ap.add_argument("--steps-gate", action="store_true",
                     help="stage 0: let the lane-steps limb gate the sanity check (the rule as first written, before "
                          "the D-018 deviation of 2026-10-09)")
@@ -1180,10 +1479,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     runs = pd.read_parquet(a.runs)
     inc = pd.read_parquet(a.incumbents) if Path(a.incumbents).exists() else None
-    if a.stage == 0:
+    if a.stage == "0":
         res = stage0(runs, inc, a.set_ or "backoff0", Path(a.root), steps_gate=a.steps_gate)
         print_stage0(res)
-    else:
+    elif a.stage == "1":
+        if a.failed == "both":
+            print("--failed both is a stage-1y reading; stage 1 takes exclude or keep", file=sys.stderr)
+            return 2
         kept = []
         if a.failed == "keep":
             sel = (runs["set"] == (a.set_ or "backoff1")) & (runs["status"] == "failed")
@@ -1193,6 +1495,9 @@ def main(argv: list[str] | None = None) -> int:
         res = stage1(runs, inc, a.set_ or "backoff1", Path(a.root), stage0_set=a.stage0_set)
         res["kept_failed"] = kept
         print_stage1(res)
+    else:
+        res = run_stage1y(runs, inc, a.set_ or "backoff2", Path(a.root), a.stage0_set, a.failed or "both")
+        print_stage1y(res)
     if a.json:
         Path(a.json).write_text(json.dumps(_jsonable(res), indent=1, default=str))
     return 0

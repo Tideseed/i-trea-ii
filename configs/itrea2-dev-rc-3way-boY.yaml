@@ -1,0 +1,31 @@
+# I-TREA II -- A9 GPU back-off, phase Y only (D-023), arm `boY`: bo1's values (D-018 stage 0, set backoff0 seed 2:
+# D_Y = 1/2 = yield_level 1, floor 1/8 = levels 3, yield_until_s 30) in ACTIVE mode with the patience ladder disabled
+# by configuration: patience_search_s = patience_own_s = patience_min_s = patience_max_s = 100000 busy seconds, longer
+# than any budget, so phase P never steps down (no code change; the validator needs only positive values with
+# min <= max). Phase Y yields until cuOpt's (or SCIP's, or the EA's own) first incumbent, then full duty to the end.
+# The D-023 TREATMENT; its control is bo1s (bo1's values in shadow mode, as in D-018 stage 1).
+# Base = configs/itrea2-dev-rc-3way.yaml verbatim (the A9 development default); `exchange.from_cuopt` is added by the
+# runner for A9. The harness comes from D-022's outcome (`itrea make-jobs backoff2 --harness ...`). Development only.
+name: itrea2-dev-rc-3way-boY
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: active
+backoff:
+  enabled: true
+  mode: active
+  yield_level: 1
+  levels: 3
+  yield_until_s: 30.0
+  patience_search_s: 100000.0
+  patience_own_s: 100000.0
+  patience_min_s: 100000.0
+  patience_max_s: 100000.0
