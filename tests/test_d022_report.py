@@ -92,82 +92,99 @@ def world(root: Path, *, p=None, extra=(), drop=(), a0=None, **per_run) -> pd.Da
 
 
 def rep(root, runs, **kw):
-    """The report on the synthetic world: INST is both the rule set and C1's set (b) (the defaults are the real
-    names of D-022's amendment; `world58` builds their layout)."""
-    return D.report(runs, root, instances=INST, c1_instances=INST, **kw)
+    """The report on the synthetic world: INST is the rule set, C1's fixed weak set and the guard's set (the
+    defaults are the real names of D-022's amendments; `world74` builds their layout)."""
+    return D.report(runs, root, instances=INST, c1_instances=INST, guard_instances=INST, **kw)
 
 
 def verdict(res, k=0):
     return res["readings"][k]["verdict"]
 
 
+def text(res) -> str:
+    import io
+    buf = io.StringIO()
+    D.print_report(res, out=buf)
+    return buf.getvalue()
+
+
 # ================================================================================================= outcome
+def check_inconclusive(out: dict) -> None:
+    """An INCONCLUSIVE verdict always names the instances it reruns (leg (3) failing on seed means, or leg (2))."""
+    if out["kind"] == "INCONCLUSIVE":
+        assert out["rerun"] and all(r in [x["instance"] for x in out["rows"]] for r in out["rerun"])
+
+
 def test_adopt_when_nothing_changes(tmp_path):
     res = rep(tmp_path, world(tmp_path))
     rd = res["readings"]
     assert len(rd) == 1 and rd[0]["reading"] == "exclude"
-    assert rd[0]["validity"]["ok"] and rd[0]["outcome"]["mean_d"] == 0.0
-    assert verdict(res).startswith("ADOPT R13 + R14")
-    with open(tmp_path / "out.txt", "w") as f:
-        D.print_report(res, out=f)
-    txt = (tmp_path / "out.txt").read_text()
-    assert "VERDICT (exclude): ADOPT" in txt and "selected on the same runs" in txt and "earlier days" in txt
+    o = rd[0]["outcome"]
+    assert rd[0]["validity"]["ok"] and all(r["no_harm"] for r in o["rows"]) and "mean_d" not in o
+    assert verdict(res).startswith("ADOPT R13 + R14") and not o["mechanism_fail"]
+    txt = text(res)
+    assert "VERDICT (exclude): ADOPT" in txt and "earlier days" in txt and "go / no-go on C1 is Berk's" in txt
+    assert "termination test (not as a pruning limit)" in txt and "No mean over the instances" in txt
 
 
-def test_reject_by_the_mean(tmp_path):
-    """Every instance at d = -0.06 inside a wide band (the control's seeds 0.3 / 0.5: band 0.4): rejected by the
-    mean alone (<= -0.05), no instance worse on both seeds."""
+def test_no_mean_a_small_loss_inside_the_band_adopts(tmp_path):
+    """Every instance at d = -0.06 inside a wide band (the control's seeds 0.3 / 0.5: band 0.4): under the second
+    amendment there is no mean over the instances — each holds its band — ADOPT (the first amendment's mean rule
+    rejected this)."""
     pc = {(i, D.CTRL): (0.3, 0.5) for i in INST}
     pt = {(i, D.TREAT): (0.4 / 0.94, 0.4 / 0.94) for i in INST}
     res = rep(tmp_path, world(tmp_path, p={**pc, **pt}))
     o = res["readings"][0]["outcome"]
-    assert o["mean_d"] == pytest.approx(-0.06) and not o["worse_both"]
-    assert all(r["band"] == pytest.approx(0.4) for r in o["rows"])
-    assert verdict(res).startswith("REJECT") and "mean d -0.060 <= -0.05" in verdict(res)
+    assert all(r["value"] == pytest.approx(-0.06) and r["band"] == pytest.approx(0.4) for r in o["rows"])
+    assert all(r["kind"] == "band" and r["no_harm"] for r in o["rows"]) and verdict(res).startswith("ADOPT")
 
 
 def test_reject_by_one_instance_worse_on_both_seeds(tmp_path):
-    """i1 at d -0.5 on both seeds (band 0.05) while the mean is +0.06: rejected by the instance."""
+    """i1 at d -0.5 on both seeds (band 0.05) while the others gain: rejected by the instance."""
     p = {("i1", D.TREAT): (0.8, 0.8)}
     p.update({(i, D.TREAT): (0.32, 0.32) for i in INST[1:]})                    # d = +0.2 each
     res = rep(tmp_path, world(tmp_path, p=p))
     o = res["readings"][0]["outcome"]
-    assert o["mean_d"] == pytest.approx((-0.5 + 4 * 0.2) / 5) and o["worse_both"] == ["i1"]
-    assert verdict(res).startswith("REJECT") and "both seeds: ['i1']" in verdict(res)
+    assert o["kind"] == "REJECT" and o["rejected"] == ["i1"] and o["rows"][0]["fails_both"]
+    assert verdict(res).startswith("REJECT") and "i1 (bounded d >= −band (0.05) fails on both seeds" in verdict(res)
 
 
-def test_inconclusive_names_the_instances_worse_on_one_seed(tmp_path):
-    """i1 worse on seed 0 only (d_s0 -0.333 < -0.05, d_s1 0): mean d -0.04 -> INCONCLUSIVE, seeds 2-3 on i1."""
-    res = rep(tmp_path, world(tmp_path, p={("i1", D.TREAT): (0.6, 0.4)}))
+def test_inconclusive_names_the_instances_failing_on_seed_means(tmp_path):
+    """i1 worse on seed 0 only (d_s0 -0.333 < -0.05, d_s1 0; seed means 0.4 vs 0.5: d -0.2): no harm not shown,
+    not on both seeds -> INCONCLUSIVE, seeds 2-3 on i1 (named). The others at d -0.03 inside band 0.05 hold."""
+    p = {("i1", D.TREAT): (0.6, 0.4)}
+    p.update({(i, D.TREAT): (0.4 / 0.97, 0.4 / 0.97) for i in INST[1:]})
+    res = rep(tmp_path, world(tmp_path, p=p))
     o = res["readings"][0]["outcome"]
-    assert o["mean_d"] == pytest.approx(-0.2 / 5) and o["worse_one"] == ["i1"] and not o["worse_both"]
-    assert verdict(res).startswith("INCONCLUSIVE") and verdict(res).endswith("— i1")
-    # the same mean with no instance outside its band on any seed: INCONCLUSIVE, and the report says no one is named
-    res2 = rep(tmp_path / "b", world(tmp_path / "b", p={(i, D.TREAT): (0.4 / 0.97, 0.4 / 0.97) for i in INST}))
-    assert res2["readings"][0]["outcome"]["mean_d"] == pytest.approx(-0.03)
-    assert verdict(res2).startswith("INCONCLUSIVE") and "none is" in verdict(res2)
+    assert o["kind"] == "INCONCLUSIVE" and o["rerun"] == ["i1"] and not o["rejected"]
+    assert o["rows"][0]["value"] == pytest.approx(-0.2) and o["rows"][0]["fail_seed"] == [True, False]
+    check_inconclusive(o)
+    assert verdict(res).startswith("INCONCLUSIVE (no harm not shown on seed means on ['i1'])")
+    assert "on i1 (pass these names to `itrea make-jobs itx-r13f --instances`" in verdict(res)
+    assert "the rerun can be declined" not in verdict(res)
 
 
 def test_band_takes_the_larger_spread_of_the_control_or_a6f(tmp_path):
-    """i1 at d -0.33 on both seeds: inside A6F's seed spread (0.2 / 0.8: band 0.75) it is not 'worse', and with the
-    others at +0.1 the mean is >= -0.02 -> ADOPT; with A6F's seeds equal the band is 0.05 -> REJECT."""
+    """i1 at d -0.33 on both seeds: inside A6F's seed spread (0.2 / 0.8: band 0.75) it holds -> ADOPT; with A6F's
+    seeds equal the band is 0.05 -> REJECT."""
     p = {("i1", D.TREAT): (0.6, 0.6)}
     p.update({(i, D.TREAT): (0.36, 0.36) for i in INST[1:]})
     res = rep(tmp_path, world(tmp_path, p={**p, ("i1", D.A6F): (0.2, 0.8)}))
     row = res["readings"][0]["outcome"]["rows"][0]
-    assert row["band"] == pytest.approx(0.75) and not row["worse_both"] and verdict(res).startswith("ADOPT")
+    assert row["band"] == pytest.approx(0.75) and not row["fails_both"] and verdict(res).startswith("ADOPT")
     res2 = rep(tmp_path / "b", world(tmp_path / "b", p=p))
     assert res2["readings"][0]["outcome"]["rows"][0]["band"] == 0.05 and verdict(res2).startswith("REJECT")
 
 
-def test_mean_counts_instances_with_p_one_in_both_arms(tmp_path):
-    """The mean over the instances includes those where both arms have P = 1 (d = 0), which stats.compare leaves
-    out: four at P = 1 and i1 at d -0.1 give -0.02 (ADOPT), not -0.1 (REJECT)."""
+def test_p_one_in_both_arms_is_no_harm(tmp_path):
+    """Instances where both arms have P = 1 read d = 0 (no harm); i1 at d -0.1 inside band 0.4 holds: ADOPT."""
     p = {(i, a): (1.0, 1.0) for i in INST[1:] for a in (D.CTRL, D.TREAT)}
     p[("i1", D.CTRL)] = (0.3, 0.5)                                                   # band 0.4
     p[("i1", D.TREAT)] = (0.4 / 0.9, 0.4 / 0.9)
     res = rep(tmp_path, world(tmp_path, p=p))
-    assert res["readings"][0]["outcome"]["mean_d"] == pytest.approx(-0.02) and verdict(res).startswith("ADOPT")
+    rows = res["readings"][0]["outcome"]["rows"]
+    assert [r["value"] for r in rows[1:]] == [0.0] * 4 and rows[0]["value"] == pytest.approx(-0.1)
+    assert verdict(res).startswith("ADOPT")
 
 
 # ================================================================================================= validity
@@ -285,23 +302,48 @@ def test_reused_run_ids_are_selected_by_set(tmp_path):
 
 # ================================================================================================= C1 interim
 def test_c1_interim_against_cuopt_and_scip(tmp_path):
-    """A6F weak set (P >= 0.5): i1, i2 (0.8); the treatment improves both (0.4) and ties the rest; SCIP's weak set
-    (A0 >= 0.5): every instance but i5 (0.3)."""
+    """The fixed weak set (here INST; not re-selected on A6F@r13x): A6F 0.8 on i1, i2 and 0.4 elsewhere, the treatment
+    0.4 everywhere: HINT ratio 0.4 / 0.56 = 0.714 -> present; GUARD mean d (0.5 + 0.5) / 5 = +0.2 -> holds. Reported
+    in D-013 terms: vs A6F improved 2 of 5; vs SCIP (A0 0.9, i5 0.3): SCIP's weak set every instance but i5."""
     p = {("i1", D.A6F): (0.8, 0.8), ("i2", D.A6F): (0.8, 0.8)}
     p.update({(i, D.A6F): (0.4, 0.4) for i in INST[2:]})
     res = rep(tmp_path, world(tmp_path, p=p, a0={"i5": 0.3}))
     c1 = res["readings"][0]["c1"]
+    h, g = c1["hint"], c1["guard"]
+    assert h["state"] == "present" and h["ratio"] == pytest.approx(0.4 / 0.56) and h["n"] == 5
+    assert h["mean_P_a9"] == pytest.approx(0.4) and h["mean_P_a6f"] == pytest.approx(0.56) and not h["missing"]
+    assert g["state"] == "holds" and g["mean_d"] == pytest.approx(0.2) and g["n"] == 5
     cu = c1[D.A6F]
-    assert cu["weak_set"] == ["i1", "i2"] and cu["n_baseline"] == 5
-    a, w = cu[D.TREAT]["all"], cu[D.TREAT]["weak"]
+    assert "weak_set" not in cu and set(cu[D.TREAT]) == {"all"}                     # not re-selected
+    a = cu[D.TREAT]["all"]
     assert (a["better"], a["worse"], a["n"]) == (2, 0, 5) and a["mean_d"] == pytest.approx(2 * 0.5 / 5)
-    assert w["n"] == 2 and w["better"] == 2 and w["mean_P_before"] == pytest.approx(0.8)
-    assert w["mean_P_after"] == pytest.approx(0.4) and w["P_reduction"] == pytest.approx(0.5)
-    assert w["mean_d"] == pytest.approx(0.5) and w["worst_P_after"] == pytest.approx(0.4)
+    assert a["mean_P_before"] == pytest.approx(0.56) and a["worst_P_after"] == pytest.approx(0.4)
     sc = c1["A0"]
     assert sc["weak_set"] == ["i1", "i2", "i3", "i4"]
     assert sc[D.TREAT]["all"]["worse"] == 1 and sc[D.TREAT]["weak"]["better"] == 4    # i5: 0.4 vs 0.3
     assert D.CTRL not in cu and D.CTRL not in sc                  # A9@r13 runs on the rule set only (amendment)
+    txt = text(res)
+    assert "HINT present: ratio of means of P(120) A9@r13x / A6F@r13x over the fixed 5 = 0.714" in txt
+    assert "GUARD holds: mean bounded d of A9@r13x vs A6F@r13x over the 5 = 0.200" in txt
+
+
+@pytest.mark.parametrize("a9, state", [(0.95, "present"), (0.951, "absent")])
+def test_c1_hint_threshold_is_inclusive(tmp_path, a9, state):
+    """HINT present iff the ratio of means <= 0.95: A6F 1.0 everywhere, the treatment 0.95 (present) or 0.951
+    (absent); a guard far below -0.05 does not change the hint (they are read apart)."""
+    p = {(i, D.A6F): (1.0, 1.0) for i in INST}
+    p.update({(i, D.TREAT): (a9, a9) for i in INST})
+    p.update({(i, D.CTRL): (a9, a9) for i in INST})
+    h = rep(tmp_path, world(tmp_path, p=p))["readings"][0]["c1"]["hint"]
+    assert h["state"] == state and h["ratio"] == pytest.approx(a9)
+    # the ratio of means weighs the high-P instance; the guard's mean d weighs each instance once: i1 at A6F 1.0 ->
+    # A9 0.1 (d +0.9), the others at 0.01 -> 0.05 (d -0.8): hint present (0.06 / 0.208), guard fails (-0.46)
+    p2 = {(i, a): (0.01, 0.01) for i in INST[1:] for a in (D.A6F, D.CTRL)}
+    p2.update({(i, D.TREAT): (0.05, 0.05) for i in INST[1:]})
+    p2.update({("i1", D.A6F): (1.0, 1.0), ("i1", D.TREAT): (0.1, 0.1), ("i1", D.CTRL): (0.1, 0.1)})
+    c = rep(tmp_path / "g", world(tmp_path / "g", p=p2))["readings"][0]["c1"]
+    assert c["guard"]["state"] == "fails" and c["guard"]["mean_d"] == pytest.approx((0.9 - 4 * 0.8) / 5)
+    assert c["hint"]["state"] == "present" and c["hint"]["ratio"] == pytest.approx(0.06 / 0.208)
 
 
 def test_cli_writes_json(tmp_path, monkeypatch):
@@ -309,11 +351,12 @@ def test_cli_writes_json(tmp_path, monkeypatch):
     runs.to_parquet(tmp_path / "runs.parquet")
     monkeypatch.setattr(D, "development_instances", lambda: INST)           # the 17 names live in datasets/
     out = tmp_path / "r.json"
-    sets = ["--instances", ",".join(INST), "--c1-instances", ",".join(INST[1:])]
+    sets = ["--instances", ",".join(INST), "--c1-instances", ",".join(INST[1:]), "--guard-instances", ",".join(INST)]
     assert D.main(["--runs", str(tmp_path / "runs.parquet"), "--root", str(tmp_path), "--json", str(out)] + sets) == 0
     js = json.loads(out.read_text())
     assert js["readings"][0]["verdict"].startswith("ADOPT") and js["instances"] == INST
-    assert js["c1_instances"] == INST[1:] and js["readings"][0]["c1_completeness"]["n_expected"] == 4 * 2 * 2
+    assert js["c1_instances"] == INST[1:] and js["guard_instances"] == INST
+    assert js["readings"][0]["c1_completeness"]["n_expected"] == 5 * 2 * 2
     assert D.main(["--runs", str(tmp_path / "nope.parquet")]) == 2
 
 
@@ -467,10 +510,10 @@ def test_c1_weak_set_counts_instances_with_p_one_in_both_arms(tmp_path):
 
 # ================================================================================================= the follow-up
 def followup_world(root: Path, p_f=None, inst=("i1",), drop=(), base_p=None, set_=D.FOLLOWUP_SET, **per_run):
-    """The INCONCLUSIVE world (i1 worse on seed 0 only: control 0.4 / 0.4, treatment 0.6 / 0.4; mean d -0.04) unless
-    `base_p`, plus seeds 2-3 of `inst` x the three arms in `set_` (control 0.4, treatment 0.4, A6F 0.6 unless `p_f` =
-    {(instance, arm): (seed 2, seed 3)}); `drop` = (instance, arm, seed) not run; `per_run` as in `world`, for the
-    follow-up runs."""
+    """The INCONCLUSIVE world (i1 worse on seed 0 only: control 0.4 / 0.4, treatment 0.6 / 0.4; d -0.2 on seed means,
+    band 0.05) unless `base_p`, plus seeds 2-3 of `inst` x the three arms in `set_` (control 0.4, treatment 0.4, A6F
+    0.6 unless `p_f` = {(instance, arm): (seed 2, seed 3)}); `drop` = (instance, arm, seed) not run; `per_run` as in
+    `world`, for the follow-up runs."""
     runs = world(root, p=base_p if base_p is not None else {("i1", D.TREAT): (0.6, 0.4)})
     extra = []
     for i in inst:
@@ -488,38 +531,38 @@ def fu(res, k=0):
 
 
 @pytest.mark.parametrize("treat, want", [
-    ((0.35, 0.35), "ADOPT"),                      # i1 over seeds 0-3: 0.4 vs 0.425 -> d -0.059, mean -0.012
-    ((0.6, 0.6), "REJECT"),                       # worse than -band on both seeds 2 and 3
-    ((0.4, 0.4), "NOT ADOPTED"),                  # 0.4 vs 0.45 -> d -0.111, mean -0.022: still between
-    ((0.6, 0.4), "NOT ADOPTED"),                  # worse on one of seeds 2-3 only: no reject; mean -0.044
+    ((0.3, 0.3), "ADOPT"),                        # i1 over seeds 0-3: 0.4 vs 0.4 -> d 0, no harm
+    ((0.35, 0.35), "NOT ADOPTED"),                # 0.4 vs 0.425 -> d -0.059 < -0.05; seeds 2-3 gain: not both
+    ((0.6, 0.6), "REJECT"),                       # d_s < -band on both seeds 2 and 3
+    ((0.4, 0.4), "NOT ADOPTED"),                  # 0.4 vs 0.45 -> d -0.111
+    ((0.6, 0.4), "NOT ADOPTED"),                  # worse on one of seeds 2-3 only: no reject
 ])
 def test_followup_reading(tmp_path, treat, want):
     runs = followup_world(tmp_path, p_f={("i1", D.TREAT): treat})
     res = rep(tmp_path, runs, followup=(D.FOLLOWUP_SET,))
-    assert verdict(res).startswith("INCONCLUSIVE") and verdict(res).endswith("— i1")       # seeds 0-1 unchanged
+    assert verdict(res).startswith("INCONCLUSIVE") and "on i1 (pass these names" in verdict(res)  # seeds 0-1 as is
     f = fu(res)
-    assert f["applies"] and f["rerun"] == ["i1"] and not f["rerun_all"] and f["validity"]["ok"]
+    assert f["applies"] and f["rerun"] == ["i1"] and f["validity"]["ok"]
     assert f["verdict"].startswith(want), f["verdict"]
     row = next(r for r in f["outcome"]["rows"] if r["instance"] == "i1")
-    assert row["band"] == 0.05 and len(row["d_seed"]) == 4
+    assert row["band"] == 0.05 and len(row["d_seed"]) == 4 and row["rerun"]
     assert row["p_treat"] == pytest.approx((0.6 + 0.4 + treat[0] + treat[1]) / 4)
     if want == "NOT ADOPTED":
-        assert "non-inferiority not shown" in f["verdict"] and "open to Berk" in f["verdict"]
-    with open(tmp_path / "out.txt", "w") as fh:
-        D.print_report(res, out=fh)
-    assert f"FOLLOW-UP VERDICT (exclude): {want}" in (tmp_path / "out.txt").read_text()
+        assert "the reject consequence" in f["verdict"] and "open to Berk" in f["verdict"]
+    assert f"FOLLOW-UP VERDICT (exclude): {want}" in text(res)
 
 
-def test_followup_reruns_all_when_none_is_named_and_needs_every_run(tmp_path):
-    """Every instance at d -0.03 inside its band: INCONCLUSIVE naming none -> all 17 (here 5) rerun; with their
-    seeds 2-3 equal the 4-seed mean is -0.015 -> ADOPT. A missing follow-up run makes it INCOMPLETE."""
-    base = {(i, D.TREAT): (0.4 / 0.97, 0.4 / 0.97) for i in INST}
-    runs = followup_world(tmp_path, inst=INST, base_p=base)
-    f = fu(rep(tmp_path, runs, followup=(D.FOLLOWUP_SET,)))
-    assert f["rerun_all"] and f["rerun"] == INST and f["verdict"].startswith("ADOPT")
-    p_treat = (2 * 0.4 / 0.97 + 2 * 0.4) / 4                                        # seeds 0-3
-    assert f["outcome"]["mean_d"] == pytest.approx((0.4 - p_treat) / p_treat) and f["outcome"]["mean_d"] > -0.02
-    runs2 = followup_world(tmp_path / "b", inst=INST, base_p=base, drop={("i3", D.A6F, 3)})
+def test_followup_reruns_the_named_instances_and_needs_every_run(tmp_path):
+    """i1 and i3 inconclusive (worse on seed 0 only): both rerun; with seeds 2-3 at 0.3 their 4-seed means equal the
+    control's -> ADOPT. A missing follow-up run makes it INCOMPLETE."""
+    base = {(i, D.TREAT): (0.6, 0.4) for i in ("i1", "i3")}
+    p_f = {(i, D.TREAT): (0.3, 0.3) for i in ("i1", "i3")}
+    runs = followup_world(tmp_path, inst=("i1", "i3"), base_p=base, p_f=p_f)
+    res = rep(tmp_path, runs, followup=(D.FOLLOWUP_SET,))
+    check_inconclusive(res["readings"][0]["outcome"])
+    f = fu(res)
+    assert f["rerun"] == ["i1", "i3"] and f["verdict"].startswith("ADOPT") and f["n_runs"] == 2 * 2 * 3
+    runs2 = followup_world(tmp_path / "b", inst=("i1", "i3"), base_p=base, p_f=p_f, drop={("i3", D.A6F, 3)})
     f2 = fu(rep(tmp_path / "b", runs2, followup=(D.FOLLOWUP_SET,)))
     assert f2["verdict"].startswith("INCOMPLETE: 1 missing runs") and f2["validity"]["missing"] == [("i3", D.A6F, 3)]
 
@@ -545,7 +588,7 @@ def test_followup_does_not_apply_and_keeps_its_own_validity(tmp_path):
 def test_followup_runs_in_the_main_set_do_not_change_seeds_0_1(tmp_path, monkeypatch):
     """Seeds 2-3 put into set itx-r13 itself: the seeds 0-1 verdict is unchanged and `--followup itx-r13` reads them;
     the CLI writes the follow-up into the JSON."""
-    runs = followup_world(tmp_path, p_f={("i1", D.TREAT): (0.35, 0.35)}, set_=D.SET)
+    runs = followup_world(tmp_path, p_f={("i1", D.TREAT): (0.3, 0.3)}, set_=D.SET)
     res = rep(tmp_path, runs, followup=(D.SET,))
     assert verdict(res).startswith("INCONCLUSIVE") and fu(res)["verdict"].startswith("ADOPT")
     runs.to_parquet(tmp_path / "runs.parquet")
@@ -584,23 +627,32 @@ def test_followup_job_file(tmp_path):
     assert not (tmp_path / "x.jsonl").exists()
 
 
-# ================================================================================================= the amendment's sets
+# ================================================================================================= the amendments' sets
+def full_layout(added: bool = True) -> list[tuple[str, str, int]]:
+    """(instance, arm label, seed) of set itx-r13 after D-022's amendments: the rule set x the three arms, the other
+    instances of the fixed 11 and (`added`) the four added for the guard x {A9@r13x, A6F@r13x}, seeds 0-1 — 74 runs
+    (58 without the four)."""
+    rest = [i for i in D.C1_INSTANCES + (D.GUARD_ADDED if added else ()) if i not in D.RULE_INSTANCES]
+    return [(i, a, s) for i in D.RULE_INSTANCES for a in D.ARMS for s in D.SEEDS] + \
+        [(i, a, s) for i in rest for a in D.C1_ARMS for s in D.SEEDS]
+
+
 def job_layout() -> list[tuple[str, str, int]]:
-    """(instance, arm label, seed) of every job in `jobs/itx-r13.jsonl` (D-022 amendment 2026-10-13: 58 runs)."""
+    """(instance, arm label, seed) of every job in `jobs/itx-r13.jsonl`."""
     from itrea.experiments import pair
     jobs = [json.loads(x) for x in (ROOT / "jobs" / "itx-r13.jsonl").read_text().splitlines() if x.strip()]
     assert {j["set"] for j in jobs} == {D.SET} and {float(j["budget"]) for j in jobs} == {D.BUDGET}
     return [(j["name"], pair.arm_label(j), int(j["seed"])) for j in jobs]
 
 
-def world58(root: Path, *, p=None, drop=(), a0=None, extra=(), **per_run) -> pd.DataFrame:
-    """The 58-run layout of `jobs/itx-r13.jsonl` in set itx-r13 (P: control 0.4, treatment 0.4, A6F 0.6 unless `p` =
-    {(instance, arm): (seed 0, seed 1)}) and A0 of set dev on C1's 11 (0.9 unless `a0` = {instance: P}); `per_run`,
-    `drop`, `extra` as in `world`."""
+def world74(root: Path, *, added=True, p=None, drop=(), a0=None, extra=(), **per_run) -> pd.DataFrame:
+    """Set itx-r13 in `full_layout(added)` (P: control 0.4, treatment 0.4, A6F 0.6 unless `p` = {(instance, arm):
+    (seed 0, seed 1)}) and A0 of set dev on the fixed 11 (0.9 unless `a0` = {instance: P}); `per_run`, `drop`,
+    `extra` as in `world`."""
     p, a0 = p or {}, a0 or {}
     dflt = {D.CTRL: 0.4, D.TREAT: 0.4, D.A6F: 0.6}
     rows = []
-    for i, arm, s in job_layout():
+    for i, arm, s in full_layout(added):
         if (i, arm, s) in drop:
             continue
         kw = {k: v[(i, arm, s)] for k, v in per_run.items() if (i, arm, s) in v}
@@ -613,121 +665,166 @@ def world58(root: Path, *, p=None, drop=(), a0=None, extra=(), **per_run) -> pd.
     return pd.DataFrame(rows + list(extra))
 
 
-def text(res) -> str:
-    import io
-    buf = io.StringIO()
-    D.print_report(res, out=buf)
-    return buf.getvalue()
-
-
-def test_default_sets_are_the_job_files():
-    """The report's defaults are `jobs/itx-r13.jsonl`'s two sets: (a) the 3 x the three arms, (b) the 11 x {A9@r13x,
-    A6F@r13x}, seeds 0-1, 58 runs, neos-960392 in both; both within the 17 development + class-probe instances."""
-    lay = job_layout()
-    assert len(lay) == len(set(lay)) == 58 and {s for _, _, s in lay} == set(D.SEEDS)
-    rule = {(i, a) for i in D.RULE_INSTANCES for a in D.ARMS}
-    c1 = {(i, a) for i in D.C1_INSTANCES for a in D.C1_ARMS}
-    assert {(i, a) for i, a, _ in lay} == rule | c1 and len(rule | c1) * 2 == 58
-    assert set(D.RULE_INSTANCES) & set(D.C1_INSTANCES) == {"neos-960392"}
-    assert len(D.RULE_INSTANCES) == 3 and len(D.C1_INSTANCES) == len(set(D.C1_INSTANCES)) == 11
+def test_default_sets_are_the_amendments_and_the_job_files():
+    """The defaults: the rule set (3), the fixed 11 and the four added for the guard make the 17 development +
+    class-probe instances; `jobs/itx-r13.jsonl` holds the 58 of the first amendment, or the 74 once the four's 16
+    runs are appended (they may also land in a file of their own)."""
     dev = set(D.development_instances())
-    assert set(D.RULE_INSTANCES) <= dev and set(D.C1_INSTANCES) <= dev
+    assert set(D.RULE_INSTANCES) | set(D.C1_INSTANCES) | set(D.GUARD_ADDED) == dev and len(dev) == 17
+    assert set(D.RULE_INSTANCES) & set(D.C1_INSTANCES) == {"neos-960392"} and set(D.FLOOR_INSTANCES) < \
+        set(D.RULE_INSTANCES)
+    assert not set(D.GUARD_ADDED) & (set(D.RULE_INSTANCES) | set(D.C1_INSTANCES))
+    assert len(D.C1_INSTANCES) == len(set(D.C1_INSTANCES)) == 11 and len(full_layout()) == 74
+    lay = job_layout()
+    assert len(lay) == len(set(lay)) and len(lay) in (58, 74)
+    assert set(full_layout(added=False)) <= set(lay) <= set(full_layout())
 
 
-def test_58_run_layout_gives_a_complete_verdict_and_a_complete_c1_block(tmp_path):
-    """The defaults on the 58-run layout: the rule reads the 18 runs of the 3 (ADOPT, validity holding, mean over the
-    3; the header says the other 14 are not run), C1 reads its 44 (complete, A0 22 of 22): A9@r13x 0.4 vs A6F 0.6 on
-    all 11 and A0 0.9 on all 11 — improved 11 of 11 against both; A6F's weak set on these runs = all 11."""
-    runs = world58(tmp_path)
+def test_full_layout_gives_a_complete_verdict_hint_and_guard(tmp_path):
+    """The defaults on the 74 runs: the rule reads the 18 of the 3 (ADOPT; no mean), C1's completeness covers 17 x 2
+    arms x 2 seeds = 68 (complete, A0 22 of 22); HINT present (0.4 / 0.6 = 0.667), GUARD holds (d +1/3 on each of the
+    17); reported vs A6F and vs SCIP on the fixed 11: improved 11 of 11. On the 58 (the four not yet run) the D-022
+    verdict is the same and the GUARD is INCOMPLETE (16 missing, no partial mean) while the HINT is decided."""
+    runs = world74(tmp_path)
     res = D.report(runs, tmp_path)
     assert res["instances"] == list(D.RULE_INSTANCES) and res["c1_instances"] == list(D.C1_INSTANCES)
-    assert res["rule_set_is_the_amendments"] and len(res["not_in_rule_set"]) == 14
-    assert set(res["not_in_rule_set"]).isdisjoint(D.RULE_INSTANCES)
+    assert res["guard_instances"] == D.development_instances() and len(res["not_in_rule_set"]) == 14
     rd = res["readings"]
     assert len(rd) == 1 and rd[0]["n_runs"] == 18 and rd[0]["validity"]["ok"]
-    assert [r["instance"] for r in rd[0]["outcome"]["rows"]] == list(D.RULE_INSTANCES)
-    assert verdict(res).startswith("ADOPT R13 + R14") and rd[0]["validity"]["voids_outside_reading"] == 0
+    o = rd[0]["outcome"]
+    assert [r["instance"] for r in o["rows"]] == list(D.RULE_INSTANCES) and "mean_d" not in o
+    assert [r["kind"] for r in o["rows"]] == ["floor", "floor", "band"] and all(r["no_harm"] for r in o["rows"])
+    assert verdict(res).startswith("ADOPT R13 + R14")
     c = rd[0]["c1_completeness"]
-    assert c["complete"] and (c["n_runs"], c["n_expected"], c["n_a0"], c["n_a0_expected"]) == (44, 44, 22, 22)
-    assert not c["missing"] and not c["failed"] and not c["no_p"] and not c["a0_missing"]
-    cu, sc = rd[0]["c1"][D.A6F], rd[0]["c1"]["A0"]
-    assert cu["weak_set"] == sorted(D.C1_INSTANCES) and cu["n_baseline"] == 11
-    for blk, before, d in ((cu, 0.6, 1 / 3), (sc, 0.9, 5 / 9)):
+    assert c["complete"] and (c["n_runs"], c["n_expected"], c["n_a0"], c["n_a0_expected"]) == (68, 68, 22, 22)
+    h, g = rd[0]["c1"]["hint"], rd[0]["c1"]["guard"]
+    assert h["state"] == "present" and h["ratio"] == pytest.approx(0.4 / 0.6) and h["n"] == 11
+    assert g["state"] == "holds" and g["mean_d"] == pytest.approx(1 / 3) and g["n"] == 17
+    for blk, before in ((rd[0]["c1"][D.A6F], 0.6), (rd[0]["c1"]["A0"], 0.9)):
         a = blk[D.TREAT]["all"]
         assert (a["n"], a["better"], a["worse"]) == (11, 11, 0) and a["mean_P_before"] == pytest.approx(before)
-        assert a["mean_P_after"] == pytest.approx(0.4) and a["worst_P_after"] == pytest.approx(0.4)
-        assert a["mean_d"] == pytest.approx(d) and a["ci"][0] == pytest.approx(d) and a["p"] < 0.01
     txt = text(res)
-    assert "The other 14 development + class-probe instances are not run: R13 cannot act there" in txt
-    assert "mean d over the 3 of the rule set" in txt and "44 of 44 runs" in txt and "A0 (dev / classprobe) 22 of 22" \
-        in txt and "— set (b) complete" in txt and "VERDICT (exclude): ADOPT" in txt
-    assert "all 11: improved 11 of 11, mean P 0.600 -> 0.400 (-33 %), worse 0" in txt
-    # the CLI's defaults are the same two sets; --instances overrides the rule set and the header says so
+    for s in ("stated assumption: the 14 other development + class-probe instances are not run",
+              "termination test (not as a pruning limit)", "No mean over the instances",
+              "68 of 68 runs", "— complete", "HINT present", "GUARD holds", "go / no-go on C1 is Berk's",
+              "VERDICT (exclude): ADOPT", "two-sided as D-018's floor rule"):
+        assert s in txt, s
+    r58 = D.report(world74(tmp_path / "58", added=False), tmp_path / "58")
+    assert verdict(r58) == verdict(res)
+    c58 = r58["readings"][0]["c1_completeness"]
+    assert not c58["complete"] and c58["n_runs"] == 52 and len(c58["missing"]) == 16
+    assert {m[0] for m in c58["missing"]} == set(D.GUARD_ADDED)
+    assert r58["readings"][0]["c1"]["guard"]["state"] == "INCOMPLETE"
+    assert r58["readings"][0]["c1"]["hint"]["state"] == "present"
+    t58 = text(r58)
+    assert "GUARD INCOMPLETE: 16 runs of the 17 missing" in t58
+    assert "16 on the four instances added for the guard" in t58
+    # the CLI's defaults are the same sets; --instances overrides the rule set and the header says so
     runs.to_parquet(tmp_path / "runs.parquet")
     out = tmp_path / "r.json"
     assert D.main(["--runs", str(tmp_path / "runs.parquet"), "--root", str(tmp_path), "--json", str(out)]) == 0
     js = json.loads(out.read_text())
     assert js["instances"] == list(D.RULE_INSTANCES) and js["c1_instances"] == list(D.C1_INSTANCES)
-    assert js["readings"][0]["verdict"] == verdict(res)
+    assert js["readings"][0]["verdict"] == verdict(res) and js["readings"][0]["c1"]["guard"]["state"] == "holds"
     two = D.report(runs, tmp_path, instances=list(D.RULE_INSTANCES[:2]))
-    assert len(two["readings"][0]["outcome"]["rows"]) == 2 and "overriding D-022's amendment" in text(two)
+    assert len(two["readings"][0]["outcome"]["rows"]) == 2 and "overriding D-022's amendments" in text(two)
 
 
-def test_the_mean_is_over_the_rule_set(tmp_path):
-    """D-022's amendment and its clarification: the mean d is over the three — the 14 not run do not enter it. Each
-    of the three at d = -0.06 inside a wide band (control 0.3 / 0.5): REJECT by the mean, -0.06; a mean over the 17
-    with the 14 at d = 0 would read -0.011 and adopt."""
-    p = {(i, D.CTRL): (0.3, 0.5) for i in D.RULE_INSTANCES}
-    p.update({(i, D.TREAT): (0.4 / 0.94, 0.4 / 0.94) for i in D.RULE_INSTANCES})
-    res = D.report(world58(tmp_path, p=p), tmp_path)
+FH, KR, N96 = D.RULE_INSTANCES
+
+
+@pytest.mark.parametrize("ctrl, treat, kind, rerun", [
+    ((0.010, 0.012), (0.013, 0.014), "ADOPT", []),                 # ΔP +0.0025 on seed means: holds
+    ((0.010, 0.012), (0.022, 0.012), "INCONCLUSIVE", [FH]),        # ΔP +0.006 (+0.012 / 0): fails on one seed
+    ((0.010, 0.010), (0.020, 0.020), "REJECT", []),                # ΔP +0.010 on both seeds
+    ((0.010, 0.010), (0.000, 0.000), "REJECT", []),                # a GAIN of 0.010 on both seeds: two-sided
+    ((0.010, 0.010), (0.020, 0.000), "REJECT", []),                # ±0.010: seed means hold, both seeds fail
+])
+def test_the_floor_limb(tmp_path, ctrl, treat, kind, rerun):
+    """D-022's second amendment on fhnw-binpack4-48: |ΔP| <= 0.005 on seed means (ΔP = P(A9@r13x) − P(A9@r13));
+    REJECT when |ΔP_s| > 0.005 on both seeds, before ADOPT — as written, two-sided (D-018's floor rule): a gain beyond
+    0.005 on both seeds rejects, and so do opposite-sign seeds whose mean holds (pinned here, open to Berk)."""
+    res = D.report(world74(tmp_path, p={(FH, D.CTRL): ctrl, (FH, D.TREAT): treat}), tmp_path)
     o = res["readings"][0]["outcome"]
-    assert len(o["rows"]) == 3 and o["mean_d"] == pytest.approx(-0.06) and not o["worse_both"]
-    assert verdict(res).startswith("REJECT") and "mean d -0.060 <= -0.05" in verdict(res)
-    assert -0.06 * 3 / 17 > D.ADOPT_MEAN                                  # the other reading would have adopted
+    row = o["rows"][0]
+    assert row["kind"] == "floor" and row["value"] == pytest.approx(sum(treat) / 2 - sum(ctrl) / 2)
+    assert row["limit"] == D.FLOOR_DP and o["kind"] == kind and o["rerun"] == rerun
+    check_inconclusive(o)
+    if kind == "REJECT":
+        assert o["rejected"] == [FH] and "|ΔP| <= 0.005 fails on both seeds" in verdict(res)
+    assert f"{row['value']:+.4f}" in text(res)                                       # ΔP printed signed
 
 
-def test_inconclusive_naming_none_names_the_three_for_the_followup(tmp_path):
-    """Every rule instance at d -0.03 inside its band: INCONCLUSIVE naming none -> the follow-up reruns all three of
-    the rule set; the verdict names them, since `make-jobs itx-r13f --instances all` would make the 17."""
-    p = {(i, D.TREAT): (0.4 / 0.97, 0.4 / 0.97) for i in D.RULE_INSTANCES}
-    runs = world58(tmp_path, p=p)
+def test_the_band_limb_on_neos_960392(tmp_path):
+    """neos-960392 (band limb): d on seed means -0.2 against band 0.05 with one seed failing -> INCONCLUSIVE on it;
+    d -0.33 on both seeds -> REJECT; inside A6F's spread (0.2 / 0.8) -> ADOPT."""
+    r1 = D.report(world74(tmp_path / "a", p={(N96, D.TREAT): (0.6, 0.4)}), tmp_path / "a")
+    o1 = r1["readings"][0]["outcome"]
+    assert o1["kind"] == "INCONCLUSIVE" and o1["rerun"] == [N96] and o1["rows"][2]["kind"] == "band"
+    r2 = D.report(world74(tmp_path / "b", p={(N96, D.TREAT): (0.6, 0.6)}), tmp_path / "b")
+    assert verdict(r2).startswith("REJECT") and r2["readings"][0]["outcome"]["rejected"] == [N96]
+    r3 = D.report(world74(tmp_path / "c", p={(N96, D.TREAT): (0.6, 0.6), (N96, D.A6F): (0.2, 0.8)}), tmp_path / "c")
+    assert verdict(r3).startswith("ADOPT") and r3["readings"][0]["outcome"]["rows"][2]["band"] == pytest.approx(0.75)
+
+
+def test_a_mechanism_failure_is_inconclusive_and_cannot_be_washed_out(tmp_path):
+    """A treatment run on krka ended first by cuOpt's 'optimal' with a final gap 1e-4 (leg (2) fails) and no harm:
+    not ADOPT, not REJECT -> INCONCLUSIVE naming krka, and the verdict says a seeds 0-1 mechanism failure ends NOT
+    ADOPTED; with clean seeds 2-3 the follow-up is NOT ADOPTED (leg (2) reads seeds 0-3). A treatment run ended by
+    cuOpt's 'optimal' at gap 0 is not a failure."""
+    kw = dict(cuopt_exit={(KR, D.TREAT, 0): "optimal", (FH, D.TREAT, 1): "optimal"},
+              cuopt_exit_t={(KR, D.TREAT, 0): 30.0, (FH, D.TREAT, 1): 40.0},
+              solver_exit_t={(KR, D.TREAT, 0): 30.5, (FH, D.TREAT, 1): 40.5},
+              final_gap={(KR, D.TREAT, 0): 1e-4, (FH, D.TREAT, 1): 0.0})
+    runs = world74(tmp_path, **kw)
+    fu_rows = [make(tmp_path, D.FOLLOWUP_SET, KR, a, s, {D.CTRL: 0.4, D.TREAT: 0.4, D.A6F: 0.6}[a])
+               for s in D.FOLLOWUP_SEEDS for a in D.ARMS]
+    runs = pd.concat([runs, pd.DataFrame(fu_rows)], ignore_index=True)
     res = D.report(runs, tmp_path, followup=(D.FOLLOWUP_SET,))
-    v = verdict(res)
-    assert v.startswith("INCONCLUSIVE") and "none is, so all 3 of the rule set: " + ", ".join(D.RULE_INSTANCES) in v
-    assert "its 'all' is the 17" in v
-    f = res["readings"][0]["followup"]
-    assert f["applies"] and f["rerun_all"] and f["rerun"] == list(D.RULE_INSTANCES)
-    assert len(f["validity"]["missing"]) == 3 * 3 * 2 and f["verdict"].startswith("INCOMPLETE")
+    o = res["readings"][0]["outcome"]
+    assert o["mechanism_fail"] == [(KR, 0)] and all(r["no_harm"] for r in o["rows"])
+    assert o["kind"] == "INCONCLUSIVE" and o["rerun"] == [KR]
+    check_inconclusive(o)
+    assert "mechanism fails" in verdict(res) and "ends NOT ADOPTED whatever seeds 2–3 show" in verdict(res)
+    f = fu(res)
+    assert f["applies"] and f["rerun"] == [KR] and f["validity"]["ok"] and f["verdict"].startswith("NOT ADOPTED")
+    assert next(r for r in f["outcome"]["rows"] if r["instance"] == KR)["mechanism_fail"] == [0]
+    assert "mechanism leg (2): FAILS on [('neos-3004026-krka', 0)]" in text(res)
 
 
 def test_a_missing_or_failed_c1_run_does_not_change_the_d022_verdict(tmp_path):
-    """Set (b)'s own runs (sing44, rail01 — not in the rule set): missing, failed, voided without a rerun, or under a
-    wrong harness, none of them changes D-022's verdict or its validity; the C1 completeness line names them. A failed
-    one gives both readings, with byte-identical D-022 verdicts; `keep` scores it in the C1 block."""
-    full = D.report(world58(tmp_path / "full"), tmp_path / "full")
+    """C1's own runs (sing44, rail01 — not in the rule set): missing, failed, voided without a rerun, or under a wrong
+    harness, none of them changes D-022's verdict or its validity; C1's completeness line names them. A failed one
+    gives both readings, with byte-identical D-022 verdicts: under `exclude` the hint is INCOMPLETE, under `keep` the
+    failed A9 run counts as an A9 outcome (D-002 §6)."""
+    full = D.report(world74(tmp_path / "full"), tmp_path / "full")
     v0 = verdict(full)
     assert v0.startswith("ADOPT")
-    gone = D.report(world58(tmp_path / "m", drop={("sing44", D.TREAT, 1)}), tmp_path / "m")
+    gone = D.report(world74(tmp_path / "m", drop={("sing44", D.TREAT, 1)}), tmp_path / "m")
     rd = gone["readings"][0]
     assert verdict(gone) == v0 and rd["validity"]["ok"] and rd["validity"] == full["readings"][0]["validity"]
     c = rd["c1_completeness"]
-    assert not c["complete"] and c["missing"] == [("sing44", D.TREAT, 1)] and c["n_runs"] == 43
-    assert rd["c1"][D.A6F][D.TREAT]["all"]["n"] == 11                     # sing44 still has seed 0 of both arms
+    assert not c["complete"] and c["missing"] == [("sing44", D.TREAT, 1)] and c["n_runs"] == 67
+    assert rd["c1"]["hint"]["state"] == "INCOMPLETE" and rd["c1"]["guard"]["state"] == "INCOMPLETE"
     txt = text(gone)
-    assert "missing 1 [('sing44', 'A9@r13x', 1)]" in txt and "set (b) INCOMPLETE (the C1 block reads what is" in txt
-    assert f"VERDICT (exclude): {v0}" in txt
-    fl = D.report(world58(tmp_path / "f", status={("rail01", D.A6F, 0): "failed"}), tmp_path / "f")
+    assert "missing 1 [('sing44', 'A9@r13x', 1)]" in txt and "INCOMPLETE (C1 reads what is there" in txt
+    assert "HINT INCOMPLETE" in txt and f"VERDICT (exclude): {v0}" in txt
+    fl = D.report(world74(tmp_path / "f", status={("sing44", D.TREAT, 0): "failed"},
+                          p={("sing44", D.TREAT): (1.0, 0.4)}), tmp_path / "f")
     by = {r["reading"]: r for r in fl["readings"]}
     assert set(by) == {"exclude", "keep"} and by["exclude"]["verdict"] == by["keep"]["verdict"] == v0
     assert not by["exclude"]["failed_runs"] and not by["keep"]["failed_runs"]       # not the rule's runs
     ce, ck = by["exclude"]["c1_completeness"], by["keep"]["c1_completeness"]
-    assert ce["missing"] == [("rail01", D.A6F, 0)] and not ce["complete"]
-    assert ck["complete"] and ck["n_runs"] == 44 and [(f["instance"], f["arm"]) for f in ck["failed"]] == \
-        [("rail01", D.A6F)]
+    assert ce["missing"] == [("sing44", D.TREAT, 0)] and not ce["complete"]
+    assert ck["complete"] and ck["n_runs"] == 68 and [(f["instance"], f["arm"]) for f in ck["failed"]] == \
+        [("sing44", D.TREAT)]
+    assert by["exclude"]["c1"]["hint"]["state"] == "INCOMPLETE"
+    hk = by["keep"]["c1"]["hint"]
+    assert hk["state"] == "present" and hk["mean_P_a9"] == pytest.approx((10 * 0.4 + 0.7) / 11)
     assert "(kept as D-002 §6 crashes)" in text(fl)
-    # a void of a set-(b) run whose rerun is not in the table (its key read from the voided directory's run.json):
+    # a void of a C1 run whose rerun is not in the table (its key read from the voided directory's run.json):
     # outside the rule's reading, missing in C1's
-    runs = world58(tmp_path / "v")
+    runs = world74(tmp_path / "v")
     row = runs[(runs["instance"] == "sing44") & (runs["arm"] == D.A6F) & (runs["seed"] == 1)].iloc[0]
     moved = tmp_path / "v" / D.SET / "void" / (row["run_id"] + "__20261013160000")
     moved.parent.mkdir(parents=True, exist_ok=True)
@@ -736,23 +833,23 @@ def test_a_missing_or_failed_c1_run_does_not_change_the_d022_verdict(tmp_path):
     vd = D.report(runs.drop(index=row.name), tmp_path / "v")["readings"][0]
     assert vd["verdict"] == v0 and vd["validity"]["voids_outside_reading"] == 1 and not vd["validity"]["voids"]
     assert vd["c1_completeness"]["missing"] == [("sing44", D.A6F, 1)]
-    # a set-(b) run under a wrong harness or compiling on the clock is not the rule's run either
-    bad = D.report(world58(tmp_path / "h", harness={("rail01", D.TREAT, 0): None},
-                           compiled_cuda={("sing44", D.A6F, 0): True}), tmp_path / "h")
+    # a C1 run under a wrong harness or compiling on the clock is not the rule's run either
+    bad = D.report(world74(tmp_path / "h", harness={("rail01", D.TREAT, 0): None},
+                           compiled_cuda={("glass4", D.A6F, 0): True}), tmp_path / "h")
     assert verdict(bad) == v0
 
 
 def test_a_missing_or_failed_rule_set_run_changes_the_d022_verdict(tmp_path):
     """A rule-set run missing (fhnw's control; neos-960392's A9@r13x, which C1 reads too) or failed (krka's A6F):
     INCOMPLETE under `exclude`; `keep` scores the crash and names it. C1 stays complete unless the run is shared."""
-    r1 = D.report(world58(tmp_path / "a", drop={("fhnw-binpack4-48", D.CTRL, 0)}), tmp_path / "a")
+    r1 = D.report(world74(tmp_path / "a", drop={(FH, D.CTRL, 0)}), tmp_path / "a")
     assert verdict(r1).startswith("INCOMPLETE: 1 missing runs") and r1["readings"][0]["c1_completeness"]["complete"]
-    r2 = D.report(world58(tmp_path / "b", drop={("neos-960392", D.TREAT, 0)}), tmp_path / "b")
+    r2 = D.report(world74(tmp_path / "b", drop={(N96, D.TREAT, 0)}), tmp_path / "b")
     rd2 = r2["readings"][0]
-    assert verdict(r2).startswith("INCOMPLETE") and rd2["validity"]["missing"] == [("neos-960392", D.TREAT, 0)]
-    assert rd2["c1_completeness"]["missing"] == [("neos-960392", D.TREAT, 0)]
-    r3 = D.report(world58(tmp_path / "c", status={("neos-3004026-krka", D.A6F, 1): "failed"}), tmp_path / "c")
+    assert verdict(r2).startswith("INCOMPLETE") and rd2["validity"]["missing"] == [(N96, D.TREAT, 0)]
+    assert rd2["c1_completeness"]["missing"] == [(N96, D.TREAT, 0)] and rd2["c1"]["hint"]["state"] == "INCOMPLETE"
+    r3 = D.report(world74(tmp_path / "c", status={(KR, D.A6F, 1): "failed"}), tmp_path / "c")
     by = {r["reading"]: r for r in r3["readings"]}
     assert by["exclude"]["verdict"].startswith("INCOMPLETE")
     assert by["keep"]["verdict"].startswith("ADOPT") and "1 failed runs kept as D-002 §6" in by["keep"]["verdict"]
-    assert by["exclude"]["c1_completeness"]["complete"] and by["keep"]["c1_completeness"]["complete"]
+    assert by["keep"]["c1_completeness"]["complete"] and not by["exclude"]["c1_completeness"]["complete"]
