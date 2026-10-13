@@ -63,3 +63,43 @@ close to the release so it might not make it to 26.10 but we can prioritize this
 v26.08.00 is the latest (installed here); the tag v26.10.00a marks the 26.10 development branch (RAPIDS convention), not
 a release. Our arm A9 (one-way cuOpt → EA) does not depend on the feature; when it ships, mid-run injection into cuOpt
 (EA → cuOpt) becomes possible without restarts. Installing a new cuOpt is a download → Berk's word first.
+
+## 2026-10-13 — fixed by PR #2098 (merged 2026-10-12, in 26.10); verified on the 26.10 nightly
+Berk (2026-10-13): "If the nightly for the next version is up can you check if our feature request in Github issues is
+implemented properly?" Issue closed 2026-10-12 06:09 UTC by **NVIDIA/cuopt#2098** "Keep presolve enabled for MIP
+set-solution callbacks" (akifcorduk; approved by aliceb-nv and ramakrishnap-nv), merged into `main` = 26.10.00 (the
+maintainer had expected 26.12). What it does (diff read): presolve stays as configured when a SET callback is
+registered; Papilo's **dual reductions are turned off** while one is registered (so feasible user points stay
+representable); an injected vector in ORIGINAL variable order is checked against the original model (bounds,
+integrality, every row, with cuOpt's tolerances), crushed into the presolved space, re-checked, and queued only if
+feasible, with its objective recomputed; GET callbacks keep returning original-space vectors; a SET callback that
+offers nothing now skips (`continue`) instead of ending the callback loop. C++ tests cover presolve on/off ×
+min/max × semi-continuous and three invalid offers; the Python callback tests are skipped upstream (cuopt#1909).
+
+**Our probe** (`tools/probe_cuopt_setsol.py`, `tools/probe_cuopt_setsol_report.py`; nightly
+`cuopt-cu13 == libcuopt-cu13 == 26.10.0a294.post261013051018` in a separate venv `~/venvs/cuopt-2610n`, installed on
+Berk's ask; 26.08 = the repository venv; 20-s solves, 3 threads, RMM 8 GB, a short lease, LLM servers left up): five
+development instances × {no SET callback, a SET callback that never offers, inject our best checked solution, inject
+infeasible variants} on 26.10, the injection on 26.08, and a glass4 point that beats the proven optimum.
+- **Presolve with a SET callback: on in 26.10** on all five (glass4 322 → 317 variables, sing44 59,708 → 51,461,
+  loue 3,255 → 3,250, crna → 308; item_placement unchanged); **26.08: "Presolve is disabled because set_solution
+  callbacks are provided."** The cost of dual reductions off: the presolved size is identical with and without a
+  (never-offering) SET callback on 4 of 5; crna keeps 3 more variables (308 vs 305).
+- **Injected solutions accepted, echoed exactly, valid:** glass4 (the optimum 1,200,012,599.999), loue (29,699 vs
+  cuOpt's own 58,784), item_placement (4.7388 vs 33.15; cuOpt then improved it to 4.73877), crna (the optimum
+  1.810748), sing44 (8,171,973.25) — each reported back by the GET callback 1–6 ms after the offer, the echoed vector
+  equal to the offered one (max |Δ| ≤ 1e-12; sing44 9.1e-13), feasible by our exact checker (crna and sing44 from
+  the rerun with offers from the first call, `/tmp/setsol/out2`).
+- **Infeasible offers rejected:** a fractional integer and an all-ones shift (glass4, item_placement, loue): 0 reported.
+  The glass4 point below MIPLIB's proven optimum (1,200,006,662.6, which our own checker's tolerance had accepted in a
+  development run) is rejected by cuOpt — correct.
+- **Limitation (pre-existing, not changed by #2098): cuOpt polls SET callbacks only when its GPU heuristics' population
+  records a new best feasible solution** (`population_t::run_solution_callbacks`, called from `add_solution` on an
+  improvement, for initial solutions and in `generate_quick_feasible_solution`; source at 1e0c261). Incumbents found by
+  other components (CPU FJ, branch-and-bound) are reported to GET callbacks without polling SET. Measured on 26.10:
+  crna — 11 SET calls, all at 0.70–0.71 s, none in the remaining 29 s; sing44 — the first SET call at 28.3 s, after 639
+  GET reports. So an outside solution enters only while cuOpt's own heuristics are improving — not when cuOpt has
+  stalled, which is when a partner's solution would help most (A9, D-015).
+- **Verdict:** the feature request is implemented properly — presolve on, original-space injection crushed correctly,
+  invalid offers rejected. A follow-up request (poll SET callbacks on a timer or at B&B events, so a stalled solver can
+  still take a partner's solution) is drafted for Berk's yes; nothing posted.

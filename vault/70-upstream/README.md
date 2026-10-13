@@ -21,7 +21,7 @@ not cover any particular one. The same applies to anything submitted elsewhere (
 ## Drafts
 | file | project | status |
 |---|---|---|
-| [[2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve]] — NVIDIA/cuopt#2073 (feature request: accept solutions mid-run without disabling presolve; filed 2026-10-07 with Berk's yes, edited to add how SCIP handles it) | cuOpt | open; labelled P1, the maintainer aims for 26.12 (2026-10-08) |
+| [[2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve]] — NVIDIA/cuopt#2073 (feature request: accept solutions mid-run without disabling presolve; filed 2026-10-07 with Berk's yes, edited to add how SCIP handles it) | cuOpt | **fixed** by PR #2098 (merged 2026-10-12, in 26.10); verified on the 26.10 nightly 2026-10-13 (presolve on, injection crushed and accepted, invalid offers rejected); limitation found: SET polled only on GPU-population improvements — follow-up drafted, not posted |
 
 Candidates seen so far (not drafted): none. Items from the predecessor (HiGHS `time_limit` on `s100`, ERGO-Code/HiGHS
 #3314) are optopt's and are not re-filed from here.
