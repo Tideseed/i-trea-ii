@@ -103,3 +103,6 @@ infeasible variants} on 26.10, the injection on 26.08, and a glass4 point that b
 - **Verdict:** the feature request is implemented properly — presolve on, original-space injection crushed correctly,
   invalid offers rejected. A follow-up request (poll SET callbacks on a timer or at B&B events, so a stalled solver can
   still take a partner's solution) is drafted for Berk's yes; nothing posted.
+- **2026-10-13 11:xx, Berk:** "I just got word it is integrated to 26.10" — the fix ships in cuOpt 26.10 (our check:
+  `main` = 26.10.00, every nightly since the merge is a 26.10 build, no 26.12 nightlies yet). Drafts of the follow-up
+  stay unposted (no yes).
