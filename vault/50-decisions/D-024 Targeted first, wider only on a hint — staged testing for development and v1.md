@@ -78,3 +78,14 @@ parameterised; `tools/d022_report.py`: D-022's second amendment (in progress).
 ## Open for Berk (v1)
 Yes / no per item: (a)–(h) above. The most consequential: (d) — with no hint, is v1's external minimum left unevaluated,
 or does a guard-only stage 2 (≈ 9 h) run anyway?
+
+## Addendum — Berk's answers (2026-10-13 15:5x, question panel)
+- **Staging: "Yes, stage it"** — items (a), (b), (c), (e) and (h) are decided for prereg-v2: stage 1 = the panel + the 5
+  no-solution H_cu-unseen instances, the hint = ratio of means ≤ 0.95 (the one registered futility-only look, R21
+  amended), the rest of T1 + T2 only after a hint, one frozen configuration / cuOpt version / harness across stages,
+  D-019's literal readings and the 233-wide geo-mean only in the limits stage.
+- **No-hint case: "Guard-only stage anyway"** — item (d): the guard stage (T2's E-sample + W-only ≈ 8.5–9.4 h of GPU
+  runs) runs whatever the hint says, so v1's minimum (guard + solutions found, D-019) is always evaluated.
+- **SCIP-alone runs: "Yes, 81"** — item (f).
+- Item (g) (part A's futility stage) was not asked separately; it follows the same pattern and is written into prereg-v2
+  with the test-set size question (#32).
