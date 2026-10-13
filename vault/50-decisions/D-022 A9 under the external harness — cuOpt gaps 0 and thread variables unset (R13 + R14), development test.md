@@ -80,3 +80,11 @@ the other 14 counted as d = 0 by construction (stated, not run). **C1's interim 
 cryptanalysiskb128n5obj16, rail01, crna, loue, sing44, ca, item_placement, neos-960392, toguru, comp21 — 11; comp21
 borderline at 0.506; selected on 3-core A6, stated): {A9@r13x, A6F@r13x} × seeds 0–1. `jobs/itx-r13.jsonl` holds
 these 58 runs (e1403fa); `tools/d022_report.py` gains the instance selection before its reading.
+
+*Clarification (2026-10-13 15:2x, AgentRA, before any reading of itx-r13; runs in progress, none read):* the mean d is
+over the three; the other 14 are not run and do not enter it ("counted as d = 0 by construction" above says why they
+need no run, not that they are averaged in — over 17 the mean would dilute any effect 17/3-fold; open to Berk). The
+follow-up reruns the three's instances worse than −band_i on exactly one seed, or all three when none is (named in the
+verdict: `make-jobs itx-r13f --instances all` means the 17); its mean is over the three. C1's block reads A9@r13x vs
+A6F@r13x (and vs A0) on the 11 only, with its own completeness line; it never makes D-022's verdict INCOMPLETE or
+INVALID (`tools/d022_report.py --instances / --c1-instances`, defaults the three / the 11).

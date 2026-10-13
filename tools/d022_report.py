@@ -1,11 +1,14 @@
 """D-022 report: A9 under the external harness — cuOpt's MIP gaps 0 and its thread variables unset (D-021 R13 + R14),
-development test (D-010) — and C1's interim A9 result on the 17 instances (D-019 addendum). The rules are D-022's,
-fixed before any run (with its clarifications of 2026-10-12, also before any run); nothing is chosen by eye.
+development test (D-010) — and C1's interim A9 result (D-019 addendum), both as D-022's amendment of 2026-10-13
+(before any run, after Berk's "targeted and surgical tests" instruction, D-024) narrowed them. The rules are D-022's,
+fixed before any run (with its clarifications of 2026-10-12 and the amendment, also before any run); nothing is
+chosen by eye.
 
 Usage (repository root, after `itrea build-runs`; untimed analysis: OMP_NUM_THREADS=1, never beside timed runs with
 default thread counts):
 
     OMP_NUM_THREADS=1 .venv/bin/python tools/d022_report.py [--set itx-r13] [--failed both|exclude|keep]
+                                                            [--instances A,B,C] [--c1-instances A,B,…]
                                                             [--followup [itx-r13f]] [--json out]
     itrea d022-report …                       (the same, through the entry point)
 
@@ -16,14 +19,24 @@ solve's `settings`, `exit_reason`) and `ea.summary.json` (`P`, `gene_dtype`), an
 `<raw>/<set>/void.jsonl` (the pool's record of voided runs, moved aside and not in the table). The checked-incumbents
 table is not needed: every number here is a run-table column or a run-directory field.
 
-Arms (`jobs/itx-r13.jsonl`, set itx-r13, 120 s, seeds 0–1, the 17 development + class-probe instances): control A9@r13
-(A9 under the harness {ext, cuopt_gap_zero false, cuopt_env_unset false}), treatment A9@r13x (A9 under ext), same-day
-A6F@r13x (cuOpt alone on F, ext). A0 for the C1 block: the runs of sets `dev` / `classprobe`, 120 s, seeds 0–1.
+Arms (set itx-r13, 120 s, seeds 0–1): control A9@r13 (A9 under the harness {ext, cuopt_gap_zero false,
+cuopt_env_unset false}), treatment A9@r13x (A9 under ext), same-day A6F@r13x (cuOpt alone on F, ext). A0 for the C1
+block: the runs of sets `dev` / `classprobe`, 120 s, seeds 0–1. `jobs/itx-r13.jsonl` holds 58 runs in two sets of
+instances (D-022 amendment 2026-10-13):
+  (a) the RULE SET (`--instances`, default RULE_INSTANCES): the three instances where cuOpt stops on its own 1e-4
+      "optimal" in our recorded runs — fhnw-binpack4-48, neos-3004026-krka, neos-960392 — x the three arms (18 runs).
+      Only these are read by D-022's rule (validity, mechanism, outcome, verdict, follow-up). The other 14 development
+      + class-probe instances are not run: R13 cannot act there (cuOpt never stopped early on them) and R14 is
+      measured inert; they do not enter the mean.
+  (b) the C1 SET (`--c1-instances`, default C1_INSTANCES): cuOpt's 11 weak development instances (cuOpt-alone P >= 0.5
+      at 120 s in earlier 3-core A6 runs) x {A9@r13x, A6F@r13x} (44 runs; neos-960392's 4 are shared with (a)). Read
+      only by C1's interim block, which has its own completeness line and never changes D-022's verdict. A9@r13 is
+      not expected there (it runs on (a) only; neos-960392 is the one instance in both).
 
-A reading reads only its own runs: the 17 instances x the three arms x its seeds (0–1; the follow-up's 2–3) x 120 s,
-not synthetic, not in a voided block. Its failed runs and its voids are of those keys only (a void's key comes from the
-run table's row of its run id — the rerun —, else from the voided directory's own run.json, written at the run's
-start; a void whose key cannot be read is counted).
+The rule's reading reads only its own runs: the rule set x the three arms x its seeds (0–1; the follow-up's 2–3) x
+120 s, not synthetic, not in a voided block. Its failed runs and its voids are of those keys only (a void's key comes
+from the run table's row of its run id — the rerun —, else from the voided directory's own run.json, written at the
+run's start; a void whose key cannot be read is counted). Runs of set (b) alone, failed or voided, are not its runs.
 
 Validity (must hold; else the verdict is INVALID):
   - no compile on the clock: run.json `compiled_on_clock_cuda` (the project's CUDA cache, every run) and, on the arms
@@ -55,40 +68,43 @@ reading (A6F 5.02 / 4.99 / 5.03); start-up CPU is in the numerator, so it reads 
 
 Outcome (bounded d of the treatment vs the control on seed means, positive = treatment better; per seed
 d_s = effect_d(P_ctrl,s, P_treat,s); band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference |a − b| /
-max(a, b, 1e-3) of the control or of A6F@r13x); the mean over the 17 counts every instance, both-P = 1 ones at d = 0;
-a run without P(120) on any of the three arms makes the verdict INCOMPLETE and is named):
+max(a, b, 1e-3) of the control or of A6F@r13x); the mean d is over the rule set (the three; amendment 2026-10-13 and
+its clarification: the 14 not run do not enter it), both-P = 1 ones at d = 0; a run without P(120) on any of the
+three arms makes the verdict INCOMPLETE and is named):
   - REJECT (A9 keeps the default gaps; D-021's A9 rows run under {ext, gap_zero false, env_unset false}) if the mean
     d <= −0.05 or any instance has d_s < −band_i on both seeds;
   - ADOPT R13 + R14 for A9 (the C1 freeze carries harness ext) if the mean d >= −0.02 and no instance is worse than
     −band_i on both seeds;
   - otherwise INCONCLUSIVE (−0.05 < mean d < −0.02, no instance worse on both seeds) -> seeds 2–3 on the instances
-    worse than −band_i on exactly one seed (all 17 when none is), same rules (the report names them).
+    worse than −band_i on exactly one seed (all of the rule set when none is), same rules (the report names them —
+    `itrea make-jobs itx-r13f --instances <names>`; its `all` means the 17, so the names are passed).
 
 The follow-up (`--followup [SET]`, D-022's clarification of 2026-10-12, fixed before any run): applies only when the
-seeds 0–1 verdict is INCONCLUSIVE. Runs: the named instances (or all 17) x seeds 2–3 x the same three arms and
-harnesses, 120 s, in their own set `itx-r13f` (`itrea make-jobs itx-r13f`). Validity as above, on those runs. band_i
-stays seeds 0–1's; a rerun instance's d is the bounded d on its means over seeds 0–3 and it is "worse on both seeds"
-when d_s < −band_i on both seeds 2 and 3; the others keep their seeds-0–1 d; the mean is over the 17. REJECT if the
-mean d <= −0.05 or a rerun instance is worse on both seeds 2 and 3; ADOPT if the mean d >= −0.02; otherwise NOT
-ADOPTED — non-inferiority not shown, the reject consequence, no further seeds (the terminal rule the record left
-open, stated before any run and open to Berk).
+seeds 0–1 verdict is INCONCLUSIVE. Runs: the named instances (or all of the rule set) x seeds 2–3 x the same three
+arms and harnesses, 120 s, in their own set `itx-r13f`. Validity as above, on those runs. band_i stays seeds 0–1's; a
+rerun instance's d is the bounded d on its means over seeds 0–3 and it is "worse on both seeds" when d_s < −band_i on
+both seeds 2 and 3; the others keep their seeds-0–1 d; the mean is over the rule set. REJECT if the mean d <= −0.05 or
+a rerun instance is worse on both seeds 2 and 3; ADOPT if the mean d >= −0.02; otherwise NOT ADOPTED — non-inferiority
+not shown, the reject consequence, no further seeds (the terminal rule the record left open, stated before any run
+and open to Berk).
 
-C1's interim block (reported, not criteria; D-013 terms): A9@r13x and A9@r13 against A6F@r13x (equal footprint,
-same day) and against SCIP alone (A0 of `dev` / `classprobe`) — all instances: better / worse, mean d with its 95 %
-bootstrap interval and the Wilcoxon test (`itrea.analysis.stats.compare`, which leaves out instances with P = 1 in
-both arms on every seed; the left-out ones are printed); each solver's weak set (A6F@r13x P >= 0.5, A0 P >= 0.5, seed
-means), read as `backoff.d013_report` and D-013's own table read it — over EVERY weak instance with both arms' runs,
-both-P = 1 ones included (d = 0): improved k of |W_B|, mean P before -> after (and its relative reduction), mean d with
-its bootstrap interval (`stats.bootstrap_mean` on the same d's) and the Wilcoxon test (zeros dropped), worst P after
-coupling, and the weak instances `compare` would leave out. Caveats printed with it: cuOpt's weak set is selected on
-the same runs it is compared with; the A0 runs are from earlier days.
+C1's interim block (reported, not criteria; D-013 terms; set (b) only): A9@r13x against A6F@r13x (equal footprint,
+same day) and against SCIP alone (A0 of `dev` / `classprobe`), read as `backoff.d013_report` and D-013's own table
+read it — over EVERY instance of set (b) with both arms' runs, both-P = 1 ones included (d = 0): better (improved) k
+of n and worse, mean P before -> after (and its relative reduction), mean d with its 95 % bootstrap interval
+(`stats.bootstrap_mean` on the same d's) and the Wilcoxon test (`stats.wilcoxon_d`, zeros dropped), worst P after
+coupling, and the instances `stats.compare` would leave out (both P = 1 on every seed). The same numbers on each
+baseline's weak set re-read on these runs (A6F@r13x P >= 0.5; A0 P >= 0.5; seed means). Its completeness line: the
+runs of set (b) present, missing (failed runs are missing under `exclude`, kept under `keep`), without P(120), and
+A0's runs on set (b). Caveats printed with it: set (b) was chosen on earlier 3-core A6 runs; cuOpt's weak set is
+selected on the same runs it is compared with; the A0 runs are from earlier days.
 
-Failed runs: both readings (`--failed both`, the default; produced when the readings' own runs include a failed one)
-— `exclude` (the letter: a failed run is missing, the verdict INCOMPLETE) and `keep` (D-002 §6). Run identity: a job
-run again in another set keeps its run id and the run table qualifies the later copy as `<run_id>#<set>`
-(build_runs.qualify_reused_ids). Runs are therefore selected by the `set` column and keyed by (instance, arm, seed) —
-the run id is never parsed —, the directory is `run_dir`; when one key occurs in more than one selected set the bare
-id is kept (then the highest attempt) and the others are listed.
+Failed runs: both readings (`--failed both`, the default; produced when the readings' own runs — the rule set's, set
+(b)'s, the follow-up's — include a failed one) — `exclude` (the letter: a failed run is missing, the verdict
+INCOMPLETE) and `keep` (D-002 §6). Run identity: a job run again in another set keeps its run id and the run table
+qualifies the later copy as `<run_id>#<set>` (build_runs.qualify_reused_ids). Runs are therefore selected by the `set`
+column and keyed by (instance, arm, seed) — the run id is never parsed —, the directory is `run_dir`; when one key
+occurs in more than one selected set the bare id is kept (then the highest attempt) and the others are listed.
 """
 from __future__ import annotations
 
@@ -107,7 +123,6 @@ from itrea.paths import DATASETS, ROOT
 
 CTRL, TREAT, A6F, A0 = "A9@r13", "A9@r13x", "A6F@r13x", "A0"
 ARMS = (CTRL, TREAT, A6F)
-A9_ARMS = (CTRL, TREAT)
 GAP_ZERO_ARMS = (TREAT, A6F)              # every cuOpt solve under the ext harness
 SET, SEEDS, BUDGET = "itx-r13", (0, 1), 120.0
 FOLLOWUP_SET, FOLLOWUP_SEEDS = "itx-r13f", (2, 3)   # D-022's INCONCLUSIVE follow-up (clarification 2026-10-12)
@@ -117,6 +132,15 @@ GAP_TOL = 1e-9
 WEAK_P = 0.5
 THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 REUSE_SEP = "#"
+# D-022 amendment before any run (2026-10-13; D-024): (a) the rule set — where cuOpt stops on its own 1e-4 "optimal"
+# (fhnw 9/9, krka 10/10, neos-960392 3/4 of the 92 recorded cuOpt runs at 120 s on the 17); (b) C1's interim set —
+# cuOpt's weak development instances (cuOpt-alone P >= 0.5 at 120 s in earlier 3-core A6 runs; comp21 at 0.506).
+# `jobs/itx-r13.jsonl` = (a) x ARMS + (b) x C1_ARMS x seeds 0–1 = 58 runs (neos-960392 in both).
+RULE_INSTANCES = ("fhnw-binpack4-48", "neos-3004026-krka", "neos-960392")
+C1_INSTANCES = ("neos-2746589-doon", "cryptanalysiskb128n5obj16", "rail01", "neos-2657525-crna", "neos-3024952-loue",
+                "sing44", "ca__Scenario400_reserves_1", "item_placement_9903", "neos-960392", "neos-4763324-toguru",
+                "comp21-2idx")
+C1_ARMS = (TREAT, A6F)
 REJECT_TAIL = ("A9 keeps cuOpt's default gaps; D-021's A9 rows run under {ext, cuopt_gap_zero false, "
                "cuopt_env_unset false}")
 
@@ -184,10 +208,10 @@ def select(runs: pd.DataFrame, sets, arms, seeds=SEEDS, budget: float = BUDGET, 
     return df[~dup].drop(columns=["_reused", "_attempt"]), dropped
 
 
-def failed_runs(runs: pd.DataFrame, sets, seeds, instances, budget: float = BUDGET) -> list[dict]:
+def failed_runs(runs: pd.DataFrame, sets, seeds, instances, budget: float = BUDGET, arms=ARMS) -> list[dict]:
     """The reading's failed runs: of the rows `select` takes under `keep` — the same sets, arms, seeds, budget and
     instances, not synthetic, not in a voided block, one per key — those whose status is failed."""
-    df, _ = select(runs, sets, ARMS, seeds, budget, keep_failed=True, instances=instances)
+    df, _ = select(runs, sets, arms, seeds, budget, keep_failed=True, instances=instances)
     return [dict(instance=r["instance"], arm=r["arm"], seed=int(r["seed"]), run_id=r["run_id"], set=r["set"])
             for r in df[df["status"] == "failed"].to_dict("records")]
 
@@ -426,7 +450,11 @@ def outcome(df: pd.DataFrame, instances, seeds=SEEDS) -> dict:
         kind = "INCONCLUSIVE"
         verdict = (f"INCONCLUSIVE (mean d {mean_d:+.3f} in ({REJECT_MEAN}, {ADOPT_MEAN}), no instance worse on both "
                    f"seeds): seeds 2–3 in set {FOLLOWUP_SET}, same rules, on the instances worse than −band on one "
-                   "seed — " + (", ".join(wo) if wo else "none is, so all 17 (D-022's clarification of 2026-10-12)"))
+                   "seed — " + (", ".join(wo) if wo else
+                                f"none is, so all {len(rows)} of the rule set: "
+                                + ", ".join(r["instance"] for r in rows)
+                                + " (D-022's clarification of 2026-10-12 and amendment of 2026-10-13; pass these names "
+                                "to `itrea make-jobs itx-r13f --instances` — its 'all' is the 17)"))
     return dict(kind=kind, verdict=verdict, rows=rows, mean_d=mean_d, worse_both=wb, worse_one=wo, missing=[],
                 no_p=no_p)
 
@@ -504,23 +532,43 @@ def _weak_block(long: pd.DataFrame, arm: str, base: str, weak: list[str]) -> dic
 
 
 def c1_interim(df: pd.DataFrame, a0: pd.DataFrame, instances) -> dict:
-    """C1's interim A9 result (reported, not criteria): both A9 arms against A6F@r13x and against A0."""
+    """C1's interim A9 result on set (b) (reported, not criteria): A9@r13x against A6F@r13x (same day, equal footprint)
+    and against A0, in D-013 terms (`_weak_block`) over every instance of set (b) with both arms' runs ("all") and over
+    the baseline's weak set re-read on these runs ("weak": baseline seed-mean P >= WEAK_P)."""
     cols = ["instance", "seed", "arm", "pt"]
     long = pd.concat([df[cols], a0[cols]], ignore_index=True)
     long = long[long["instance"].isin(list(instances)) & long["pt"].notna()]
     means = long.groupby(["arm", "instance"])["pt"].mean()
     out = {}
-    for base, label in ((A6F, "cuOpt alone (A6F@r13x, same day)"), (A0, "SCIP alone (A0, dev / classprobe)")):
+    for base, label in ((A6F, "cuOpt alone (A6F@r13x, same day, equal footprint)"),
+                        (A0, "SCIP alone (A0, dev / classprobe)")):
         weak = sorted(i for i in instances if (base, i) in means.index and means[(base, i)] >= WEAK_P)
-        res = dict(label=label, weak_set=weak, n_baseline=int(sum(1 for i in instances if (base, i) in means.index)))
-        for arm in A9_ARMS:
-            c = compare(long, arm, base)
-            res[arm] = dict(all=dict(n=c["n_instances"], excluded=c["excluded"], better=c["better"], worse=c["worse"],
-                                     mean_d=c["mean_d"], ci=(c["ci_lo"], c["ci_hi"]), p=c["p"], method=c["method"],
-                                     mean_P_before=c["mean_p_ctrl"], mean_P_after=c["mean_p_arm"]),
-                            weak=_weak_block(long, arm, base, weak))
-        out[base] = res
+        out[base] = {"label": label, "weak_set": weak,
+                     "n_baseline": int(sum(1 for i in instances if (base, i) in means.index)),
+                     TREAT: dict(all=_weak_block(long, TREAT, base, list(instances)),
+                                 weak=_weak_block(long, TREAT, base, weak))}
     return out
+
+
+def c1_reading(runs: pd.DataFrame, sets, instances, keep_failed: bool) -> dict:
+    """C1's interim block on set (b) under one reading of failed runs, with its own completeness line: the runs of
+    `instances` x C1_ARMS x seeds 0–1 present, missing (a failed run is missing under `exclude`, kept under `keep`),
+    failed, without P(120), and A0's runs on `instances`. Nothing here enters D-022's verdict."""
+    df, dropped = select(runs, sets, C1_ARMS, SEEDS, keep_failed=keep_failed, instances=instances)
+    failed = failed_runs(runs, sets, SEEDS, instances, arms=C1_ARMS)
+    a0, a0_dropped = select(runs, A0_SETS, (A0,), instances=instances)
+    have = {(r["instance"], r["arm"], int(r["seed"])) for r in df.to_dict("records")}
+    missing = [(i, a, s) for i in instances for a in C1_ARMS for s in SEEDS if (i, a, s) not in have]
+    _, no_p = _p_table(df)
+    a0_have = {(r["instance"], int(r["seed"])) for r in a0.to_dict("records")}
+    a0_missing = [(i, s) for i in instances for s in SEEDS if (i, s) not in a0_have]
+    complete = not missing and not no_p
+    return dict(blocks=c1_interim(df, a0, instances), duplicates_left_out=dropped + a0_dropped,
+                completeness=dict(instances=list(instances), arms=list(C1_ARMS), seeds=list(SEEDS),
+                                  n_expected=len(instances) * len(C1_ARMS) * len(SEEDS), n_runs=int(len(df)),
+                                  missing=missing, failed=failed, no_p=no_p, n_a0=int(len(a0)),
+                                  n_a0_expected=len(instances) * len(SEEDS), a0_missing=a0_missing,
+                                  complete=bool(complete)))
 
 
 # ----------------------------------------------------------------------------------------------- the report
@@ -573,37 +621,50 @@ def followup_reading(runs: pd.DataFrame, root: Path, sets, instances, keep_faile
 
 
 def reading(runs: pd.DataFrame, root: Path, sets, instances, keep_failed: bool, info_cache: dict,
-            followup=None) -> dict:
+            followup=None, c1_instances=C1_INSTANCES) -> dict:
+    """One reading of failed runs: D-022's rule on the rule set `instances` and, apart from it, C1's interim block on
+    `c1_instances` (set (b)); the C1 block's runs, missing or failed, never enter the rule's validity or verdict."""
     df, dropped = select(runs, sets, ARMS, SEEDS, keep_failed=keep_failed, instances=instances)
     # failed runs: under `exclude` they are missing (and listed); under `keep` they are scored, and validity's
     # "completed" leg fails by the letter (a stated deviation, named in the verdict)
     failed = failed_runs(runs, sets, SEEDS, instances)
     _fill_info(df, root, info_cache)
-    a0, a0_dropped = select(runs, A0_SETS, (A0,))
     val = validity(df, info_cache, instances, void_log(runs, sets, root), failed, SEEDS, keep_failed)
     out = outcome(df, instances)
     verdict = _verdict(val, out, keep_failed, failed)
+    c1 = c1_reading(runs, sets, list(c1_instances), keep_failed)
+    dup, seen = [], set()
+    for d in dropped + c1["duplicates_left_out"]:      # neos-960392's A9@r13x / A6F@r13x are in both sets
+        k = (d["instance"], d["arm"], d["seed"], d["run_id"])
+        if k not in seen:
+            seen.add(k)
+            dup.append(d)
     res = dict(reading="keep" if keep_failed else "exclude", verdict=verdict, validity=val,
-               mechanism=mechanism(df, info_cache), outcome=out, c1=c1_interim(df, a0, instances),
-               duplicates_left_out=dropped + a0_dropped, n_runs=int(len(df)), n_a0=int(len(a0)), failed_runs=failed)
+               mechanism=mechanism(df, info_cache), outcome=out, c1=c1["blocks"], c1_completeness=c1["completeness"],
+               duplicates_left_out=dup, n_runs=int(len(df)), n_a0=c1["completeness"]["n_a0"], failed_runs=failed)
     if followup:
         res["followup"] = followup_reading(runs, root, followup, instances, keep_failed, info_cache, out, verdict)
     return res
 
 
 def report(runs: pd.DataFrame, root: Path = ROOT, sets=(SET,), instances=None, failed: str = "both",
-           followup=None) -> dict:
+           followup=None, c1_instances=None) -> dict:
     """D-022 under the readings of failed runs: "exclude", "keep" or "both" (both only when the readings' own runs —
-    seeds 0–1 and, with `followup` (its sets), seeds 2–3 — include a failed one; otherwise the readings coincide and
-    one is returned)."""
-    instances = list(instances) if instances is not None else development_instances()
+    the rule set's seeds 0–1, set (b)'s seeds 0–1 and, with `followup` (its sets), seeds 2–3 — include a failed one;
+    otherwise the readings coincide and one is returned). `instances` = the rule set (default RULE_INSTANCES),
+    `c1_instances` = C1's set (b) (default C1_INSTANCES)."""
+    instances = list(instances) if instances is not None else list(RULE_INSTANCES)
+    c1_instances = list(c1_instances) if c1_instances is not None else list(C1_INSTANCES)
     followup = tuple(followup) if followup else None
     cache: dict = {}
     has_failed = bool(failed_runs(runs, sets, SEEDS, instances)) or bool(
+        failed_runs(runs, sets, SEEDS, c1_instances, arms=C1_ARMS)) or bool(
         followup and failed_runs(runs, followup, FOLLOWUP_SEEDS, instances))
     modes = {"exclude": [False], "keep": [True], "both": [False, True] if has_failed else [False]}[failed]
     return dict(sets=list(sets), followup_sets=list(followup) if followup else None, instances=instances,
-                readings=[reading(runs, root, sets, instances, k, cache, followup) for k in modes])
+                c1_instances=c1_instances, rule_set_is_the_amendments=sorted(instances) == sorted(RULE_INSTANCES),
+                not_in_rule_set=[i for i in development_instances() if i not in instances],
+                readings=[reading(runs, root, sets, instances, k, cache, followup, c1_instances) for k in modes])
 
 
 # ----------------------------------------------------------------------------------------------- printing
@@ -635,16 +696,53 @@ def _validity_line(v: dict) -> str:
                if v["crashed_before_record"] else ""))
 
 
+def _d013_line(w: dict, label: str, of: str) -> str:
+    """One D-013-terms line of the C1 block (`_weak_block`'s numbers)."""
+    if not w.get("n"):
+        return f"{label}: no instance of the {w.get('n_weak', 0)} {of} has both arms' runs"
+    return (f"{label}: improved {w['better']} of {w['n']}"
+            + (f" ({w['n_weak'] - w['n']} {of} without both arms' runs)" if w["n_weak"] > w["n"] else "")
+            + f", mean P {_fmt(w['mean_P_before'])} -> {_fmt(w['mean_P_after'])} ({_fmt(-100 * w['P_reduction'], 0)} %)"
+            f", worse {w['worse']}, mean d {_fmt(w['mean_d'])} [{_fmt(w['ci'][0])}, {_fmt(w['ci'][1])}], Wilcoxon p "
+            f"{_fmt(w['p'], 4)}, worst P after {_fmt(w['worst_P_after'])}"
+            + (f"; both P = 1 (counted at d = 0; stats.compare would leave out): {w['left_out_by_compare']}"
+               if w["left_out_by_compare"] else ""))
+
+
+def _c1_completeness_line(c: dict, keep: bool) -> str:
+    return (f"C1 completeness (set (b), its own; not D-022's): {c['n_runs']} of {c['n_expected']} runs "
+            f"({' / '.join(c['arms'])} x seeds {c['seeds']}) — missing {len(c['missing'])}"
+            + (f" {c['missing'][:6]}" if c["missing"] else "") + f"; failed {len(c['failed'])}"
+            + (f" {[(f['instance'], f['arm'], f['seed']) for f in c['failed'][:6]]} "
+               + ("(kept as D-002 §6 crashes)" if keep else "(missing)") if c["failed"] else "")
+            + f"; without P(120) {len(c['no_p'])}" + (f" {c['no_p'][:6]}" if c["no_p"] else "")
+            + f"; A0 (dev / classprobe) {c['n_a0']} of {c['n_a0_expected']}"
+            + (f", missing {c['a0_missing'][:6]}" if c["a0_missing"] else "")
+            + (" — complete" if c["complete"] and not c["a0_missing"] else " — INCOMPLETE (the C1 block reads what is "
+               "there; D-022's verdict is not affected)"))
+
+
 def print_report(res: dict, out=sys.stdout) -> None:
     p = lambda *a: print(*a, file=out)  # noqa: E731
+    n, n_c1, other = len(res["instances"]), len(res["c1_instances"]), res.get("not_in_rule_set") or []
     p(f"D-022 — A9 under the external harness (R13 + R14): {TREAT} (ext) vs {CTRL} (ext without R13 / R14), "
-      f"same-day {A6F}; sets {res['sets']}, {len(res['instances'])} instances, seeds {list(SEEDS)}, {BUDGET:g} s"
+      f"same-day {A6F}; sets {res['sets']}, seeds {list(SEEDS)}, {BUDGET:g} s"
       + (f"; follow-up sets {res['followup_sets']}, seeds {list(FOLLOWUP_SEEDS)}" if res.get("followup_sets") else ""))
+    if res.get("rule_set_is_the_amendments"):
+        p(f"(a) rule set — the only instances D-022's rule reads (validity, mechanism, outcome, verdict, follow-up): "
+          f"{n} {res['instances']}, where cuOpt stops on its own 1e-4 'optimal'; the mean d is over these {n}. The "
+          f"other {len(other)} development + class-probe instances are not run: R13 cannot act there (cuOpt never "
+          "stopped early on them; R14 is measured inert) — D-022 amendment 2026-10-13; they do not enter the mean")
+    else:
+        p(f"(a) rule set (--instances, overriding D-022's amendment of 2026-10-13): {n} {res['instances']}; the mean d "
+          f"is over these {n}; {len(other)} development + class-probe instances are not read by the rule")
+    p(f"(b) C1 interim set: {n_c1} {res['c1_instances']} — {TREAT} vs {A6F} (and vs A0) only; {CTRL} is not expected "
+      "there (it runs on the rule set only); its completeness never enters D-022's verdict")
     for rd in res["readings"]:
         v = rd["validity"]
         p("")
         p(f"=== reading '{rd['reading']}' (failed runs " + ("kept as D-002 §6 keeps crashes" if rd["reading"] == "keep"
-                                                            else "missing") + f"): {rd['n_runs']} runs")
+                                                            else "missing") + f"): {rd['n_runs']} runs of the rule set")
         p(_validity_line(v))
         p(f"R14 (reported): thread variables not as the harness says on {len(v['r14_env'])} runs"
           + (f" {[(e['instance'], e['arm'], e['seed']) for e in v['r14_env'][:4]]}" if v["r14_env"] else ""))
@@ -663,26 +761,22 @@ def print_report(res: dict, out=sys.stdout) -> None:
             p(f"{r['instance']:<30} {_fmt(r['p_ctrl']):<7} {_fmt(r['p_treat']):<7} {_fmt(r['p_a6f']):<7} "
               f"{_fmt(r['d']):<7} {_fmt(r['d_seed'][0]):<7} {_fmt(r['d_seed'][1]):<7} {_fmt(r['band'], 2):<5} "
               + ("both seeds" if r["worse_both"] else ("one seed" if r["worse_one"] else "")))
-        p(f"mean d over the {len(o['rows'])}: {_fmt(o['mean_d'])} (adopt >= {ADOPT_MEAN}, reject <= {REJECT_MEAN})")
-        p("C1 interim (reported, not criteria; D-013 terms):")
-        for base, c in rd["c1"].items():
-            p(f"  vs {c['label']}: weak set (P >= {WEAK_P}) {c['weak_set']} ({len(c['weak_set'])} of "
+        p(f"mean d over the {len(o['rows'])} of the rule set: {_fmt(o['mean_d'])} (adopt >= {ADOPT_MEAN}, reject <= "
+          f"{REJECT_MEAN})")
+        p(f"C1 interim (reported, not criteria; D-013 terms; set (b), {n_c1} instances, {TREAT} vs each baseline):")
+        p("  " + _c1_completeness_line(rd["c1_completeness"], rd["reading"] == "keep"))
+        for base in (A6F, A0):
+            c = rd["c1"][base]
+            a, w = c[TREAT]["all"], c[TREAT]["weak"]
+            p(f"  vs {c['label']}:")
+            p("    " + _d013_line(a, f"all {n_c1}", "instances"))
+            p(f"    weak set ({base} P >= {WEAK_P} on these runs) {c['weak_set']} ({len(c['weak_set'])} of "
               f"{c['n_baseline']} with a baseline)")
-            for arm in A9_ARMS:
-                a, w = c[arm]["all"], c[arm]["weak"]
-                p(f"    {arm:<8} all: {a['better']} better / {a['worse']} worse of {a['n']}, mean d "
-                  f"{_fmt(a['mean_d'])} [{_fmt(a['ci'][0])}, {_fmt(a['ci'][1])}], Wilcoxon p {_fmt(a['p'], 4)}"
-                  + (f" (both P = 1, left out: {a['excluded']})" if a["excluded"] else ""))
-                if w.get("n"):
-                    p(f"    {'':<8} weak set: improved {w['better']} of {w['n']}"
-                      + (f" ({w['n_weak'] - w['n']} weak without the arm's runs)" if w["n_weak"] > w["n"] else "")
-                      + f", mean P {_fmt(w['mean_P_before'])} -> {_fmt(w['mean_P_after'])} "
-                      f"({_fmt(-100 * w['P_reduction'], 0)} %), mean d {_fmt(w['mean_d'])} [{_fmt(w['ci'][0])}, "
-                      f"{_fmt(w['ci'][1])}], Wilcoxon p {_fmt(w['p'], 4)}, worst P after {_fmt(w['worst_P_after'])}"
-                      + (f"; both P = 1 (counted at d = 0; stats.compare would leave out): {w['left_out_by_compare']}"
-                         if w["left_out_by_compare"] else ""))
-        p("  caveats (D-022): cuOpt's weak set is selected on the same runs it is compared with; the A0 runs are from "
-          "earlier days (sets dev / classprobe), not same-day")
+            if c["weak_set"]:
+                p("    " + _d013_line(w, "weak set", "weak"))
+        p("  caveats (D-022): set (b) was chosen on earlier 3-core A6 runs (cuOpt-alone P >= 0.5; comp21-2idx "
+          "borderline at 0.506); cuOpt's weak set is selected on the same runs it is compared with; the A0 runs are "
+          "from earlier days (sets dev / classprobe), not same-day")
         if rd["duplicates_left_out"]:
             p(f"note: the same (instance, arm, seed) in more than one selected set — kept the bare run id, left out "
               f"{[(d['instance'], d['arm'], d['seed'], d['run_id']) for d in rd['duplicates_left_out'][:4]]}")
@@ -693,7 +787,8 @@ def print_report(res: dict, out=sys.stdout) -> None:
                 p(f"FOLLOW-UP ({rd['reading']}, sets {f['sets']}): {f['verdict']}")
                 continue
             p(f"--- follow-up ({rd['reading']}): seeds {f['seeds']} of sets {f['sets']} on "
-              + ("all instances (the seeds 0–1 reading named none)" if f["rerun_all"] else f"{f['rerun']}")
+              + (f"all of the rule set {f['rerun']} (the seeds 0–1 reading named none)" if f["rerun_all"]
+                 else f"{f['rerun']}")
               + f": {f['n_runs']} runs")
             p("    " + _validity_line(f["validity"]))
             fo = f["outcome"]
@@ -707,7 +802,8 @@ def print_report(res: dict, out=sys.stdout) -> None:
                 p(f"    {r['instance']:<30} {_fmt(r['p_ctrl']):<7} {_fmt(r['p_treat']):<7} {_fmt(r['d']):<8} "
                   f"{_fmt(r['d_seed'][2]):<7} {_fmt(r['d_seed'][3]):<7} {_fmt(r['band'], 2):<5} "
                   + ("yes" if r["worse_both"] else ""))
-            p(f"    mean d over the {len(fo['rows'])} (rerun instances on seeds 0–3): {_fmt(fo['mean_d'])}")
+            p(f"    mean d over the {len(fo['rows'])} of the rule set (rerun instances on seeds 0–3): "
+              f"{_fmt(fo['mean_d'])}")
             p(f"FOLLOW-UP VERDICT ({rd['reading']}): {f['verdict']}")
 
 
@@ -719,9 +815,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", default=str(ROOT), help="root of the run_dir paths in the run table")
     ap.add_argument("--failed", choices=("both", "exclude", "keep"), default="both",
                     help="failed runs: both readings (default), missing (the letter) or kept as D-002 §6 crashes")
+    ap.add_argument("--instances", default=",".join(RULE_INSTANCES),
+                    help="comma-separated rule set: the only instances D-022's rule reads (default: the amendment's "
+                         "three, " + ",".join(RULE_INSTANCES) + ")")
+    ap.add_argument("--c1-instances", default=",".join(C1_INSTANCES),
+                    help="comma-separated set (b) of C1's interim block (default: cuOpt's 11 weak development "
+                         "instances)")
     ap.add_argument("--followup", nargs="?", const=FOLLOWUP_SET, default=None, metavar="SETS",
                     help=f"also read D-022's INCONCLUSIVE follow-up: seeds 2-3 of these comma-separated sets (default "
-                         f"{FOLLOWUP_SET}) on the instances the seeds 0-1 reading names (all 17 when none)")
+                         f"{FOLLOWUP_SET}) on the instances the seeds 0-1 reading names (all of the rule set when "
+                         "none; `make-jobs itx-r13f --instances all` is the 17, so pass the names)")
     ap.add_argument("--json", default=None, help="also write the result as JSON here")
     a = ap.parse_args(argv)
     if not Path(a.runs).exists():
@@ -729,7 +832,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     fu = tuple(s for s in a.followup.split(",") if s) if a.followup else None
     res = report(pd.read_parquet(a.runs), Path(a.root), tuple(s for s in a.sets.split(",") if s), failed=a.failed,
-                 followup=fu)
+                 followup=fu, instances=[x for x in a.instances.split(",") if x],
+                 c1_instances=[x for x in a.c1_instances.split(",") if x])
     print_report(res)
     if a.json:
         Path(a.json).write_text(json.dumps(_jsonable(res), indent=1, default=str))
