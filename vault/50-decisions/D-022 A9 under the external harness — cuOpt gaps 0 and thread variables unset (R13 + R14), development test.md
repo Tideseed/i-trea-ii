@@ -66,3 +66,17 @@ Readings the record left open, fixed in the script and here before the window; o
   interval and Wilcoxon, worst P — over every weak instance with both arms' runs, those where both arms have P = 1
   included at d = 0 (D-013's own table counts rail01 1.0 → 1.0; `backoff.d013_report` does the same). `stats.compare`,
   which leaves them out, gives only the all-instance line; the instances it leaves out are printed.
+
+## Amendment before any run (2026-10-13 15:1x) — targeted, after Berk's instruction
+Berk (15:0x): **"Meanwhile why do we need that many experiments? Shall we do targeted and surgical tests? and only if we
+see hints of improvement we can go wider to test the methodology's limits. It will be a more efficient way than blanket
+testing."** R13 can act only where cuOpt stops on its own 1e-4 "optimal": in all 92 recorded cuOpt runs at 120 s on
+the 17 instances that happened only on **fhnw-binpack4-48 (9/9), neos-3004026-krka (10/10) and neos-960392 (3/4)**;
+on the other 14 cuOpt never stopped early, so the gap setting cannot change the run (R14 is measured inert). The test
+is therefore run on those three: {A9@r13, A9@r13x, A6F@r13x} × seeds 0–1 (18 runs); the rule reads over the three (mean
+d ≥ −0.02 → adopt; ≤ −0.05 or an instance worse than −band_i on both seeds → reject; otherwise the follow-up on them),
+the other 14 counted as d = 0 by construction (stated, not run). **C1's interim A9 result** is read from the same set
+`itx-r13` on cuOpt's weak development instances only (cuOpt-alone P ≥ 0.5 at 120 s in our A6 runs: doon,
+cryptanalysiskb128n5obj16, rail01, crna, loue, sing44, ca, item_placement, neos-960392, toguru, comp21 — 11; comp21
+borderline at 0.506; selected on 3-core A6, stated): {A9@r13x, A6F@r13x} × seeds 0–1. `jobs/itx-r13.jsonl` holds
+these 58 runs (e1403fa); `tools/d022_report.py` gains the instance selection before its reading.
