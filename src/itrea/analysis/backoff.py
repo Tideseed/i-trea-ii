@@ -1704,7 +1704,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="0 / 1: D-018's calibration and test; 1y: D-023 (A9@boY vs A9@bo1s + A6F, set backoff2) on "
                          "the 11 of its amendment of 2026-10-13 (66 runs: the outcome rules on the nine, F one-sided "
                          "on krka / fhnw; comp21-2idx, glass4 and radiationm18 not run, their rules printed as such; "
-                         "other instances in the set are named and read by no rule)")
+                         "other instances, and the 11 at other seeds, are named and read by no rule; G's noise = no sleep in "
+                         "phase Y, 'still beats A6F' binds — the 23:3x clarification)")
     ap.add_argument("--set", dest="set_", default=None, help="run set (default backoff0 / backoff1 / backoff2)")
     ap.add_argument("--stage0-set", default="backoff0", help="stage 1 / 1y: the stage-0 set (ca's class-(Y) fallback)")
     ap.add_argument("--runs", default=str(DATASETS / "runs.parquet"))
