@@ -1,14 +1,17 @@
 """`tools/d022_report.py` (D-022: A9 under the external harness, R13 + R14; C1's interim A9 result) on synthetic run
-tables and run directories — no solver, no EA, no GPU: the outcome rule (ADOPT / REJECT by the mean or by an
-instance worse on both seeds / INCONCLUSIVE with and without named instances), the band from the control's or A6F's
-seed spread, every validity leg (compile on the clock by the runner's own rule, gap settings, P and gene dtype per
-block, missing runs, void reruns, the harness), the mechanism counts and cuOpt CPU-s per wall-s, both readings of
-failed runs (a void whose rerun failed, a crash before the record), the reading's own keys (other seeds, budgets and
-voided blocks of the set), a run without P(120), the reused-run-id qualification (`<run_id>#<set>`), the C1 interim
-block with the weak sets in D-013 terms, the INCONCLUSIVE follow-up (seeds 2–3, set itx-r13f) and its job file; and
-D-022's amendment of 2026-10-13: the defaults are `jobs/itx-r13.jsonl`'s two sets (the rule set of 3, C1's 11), the
-58-run layout gives a complete verdict and a complete C1 block, the mean is over the rule set, a missing / failed /
-voided C1 run never changes D-022's verdict while a missing or failed rule-set run does."""
+tables and run directories — no solver, no EA, no GPU. The R13 + R14 rule of D-022's second amendment (no mean over
+the instances): the band limb (ADOPT inside band_i, REJECT when worse on both seeds, INCONCLUSIVE naming the instances
+failing on seed means), the band from the control's or A6F's seed spread, the floor limb on fhnw / krka (|ΔP| <=
+0.005, two-sided as written: a gain on both seeds and opposite-sign seeds reject), the mechanism leg (a failure is
+INCONCLUSIVE and cannot be washed out by seeds 2–3); every validity leg (compile on the clock by the runner's own
+rule, gap settings, P and gene dtype per block, missing runs, void reruns, the harness), the mechanism counts and
+cuOpt CPU-s per wall-s, both readings of failed runs (a void whose rerun failed, a crash before the record), the
+reading's own keys (other seeds, budgets and voided blocks of the set), a run without P(120), the reused-run-id
+qualification (`<run_id>#<set>`), the INCONCLUSIVE follow-up (seeds 2–3, set itx-r13f) and its job file. C1: the hint
+(ratio of means <= 0.95 on the fixed 11, inclusive; INCOMPLETE under `exclude` with a failed run, decided under
+`keep`), the guard (mean d >= -0.05 over the 17; INCOMPLETE without the four added instances), the D-013-terms lines
+vs A6F and SCIP. The defaults are the amendments' sets and `jobs/itx-r13.jsonl` + `itx-r13b.jsonl` (74 runs); a
+missing / failed / voided C1 run never changes D-022's verdict while a missing or failed rule-set run does."""
 from __future__ import annotations
 
 import importlib.util
