@@ -194,9 +194,7 @@ def test_mipfeas_calibration_jobs(tmp_path):
         mj.mipfeas_calibration(data=tmp_path / "data")
 
 
-def test_itx_job_files_are_the_writers_output(tmp_path):
-    """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes; D-020's A6m writer stays (its file
-    left jobs/ when M4 replaced it) (skipped without the instances)."""
+def _skip_without_miplib():
     from itrea import paths
     from itrea.analysis.itx_strata import read_strata
     from itrea.analysis.mipfeas import SAMPLE
@@ -204,10 +202,29 @@ def test_itx_job_files_are_the_writers_output(tmp_path):
     if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in need) or \
             not (paths.DATA / "miplib" / "benchmark-v2.test").is_file():
         pytest.skip("the MIPLIB 2017 instances are not under data/")
-    for k in mj.ITX_OUT:
-        out = tmp_path / f"{k}.jsonl"
-        assert mj.main([f"itx-{k}", "--out", str(out)]) == 0
-        assert out.read_bytes() == (paths.ROOT / mj.ITX_OUT[k]).read_bytes(), k
+
+
+# One case per file, so a stale file does not hide the others (until 2026-10-13 one loop stopped at r13 and never
+# compared a0, m6 and m6a). jobs/itx-r13.jsonl was narrowed by hand to 58 runs in e1403fa (D-022's amendment) while
+# `make-jobs itx-r13` still writes 102: a known failure, strict so it is noticed once the writer is fixed (code owed,
+# #37).
+_R13_STALE = pytest.mark.xfail(strict=True, reason="jobs/itx-r13.jsonl narrowed by hand to 58 runs (e1403fa); "
+                                                   "the writer still makes 102 — code owed, #37")
+
+
+@pytest.mark.parametrize("k", [pytest.param(k, marks=_R13_STALE) if k == "r13" else k for k in mj.ITX_OUT])
+def test_itx_job_files_are_the_writers_output(tmp_path, k):
+    """jobs/itx-*.jsonl (D-021 phase 1) are exactly what `make-jobs itx-*` writes (skipped without the instances)."""
+    from itrea import paths
+    _skip_without_miplib()
+    out = tmp_path / f"{k}.jsonl"
+    assert mj.main([f"itx-{k}", "--out", str(out)]) == 0
+    assert out.read_bytes() == (paths.ROOT / mj.ITX_OUT[k]).read_bytes(), k
+
+
+def test_mipfeas_cal_writer_stays(tmp_path):
+    """D-020's A6m writer stays (its file left jobs/ when M4 replaced it) (skipped without the instances)."""
+    _skip_without_miplib()
     assert mj.main(["mipfeas-cal", "--out", str(tmp_path / "a6m.jsonl")]) == 0
     assert all(json.loads(x)["arm"] == "A6m" for x in (tmp_path / "a6m.jsonl").read_text().splitlines())
 

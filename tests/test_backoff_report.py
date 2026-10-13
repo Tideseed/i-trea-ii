@@ -667,7 +667,7 @@ def _resolved(spec):
 
 def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ctrl=None, phase_y=None,
                   boy_events=None, boy_summary=None, ctrl_summary=None, boy_row=None, censored=(), drop=(),
-                  failed=(), harness=None, extra=()):
+                  failed=(), harness=None, extra=(), extra_seeds=None):
     """The 11 instances of D-023's amendment (BR.STAGE1Y) x {A6F, A9@bo1s (control), A9@boY} x seeds 0-1 in set backoff2
     where every D-023 rule holds unless changed, plus the instances `extra` (outside the amended set: run in the set,
     read by no rule): `p_ctrl` = {instance: (seed 0, seed 1)} (A6F follows it), `p_boy` = {instance: P}, `leads_boy` /
@@ -676,7 +676,8 @@ def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ct
     `ctrl_summary` = {instance: extra EA-summary fields}, `boy_row` = {instance: extra run-table fields}, `censored` =
     {(instance, arm, seed)} whose cuOpt found nothing, `drop` = {(instance, arm, seed)} not run, `failed` = same, status
     failed; `harness` = {(instance, arm, seed): a run.json config.harness (a resolved dict, or None)} — every run
-    carries the resolved ext harness by default (D-022 adopted)."""
+    carries the resolved ext harness by default (D-022 adopted); `extra_seeds` = {instance: seeds beyond 0-1} run in
+    the set (outside the amended set's seeds: read by no rule)."""
     from itrea.experiments import make_jobs as MJ
     S = "backoff2"
     ext = _resolved(MJ.ITX_EXT)
@@ -688,9 +689,10 @@ def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ct
     p_ctrl, p_boy, phase_y = p_ctrl or {}, p_boy or {}, phase_y or {}
     leads_boy, leads_ctrl, boy_events = leads_boy or {}, leads_ctrl or {}, boy_events or {}
     boy_summary, ctrl_summary, boy_row = boy_summary or {}, ctrl_summary or {}, boy_row or {}
+    extra_seeds = extra_seeds or {}
     send = [dict(t=0.3, kind="incumbent", obj=1.0), dict(t=0.3, kind="send", k=1)]
     for i in BR.STAGE1Y + tuple(extra):
-        for s in BR.STAGE1_SEEDS:
+        for s in BR.STAGE1_SEEDS + tuple(extra_seeds.get(i, ())):
             p0 = p_ctrl[i][s] if i in p_ctrl else base[i]
             p1 = p_boy.get(i, 0.11 if i == BR.CHROMATIC else p0)
             a6 = min(1.0, p0 + 0.3) if i not in BR.FLOOR else p0
@@ -1006,6 +1008,103 @@ def test_stage1y_outside_runs_are_named_and_read_by_no_rule(tmp_path):
         BR.print_stage1y(res, out=f)
     assert "outside the amended set, read by no rule (18 runs): comp21-2idx A6F s0 (completed)" in \
         (tmp_path / "out.txt").read_text()
+
+
+def test_stage1y_still_beats_binds_a_noise_guard(tmp_path):
+    """D-023 (13:5x clarification, the amendment and the 23:3x clarification): a guard under the noise conditions is
+    exempt from its own band only — "still beats A6F" binds it. item_placement: the governor slept 0 s in phase Y on
+    both seeds, its own band holds (seed spread 0.1 / 0.7: band 0.86), the guard-set mean holds (loue improved), but
+    boY beats A6F by d 0.114 < 0.15 where the control beat it by 0.43: G fails in 1y. The same inputs under D-018
+    stage 1's reading (noise test on length, "still beats" exempt too) hold."""
+    ip = "item_placement_9903"
+    kw = dict(p_ctrl={ip: (0.1, 0.7)}, p_boy={ip: 0.62, "neos-3024952-loue": 0.35},
+              phase_y={(ip, 0): (0.3, 0.3), (ip, 1): (0.3, 0.3)})
+    runs = stage1y_world(tmp_path, **kw)
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    g = res["outcome"]["G"]
+    assert failed_gates_y(res) == {"G"} and res["verdict"] == "DO NOT ADOPT boY: failed G"
+    assert next(r for r in g["rows"] if r["instance"] == ip)["ok"] and g["mean_d"] >= BR.GUARD_MEAN
+    b = next(x for x in g["still_beats_A6"] if x["instance"] == ip)
+    assert not b["ok"] and b["d_bo1_vs_A6"] == pytest.approx(0.08 / 0.7) and b["d_bo0_vs_A6"] >= BR.BEAT_A6
+    assert g["noise"] == [] and g["noise_test"] == "slept" and g["still_beats_noise_exempt"] is False
+    with open(tmp_path / "out.txt", "w") as f:
+        BR.print_stage1y(res, out=f)
+    assert "still beating A6F (binds every guard)" in (tmp_path / "out.txt").read_text()
+    # D-018 stage 1's reading of the same runs: item_placement is noise and its "still beats" failure is exempt
+    R = {k: v for k, v in BR.load(runs, "backoff2", tmp_path).items() if k[0] in BR.STAGE1Y}
+    eff = BR._effects(R, BR.BOY, BR.CTRL1, BR.A6F, BR.STAGE1Y)
+    g18 = BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, f_one_sided=True)[0]["G"]
+    assert g18["ok"] and g18["noise"] == [ip] and "noise_test" not in g18
+    with pytest.raises(ValueError):
+        BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, noise_test="nope")
+
+
+def test_stage1y_noise_test_is_no_sleep_in_phase_y(tmp_path):
+    """1y's noise test (D-023 clarification 2026-10-13 23:3x): the governor slept 0 s in phase Y on every boY run, not
+    D-018's "phase Y < 1 s". crna fails its own band (boY 0.3 vs 0.1, band 0.05) while still beating A6F (0.4): slept
+    0.25 s inside a 0.8-s phase Y on both seeds -> not noise, G fails (D-018's length test would exempt it); slept 0 s
+    in the same 0.8 s -> noise, G holds."""
+    crna = "neos-2657525-crna"
+    base = dict(p_ctrl={crna: (0.1, 0.1)}, p_boy={crna: 0.3, "neos-3024952-loue": 0.1})
+    slept = stage1y_world(tmp_path, **base, phase_y={(crna, 0): (0.8, 0.55), (crna, 1): (0.8, 0.55)})
+    res = BR.stage1y(slept, None, "backoff2", root=tmp_path, stage0_set=None)
+    g = res["outcome"]["G"]
+    assert failed_gates_y(res) == {"G"} and g["noise"] == [] and g["mean_d"] >= BR.GUARD_MEAN
+    assert not next(r for r in g["rows"] if r["instance"] == crna)["ok"]
+    assert next(b for b in g["still_beats_A6"] if b["instance"] == crna)["ok"]
+    R = {k: v for k, v in BR.load(slept, "backoff2", tmp_path).items() if k[0] in BR.STAGE1Y}
+    assert BR._y_slept(R[(crna, BR.BOY, 0)]) == pytest.approx(0.25)
+    eff = BR._effects(R, BR.BOY, BR.CTRL1, BR.A6F, BR.STAGE1Y)
+    g18 = BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, f_one_sided=True)[0]["G"]
+    assert g18["ok"] and g18["noise"] == [crna]                       # D-018's length test: 0.8 s < 1 s, exempt
+    awake = stage1y_world(tmp_path / "a", **base, phase_y={(crna, 0): (0.8, 0.8), (crna, 1): (0.8, 0.8)})
+    ra = BR.stage1y(awake, None, "backoff2", root=tmp_path / "a", stage0_set=None)
+    assert not failed_gates_y(ra) and ra["outcome"]["G"]["noise"] == [crna] and ra["verdict"].startswith("ADOPT boY")
+    # a phase Y that never ended is not noise (no exit record to read the sleep from)
+    rv = BR.RunView(dict(), tmp_path)
+    rv._cache[("summary", "ea")] = dict(backoff=dict(phase_y=dict(length_s=120.0, exit_t=None, reason="never")))
+    assert math.isnan(BR._y_slept(rv))
+
+
+def test_stage1y_other_seeds_are_outside(tmp_path):
+    """Runs of the 11 at a seed other than 0-1 are named under `outside` and read by no rule (D-023 clarification
+    2026-10-13 23:3x): ca at seed 2 with boY's phase Y never yielding (100 s, M1 and M4 would fail), its control under
+    r13-off (the harness leg would fail) and its A6F failed (no kept failed run) change nothing."""
+    from itrea.experiments import make_jobs as MJ
+    off = _resolved(MJ.ITX_R13_CONTROL)
+    runs = stage1y_world(tmp_path, extra_seeds={BR.CA: (2,)}, phase_y={(BR.CA, 2): (100.0, 100.0)},
+                         harness={(BR.CA, BR.CTRL1, 2): off}, failed={(BR.CA, BR.A6F, 2)})
+    res = BR.run_stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert res["verdict"].startswith("ADOPT boY") and res["kept_failed"] == [] and res["harness"]["ok"]
+    assert {(r["instance"], r["arm"], r["seed"], r["status"]) for r in res["outside"]} == {
+        (BR.CA, BR.A6F, 2, "failed"), (BR.CA, BR.CTRL1, 2, "completed"), (BR.CA, BR.BOY, 2, "completed")}
+    m = res["mechanism"]
+    assert len(m["M4"]["rows"]) == 22 and len(m["M1"]["rows"]) == 22 and m["M4"]["busy_share"] == pytest.approx(0.5)
+    assert res["expected"] == 66 and not res["missing"]
+
+
+def test_stage1y_f_one_sided_at_exactly_the_limit(tmp_path):
+    """F's one-sided limit compares with REL_TOL: krka's boY worse by exactly 0.005 (0.012 -> 0.017, a float
+    difference of -0.005000000000000001) holds; by 0.0051 it fails."""
+    for p_boy, ok in ((0.017, True), (0.0171, False)):
+        w = stage1y_world(tmp_path / str(p_boy), p_ctrl={"neos-3004026-krka": (0.012, 0.012)},
+                          p_boy={"neos-3004026-krka": p_boy})
+        r = BR.stage1y(w, None, "backoff2", root=tmp_path / str(p_boy), stage0_set=None)
+        assert r["outcome"]["F"]["ok"] is ok and failed_gates_y(r) == (set() if ok else {"F"})
+    assert 0.012 - 0.017 < -BR.FLOOR_DP                                       # the float edge the tolerance absorbs
+
+
+def test_stage1y_t_failure_inside_its_band_is_not_adopted(tmp_path):
+    """D-023: a T failure inside chromaticindex's band is NOT ADOPTED (clarification 2026-10-13 23:3x); D-018's
+    "inside the band: seeds 3 and 4" class is printed as information, not as a pending verdict. Control 0.3 / 0.8
+    (band 0.625), boY 0.6: d −0.083; kumeu improved so the mean over the nine holds."""
+    runs = stage1y_world(tmp_path, p_ctrl={BR.CHROMATIC: (0.3, 0.8)},
+                         p_boy={BR.CHROMATIC: 0.6, "neos-3656078-kumeu": 0.2})
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert failed_gates_y(res) == {"T"} and res["verdict"] == "DO NOT ADOPT boY: failed T"
+    inside = [c for c in res["classification"] if c.startswith("inside the band")]
+    assert len(inside) == 1 and BR.CHROMATIC in inside[0] and "NOT ADOPTED" in inside[0]
+    assert "not pre-registered" in inside[0]
 
 
 # ======================================================================================== D-023 config and jobs

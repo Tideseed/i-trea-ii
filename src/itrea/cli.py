@@ -28,7 +28,8 @@ the only place the mapping lives.
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict;
                                --stage 1y = D-023 (phase Y only: A9@boY vs A9@bo1s + A6F, set backoff2), read over
-                               the 11 of D-023's amendment of 2026-10-13 (66 runs; outcome rules on the nine)
+                               the 11 of D-023's amendment of 2026-10-13 (66 runs; outcome rules on the nine;
+                               G's noise = no sleep in phase Y, "still beats A6F" binds — its 23:3x clarification)
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
     itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
     (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off [--instances amended|stage1|a,b], from
