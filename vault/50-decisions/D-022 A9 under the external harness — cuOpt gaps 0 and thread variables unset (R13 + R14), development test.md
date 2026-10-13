@@ -88,3 +88,26 @@ follow-up reruns the three's instances worse than −band_i on exactly one seed,
 verdict: `make-jobs itx-r13f --instances all` means the 17); its mean is over the three. C1's block reads A9@r13x vs
 A6F@r13x (and vs A0) on the 11 only, with its own completeness line; it never makes D-022's verdict INCOMPLETE or
 INVALID (`tools/d022_report.py --instances / --c1-instances`, defaults the three / the 11).
+
+## Second amendment before any reading (2026-10-13 15:3x) — after the adversarial check of D-024; 7 of 58 runs done, none read
+Two verifiers (Claude Code subagents) found the first amendment's rule unsound and the C1 hint without a threshold.
+Fixed now, before anyone reads an itx-r13 run:
+- **Counts corrected:** cuOpt summaries at 120 s on the 17: 141 runs (153 with M1); cuOpt's own "optimal" stop on
+  fhnw-binpack4-48 9/9, neos-3004026-krka 10/10, neos-960392 3/7 (A6 3/3, A9 0/4).
+- **The R13 + R14 rule (replaces the bounded-d mean over three, which reads noise: two of the three sit at floor-level P):**
+  **adopt** if (1) validity holds (as before: harness legs, gaps 0 in every treatment solve and default in every control
+  solve, no compile on the clock), (2) the mechanism shows: no treatment run is ended first by cuOpt's "optimal" with a
+  final gap > 1e-9, and (3) no harm: on fhnw-binpack4-48 and neos-3004026-krka |ΔP| ≤ 0.005 (D-018's floor rule) on
+  seed means, on neos-960392 d ≥ −band_i; **reject** if (3) fails on both seeds of an instance; otherwise INCONCLUSIVE →
+  seeds 2–3 on that instance, same rules; still inconclusive → not adopted (as before).
+- **Stated assumption:** the 14 other instances are not run because cuOpt never stopped early there; this assumes cuOpt
+  uses the MIP gaps only as a termination test (not as a pruning limit), which is not verified from cuOpt's source or
+  documentation. The v1 guard (stage 2 / the C1 guard below) carries the check.
+- **C1's interim hint, fixed before any reading:** the weak set is the **fixed 11** named in the first amendment (from
+  earlier A6 runs; not re-selected on A6F@r13x). **Hint present** iff the ratio of means of P(120) A9@r13x / A6F@r13x
+  over those 11 (seed means, both seeds, A9 failures counted as A9 outcomes, D-002 §6 reading) is **≤ 0.95**. The
+  "improved > worse" limb is dropped (under a null it passes about half the time). **Guard:** mean bounded d of
+  A9@r13x vs A6F@r13x over all 17 ≥ −0.05 — for which the four instances the first amendment dropped
+  (chromaticindex1024-7, neos-3656078-kumeu, glass4, radiationm18-12-05; chromaticindex is A9's known worst case against
+  cuOpt alone) are run: {A9@r13x, A6F@r13x} × seeds 0–1 = 16 runs, queued after the 58. Both numbers are inputs to C1's
+  go / no-go, which stays Berk's (D-019 addendum); vs SCIP alone reported as before (A0 of dev / classprobe).
