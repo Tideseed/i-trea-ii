@@ -111,3 +111,8 @@ Fixed now, before anyone reads an itx-r13 run:
   (chromaticindex1024-7, neos-3656078-kumeu, glass4, radiationm18-12-05; chromaticindex is A9's known worst case against
   cuOpt alone) are run: {A9@r13x, A6F@r13x} × seeds 0–1 = 16 runs, queued after the 58. Both numbers are inputs to C1's
   go / no-go, which stays Berk's (D-019 addendum); vs SCIP alone reported as before (A0 of dev / classprobe).
+- **Clarification (16:0x, before any itx-r13 run is read):** the floor limb is **one-sided** — a no-harm rule: on
+  fhnw-binpack4-48 and neos-3004026-krka it fails only when the treatment LOSES more than 0.005 (ΔP = P(A9@r13x) −
+  P(A9@r13) > +0.005); a gain never fails it (the second amendment's "|ΔP| ≤ 0.005" quoted D-018's two-sided floor
+  value, which here would have rejected R13 for helping). The line appended at 15:2x ("the mean d is over the three")
+  is superseded by the second amendment: there is no mean. `tools/d022_report.py` implements both (57 tests).

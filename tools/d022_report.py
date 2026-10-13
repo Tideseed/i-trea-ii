@@ -75,7 +75,7 @@ over the instances is taken). A run without P(120) on any of the three arms make
   (1) validity holds (above);
   (2) the mechanism shows: no A9@r13x run is ended first by cuOpt's "optimal" with a final gap > 1e-9;
   (3) no harm: on FLOOR_INSTANCES (fhnw-binpack4-48, neos-3004026-krka) |ΔP| <= 0.005 on seed means, ΔP = P(A9@r13x)
-      − P(A9@r13) — D-018's floor rule, two-sided as written (a gain beyond 0.005 fails it too); on neos-960392 (and
+      − P(A9@r13) — one-sided since D-022's clarification of 16:0x (only a loss beyond 0.005 fails it; a gain never does); on neos-960392 (and
       any other rule-set instance) the bounded d of the treatment vs the control on seed means >= −band_i, band_i =
       max(0.05, the larger seed-0 vs seed-1 bounded difference |a − b| / max(a, b, 1e-3) of the control or A6F@r13x).
   - REJECT (A9 keeps the default gaps; D-021's A9 rows run under {ext, gap_zero false, env_unset false}) if (3) fails
@@ -153,7 +153,7 @@ C1_INSTANCES = ("neos-2746589-doon", "cryptanalysiskb128n5obj16", "rail01", "neo
                 "sing44", "ca__Scenario400_reserves_1", "item_placement_9903", "neos-960392", "neos-4763324-toguru",
                 "comp21-2idx")
 C1_ARMS = (TREAT, A6F)
-# D-022 second amendment before any reading (2026-10-13 15:3x): the rule's no-harm leg — D-018's floor rule (two-sided)
+# D-022 second amendment before any reading (2026-10-13 15:3x): the rule's no-harm leg — D-018's floor value, one-sided (harm only; clarification 16:0x)
 # on the two floor-level instances, the band on the third; C1's hint and guard (inputs to Berk's go / no-go).
 FLOOR_INSTANCES, FLOOR_DP = ("fhnw-binpack4-48", "neos-3004026-krka"), 0.005
 HINT_RATIO, GUARD_MEAN = 0.95, -0.05
@@ -441,7 +441,7 @@ def _mech_fail(mech: dict) -> list[tuple[str, int]]:
 
 def _harm_row(i: str, pc: list, pt: list, pa: list, band: float | None = None) -> dict:
     """The no-harm leg (3) on one instance, from its per-seed P of the control, the treatment and A6F: the floor limb
-    (FLOOR_INSTANCES: |ΔP| <= FLOOR_DP on seed means, ΔP = P(A9@r13x) − P(A9@r13), two-sided as D-018's floor rule)
+    (FLOOR_INSTANCES: |ΔP| <= FLOOR_DP on seed means, ΔP = P(A9@r13x) − P(A9@r13), one-sided: harm only, D-022 clarification 16:0x)
     or the band limb (every other instance: bounded d on seed means >= −band_i); `fail_seed` = the limb failing per
     seed (|ΔP_s| > FLOOR_DP, or d_s < −band_i). band_i = max(BAND_MIN, the control's or A6F's seed-0 vs seed-1 spread)
     unless given (the follow-up keeps seeds 0–1's)."""
@@ -453,7 +453,7 @@ def _harm_row(i: str, pc: list, pt: list, pa: list, band: float | None = None) -
     d_s = [effect_d(c, t) for c, t in zip(pc, pt)]
     if floor:
         value, value_s, limit = mt - mc, dp_s, FLOOR_DP
-        no_harm, fail_s = abs(value) <= FLOOR_DP, [abs(v) > FLOOR_DP for v in dp_s]
+        no_harm, fail_s = value <= FLOOR_DP, [v > FLOOR_DP for v in dp_s]   # one-sided: harm only (D-022 clarification 16:0x)
     else:
         value, value_s, limit = effect_d(mc, mt), d_s, band
         no_harm, fail_s = value >= -band, [v < -band for v in d_s]
@@ -463,7 +463,7 @@ def _harm_row(i: str, pc: list, pt: list, pa: list, band: float | None = None) -
 
 
 def _limb(r: dict) -> str:
-    return (f"|ΔP| <= {FLOOR_DP:g}" if r["kind"] == "floor" else f"bounded d >= −band ({r['band']:.2f})")
+    return (f"ΔP <= +{FLOOR_DP:g}" if r["kind"] == "floor" else f"bounded d >= −band ({r['band']:.2f})")
 
 
 def outcome(df: pd.DataFrame, instances, seeds=SEEDS, mech_fail=()) -> dict:
@@ -859,7 +859,7 @@ def print_report(res: dict, out=sys.stdout) -> None:
           f"{len(other)} development + class-probe instances are not read by the rule")
     p(f"    rule (second amendment): ADOPT iff validity holds, the mechanism shows (no {TREAT} run ended first by "
       f"cuOpt's 'optimal' with a final gap > {GAP_TOL:g}) and no harm (floor limb on {list(FLOOR_INSTANCES)}: |ΔP| <= "
-      f"{FLOOR_DP:g} on seed means, ΔP = P({TREAT}) − P({CTRL}), two-sided as D-018's floor rule; band limb on the "
+      f"{FLOOR_DP:g} on seed means, ΔP = P({TREAT}) − P({CTRL}), one-sided: only a loss fails (clarification 16:0x); band limb on the "
       "others: bounded d >= −band_i); REJECT iff the no-harm leg fails on both seeds of an instance (checked first); "
       "otherwise INCONCLUSIVE -> seeds 2–3 on those instances; still inconclusive -> NOT ADOPTED. No mean over the "
       "instances.")

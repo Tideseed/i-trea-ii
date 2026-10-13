@@ -719,7 +719,7 @@ def test_full_layout_gives_a_complete_verdict_hint_and_guard(tmp_path):
     for s in ("stated assumption: the 14 other development + class-probe instances are not run",
               "termination test (not as a pruning limit)", "No mean over the instances",
               "68 of 68 runs", "— complete", "HINT present", "GUARD holds", "go / no-go on C1 is Berk's",
-              "VERDICT (exclude): ADOPT", "two-sided as D-018's floor rule"):
+              "VERDICT (exclude): ADOPT", "one-sided: only a loss fails"):
         assert s in txt, s
     r58 = D.report(world74(tmp_path / "58", added=False), tmp_path / "58")
     assert verdict(r58) == verdict(res)
@@ -749,13 +749,13 @@ FH, KR, N96 = D.RULE_INSTANCES
     ((0.010, 0.012), (0.013, 0.014), "ADOPT", []),                 # ΔP +0.0025 on seed means: holds
     ((0.010, 0.012), (0.022, 0.012), "INCONCLUSIVE", [FH]),        # ΔP +0.006 (+0.012 / 0): fails on one seed
     ((0.010, 0.010), (0.020, 0.020), "REJECT", []),                # ΔP +0.010 on both seeds
-    ((0.010, 0.010), (0.000, 0.000), "REJECT", []),                # a GAIN of 0.010 on both seeds: two-sided
-    ((0.010, 0.010), (0.020, 0.000), "REJECT", []),                # ±0.010: seed means hold, both seeds fail
+    ((0.010, 0.010), (0.000, 0.000), "ADOPT", []),                 # a GAIN of 0.010 on both seeds: one-sided, never harm
+    ((0.010, 0.010), (0.020, 0.000), "ADOPT", []),                 # ±0.010: seed means hold, one seed loses
 ])
 def test_the_floor_limb(tmp_path, ctrl, treat, kind, rerun):
-    """D-022's second amendment on fhnw-binpack4-48: |ΔP| <= 0.005 on seed means (ΔP = P(A9@r13x) − P(A9@r13));
-    REJECT when |ΔP_s| > 0.005 on both seeds, before ADOPT — as written, two-sided (D-018's floor rule): a gain beyond
-    0.005 on both seeds rejects, and so do opposite-sign seeds whose mean holds (pinned here, open to Berk)."""
+    """D-022's second amendment on fhnw-binpack4-48: ΔP <= +0.005 on seed means (ΔP = P(A9@r13x) − P(A9@r13));
+    REJECT when ΔP_s > +0.005 on both seeds, before ADOPT — one-sided since the clarification of 16:0x (a no-harm
+    rule: a gain never fails it; opposite-sign seeds whose mean holds adopt)."""
     res = D.report(world74(tmp_path, p={(FH, D.CTRL): ctrl, (FH, D.TREAT): treat}), tmp_path)
     o = res["readings"][0]["outcome"]
     row = o["rows"][0]
@@ -763,7 +763,7 @@ def test_the_floor_limb(tmp_path, ctrl, treat, kind, rerun):
     assert row["limit"] == D.FLOOR_DP and o["kind"] == kind and o["rerun"] == rerun
     check_inconclusive(o)
     if kind == "REJECT":
-        assert o["rejected"] == [FH] and "|ΔP| <= 0.005 fails on both seeds" in verdict(res)
+        assert o["rejected"] == [FH] and "ΔP <= +0.005 fails on both seeds" in verdict(res)
     assert f"{row['value']:+.4f}" in text(res)                                       # ΔP printed signed
 
 
