@@ -20,7 +20,8 @@ description: >
   the coupled arm, D-011). A development test is a decision record D-NNN written before any run: one variable, the
   mechanism and outcome rules with per-instance noise bands, and a control re-run in the same window under a fresh
   variant name (`rc1d`, `rc1e`) so earlier runs are not reused; amendments are dated and made before the first run
-  — or, under D-024, while runs execute but before any run of the set is read (stated as such; below).
+  (D-024 rule 2; incident 2026-10-13 15:16 — see "Never read a run before the rule is fixed" below for the recovery
+  when a rule is found missing while runs execute).
 - **Staged testing (D-024, Berk 2026-10-13: "Shall we do targeted and surgical tests? and only if we see hints of
   improvement we can go wider"; "always aim for performance runs unless something structural is buggy in our
   experimentation methodology"; "If the box is idle make the most of it").** Before writing the job file:
@@ -34,23 +35,27 @@ description: >
     on those three), or where the claim lives (D-013's weak cases). A test of a mechanism on every instance where it can
     act is a complete test, not a stage 1. State any assumption the selection rests on (D-022: cuOpt uses the MIP gaps
     only as a termination test — not verified) and let the wider guard carry its check.
-  - **The hint is written before the runs start:** one one-sided threshold on the targeted runs' own data (e.g. C1's
-    ratio of means of P(120) A9@r13x / A6F@r13x ≤ 0.95 on the fixed 11 weak instances; v1 stage 1's ratio of call-clock
-    `pt_gams` A9 / A6F ≤ 0.95 on the panel + the 5 no-solution instances), the fixed instance set it reads (never
+  - **The hint is written before the runs start:** one one-sided threshold on the targeted runs' own data (e.g. v1
+    stage 1's ratio of call-clock `pt_gams` A9 / A6F ≤ 0.95 on the panel + the 5 no-solution instances, D-024's
+    addendum; C1's hint is the counterexample — its threshold, ratio of means ≤ 0.95 on the fixed 11, was fixed at
+    15:28:42 after the itx-r13 pool had started at 15:16:11, with 7 of 58 runs done and none read: a near miss in
+    `vault/60-incidents/Mistakes and incidents.md`), the fixed instance set it reads (never
     re-selected on the runs it judges), how failures and skipped blocks count, and **what it gates** (which line widens,
     which stage runs anyway — v1's guard-only stage runs whatever the hint says). A hint is **futility-only**: it gates
     widening and never declares success; the decisive reading comes later on all instances, the targeted ones
     included. Do not use an "improved > worse" count as a hint (under no effect it passes about half the time), nor a
-    mean over a handful of floor-level instances (it reads noise; use D-018's floor rule and per-instance bands).
-  - **Never read a run before the rule is fixed.** A rule or hint may be amended while runs are executing only if no
-    run of the set has been read; the amendment is dated and states how many runs are done and that none were read
-    (D-022's second amendment: 7 of 58 done, none read). After any reading, a change is a stated deviation or a new
-    record, never a silent re-reading.
+    mean over a handful of floor-level instances (it reads noise): use a floor limb on ΔP and per-instance bands; for a
+    no-harm test the floor limb is one-sided (D-022's clarification, fd75476), not D-018's two-sided |ΔP| ≤ 0.005.
+  - **Never read a run before the rule is fixed.** The rule and the hint are written, with their numbers, before the
+    job file that serves them is launched (D-024 rule 2). If a rule is found missing or wrong while runs execute — a
+    recovery, not a permission — fix it before any run of the set is read, date the amendment, state how many runs are
+    done and that none were read, and log the near miss in the incident log (D-022's second amendment: 7 of 58 done,
+    none read). After any reading, a change is a stated deviation or a new record, never a silent re-reading.
   - **Breadth no decision reads is not run** (D-024 rule 4): A0 runs only on the instances a comparison reads (v1: the
-    81 of H_cu ∪ W_SCIP unseen; the stage-1 instances first).
+    81 of H_cu ∪ W_SCIP unseen, the stage-1 instances first; with no hint only the 25 stage-1 instances, D-024 (f)).
 - Timeline (D-019, GitHub milestones `C1 checkpoint (2026-10-23)` and `v1 (end of November 2026)`): development on cuOpt
   26.08 closes at C1, Fri 2026-10-23; v1 (A9 frozen) runs its confirmatory test and the MIPfeas run under prereg-v2
-  (#32) on cuOpt 26.10 (#31; on 26.08 if 26.10 is not out by 2026-11-06).
+  (#32) on cuOpt 26.10 (#31; on 26.08 if 26.10 is not out by 2026-11-06, to be confirmed with Berk then).
 - Daytime windows only: no I-TREA II window in 00:00–07:00 (Berk, 2026-10-10, "No nights", D-019; until then D-009
   asked for his yes for each night). Long run sets (MIPfeas ≈ 78 h) are split into daytime windows.
 - Tuning happens on the tuning side of the pool only, within the logged E4 budget (≤ 12 configurations × 16

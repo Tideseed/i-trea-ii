@@ -35,7 +35,7 @@ revised pre-registration (`prereg-v2`) before any confirmatory run.
 Checkpoint **C1 on Fri 2026-10-23** (development closes on cuOpt 26.08; MIPfeas harness calibrated; an interim A9 result
 on the 17 development and class-probe instances; go / no-go for the final phase). **v1 at the end of November 2026**
 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10; if 26.10 is not released by 11-06, the v1 runs proceed on 26.08 and
-26.10 follows as an addendum. Daytime windows only. Targets:
+26.10 follows as an addendum (to be confirmed with the author then). Daytime windows only. Targets:
 - **Confirmatory, unseen hard instances** (about 32 × 2 seeds × {SCIP alone, cuOpt alone, A9}, T = 300 s): on SCIP's
   weak set at minimum a significant gain (mean d > 0 with its 95 % interval above 0), target mean P −40 % with ≥ 70 %
   of the weak set improved (stretch −55 %); on cuOpt's weak set at minimum a significant gain, target mean P −25 % with
@@ -46,8 +46,9 @@ on the 17 development and class-probe instances; go / no-go for the final phase)
   geometric mean −10 %; stretch ≤ 0.0274 (SCIP concurrent 11, published). The reference is our own same-version run
   because the published rows are cuOpt 26.08 and aggregates only. **Since 2026-10-11 the external run follows our own
   standard ITX-1** (vault `D-021`, accepted by the author): every GPU arm gets A9's footprint F (cuOpt alone on the same
-  5 cores and the GPU; no whole-box run), 600 s, decisions on the 215 instances outside the development set that fit
-  F (each decision also reported without the instances seen in calibration), an ε-floored guard plus solutions found
+  5 cores and the GPU; no whole-box run), 600 s, decisions on the 215 instances outside the development and
+  class-probe sets that fit F (each decision also reported without the 31 instances seen in calibration or the memory
+  probe), an ε-floored guard plus solutions found
   as the minimum, the shift-0.001 geometric mean reported beside; D-019's literal readings are reported beside too.
   **Staged (vault `D-024`, 2026-10-13):** a first stage on a 20-instance panel plus the 5 instances where cuOpt finds
   no solution, with a futility-only hint fixed in advance (ratio of means ≤ 0.95); the rest of the decisive set only
@@ -101,23 +102,27 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
   ported exactly (equal to GAMS's own function on all 3,495 of its traces). ITX-1's footprint F passed its thermal soak
   (steady p95 66–73 °C, maximum 76 °C over four 600-s runs); three instances do not fit F's memory (eilA101-2, nw04,
   supportcase6) and are excluded in advance. The calibration of cuOpt alone on F against GAMS's published GB10 row is
-  **interim and incomplete** (stopped after 19 of 30 runs so that performance runs come first): at 18 runs the ratio
-  of shifted geometric means is 1.416 [1.087, 1.903] on the call clock — cuOpt on 5 cores about 40 % above GAMS's
-  24-thread whole-box run — with the clock check passing on the 6 of 10 strata-0–1 instances run; it decides nothing
-  until 30 of 30.
+  **INTERIM, INCOMPLETE (19 of 30)** (stopped so that performance runs come first): at the stop the ratio of shifted
+  geometric means is 1.390 [1.081, 1.837] on the call clock (1.416 [1.087, 1.903] at 18 runs) — cuOpt on 5 cores about
+  1.4 times GAMS's 24-thread whole-box run — with the clock check passing on the 6 of 10 strata-0–1 instances run; it
+  decides nothing until 30 of 30 (`vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim
+  calibration.md`).
 - **In progress (2026-10-13, no results yet):** `D-022` — cuOpt's MIP gaps 0 inside A9, tested on the 3 instances where
   cuOpt's own 1e-4 stop occurs — and checkpoint C1's interim A9 result against cuOpt alone on the same footprint
   (hint: ratio of means ≤ 0.95 on 11 weak development instances; guard over all 17), 74 runs.
 - **cuOpt 26.10.** NVIDIA/cuopt#2073 (filed 2026-10-07) is fixed in 26.10 by PR #2098 and checked on a 26.10 nightly in a
   separate environment: presolve stays on with a `SetSolutionCallback`, injected solutions are accepted exactly,
   invalid ones rejected; cuOpt reads injected solutions only when its GPU population records a new best. Open: our
-  exact checker and cuOpt disagree on a few incumbents (glass4, mas74 below MIPLIB's proven optimum accepted by ours;
-  cuOpt incumbents on snowy and neos-933966 rejected by ours) — a tolerance mismatch under investigation.
+  exact checker accepted incumbents below MIPLIB's proven optimum (glass4, from EA runs — cuOpt rejects that point
+  when offered; mas74, a cuOpt incumbent) and rejected cuOpt incumbents on snowy (1) and neos-933966 (3) — a tolerance
+  mismatch under investigation (#36).
 - **Tests (2026-10-12):** CPU suite 1,009 passed after D-021 phase 2; the runner's GPU tests passed on 2026-10-13.
 - **Next:** GitHub milestone *C1 checkpoint (2026-10-23)* — #23 (A9 and its back-off: D-023 next), #26 (recombine each
   partner incumbent with the elite), #27 (lp_decode: adopted for A3; open for A9 and follow-ups), #29 (MIPfeas
-  harness), #30 (A9 core layout for LP decode); milestone *v1 (end of November 2026)* — #1 (pool freeze), #31 (cuOpt
-  26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #35 (A9 two-way on 26.10), #12 (paper). Plan:
+  harness), #30 (A9 core layout for LP decode), #33 (control runs moved aside by run-id reuse), #36 (checker
+  tolerance), #37 (code owed by D-024, incl. D-023's amendment); milestone *v1 (end of November 2026)* — #1 (pool
+  freeze), #31 (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper); not in a milestone: #35
+  (A9 two-way through cuOpt 26.10's SET callback, not started; after the 26.10 re-baseline or v1.1). Plan:
   `vault/00-index/Roadmap.md`.
 
 ## How to start

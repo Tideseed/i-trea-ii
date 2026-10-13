@@ -23,11 +23,13 @@ the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_repo
 D-017, D-018 and D-022), run single-threaded after `itrea build-runs`.
 Development results are descriptive; they are never quoted as confirmatory.
 
-**Interim readings** (a report run on part of a run set, e.g. D-021's M4 calibration at 18 of 30 on 2026-10-13: R =
-1.416 [1.087, 1.903], late-clock check on 6 of the 10 strata-0–1 instances) carry **INTERIM** and **INCOMPLETE (n of
-N)** in the title, the verdict line and wherever they are quoted, and **never decide**: no adoption, no PASS / FAIL, no
-"inside / outside the band", no change of plan rests on them. Say which runs are missing and when they run; the
-verdict comes from the complete set by the record's own rule. An interim look that a record registers in advance (a
+**Interim readings** (a report run on part of a run set, e.g. D-021's M4 calibration stopped at 19 of 30 on
+2026-10-13: R = 1.390 [1.081, 1.837] on the call clock, late-clock check on 6 of the 10 strata-0–1 instances) carry
+**INTERIM** and **INCOMPLETE (n of N)** in the title, the verdict line and wherever they are quoted. An interim reading
+may report a check's outcome on what has run, labelled with its n (e.g. "the late-clock check passes on 6 of the 10
+strata-0–1 instances run", as D-024 rule 0 records it); it gives no final verdict, no adoption, no footprint or
+"inside / outside the band" reading of the final rule. Say which runs are missing and when they run; the verdict comes
+from the complete set by the record's own rule. An interim look that a record registers in advance (a
 staged test's hint) is reported as that look, not as an interim reading of the final rule.
 
 **Staged results (D-024).** A stage-1 note reports the hint exactly as it was written before the runs (threshold,

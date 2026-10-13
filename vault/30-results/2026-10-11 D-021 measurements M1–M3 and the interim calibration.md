@@ -1,4 +1,4 @@
-# D-021 measurements M1–M3 and the interim calibration M4 (2026-10-11 to 2026-10-13, windows W-1011b, W-1012, W-1013)
+# D-021 measurements M1–M3 and the calibration M4 — INTERIM, INCOMPLETE (19 of 30) (2026-10-11 to 2026-10-13, windows W-1011b, W-1012, W-1013)
 
 **Question.** Before any v1 run, [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]]
 § "Measurements first" asks four things about the external harness at A9's footprint F (X925 5–6, A725 1–3, the GPU):
@@ -16,11 +16,11 @@ harness and the heat, not for a comparison.
   76 °C, no 5-s sample ≥ 90 °C, no clock cap, busy SM 2,392 MHz.
 - **M3 — measured; the list is fixed:** eilA101-2, nw04, supportcase6 do not fit F (2 cap hits at the 40-GB host
   cap, 1 host peak above 0.8 × 24 GB). The decision set goes from 218 to 215 instances, H_cu-unseen from 65 to 64.
-- **M4 — INCOMPLETE, stopped at 19 of 30** by D-024's rule 0 (performance runs first). The late-clock check, computed
+- **M4 — INTERIM, INCOMPLETE (19 of 30)**, stopped by D-024's rule 0 (performance runs first). The late-clock check, computed
   on the 6 strata-0–1 instances run so far, passes: median first-incumbent offset ours − GAMS −0.119 s (rule
   ≤ +0.3 s); 4 strata-0–1 instances remain (neos-1171448, p200x1188c, seymour, swath3). The footprint ratio R on the
   call clock is 1.390 [1.081, 1.837] over the 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x and quoted in the
-  journal and D-024); no INSIDE / OUTSIDE reading is made before 30 of 30.
+  journal 2026-10-13 14:4x, AGENTS.md and the 2026-10-13 16:00 checkpoint); no INSIDE / OUTSIDE reading is made before 30 of 30.
 
 ## What ran
 Every pool: `.venv/bin/python -m itrea.experiments.pool <job file> --layout pair --deadline HH:MM` from a chain script
@@ -52,7 +52,7 @@ unchanged from 999995f to fd75476.
   15:10:41–42, MemAvailable ≈ 110 GB; GPU tests before M1: `test_cuopt_run.py` (with `ITREA_TEST_CUOPT_GPU_GB=8`),
   `test_pair.py`, `test_three_way.py` — 3 + 3 passed. Restored by the chain 18:13:38–18:16:59 and verified (both units
   active and enabled, :8094 and :8092 healthy, lease free, no hold lines). Fan-governor rests 15:43 (20 min), 16:34
-  (20 min).
+  (20 min), 17:25 (30 min; the M3 pool waited 17:28:34–17:55:17).
 - **W-1012** (10-12 12:05 → 12:43): lease `--mem 69`, servers stopped 12:05:51–52, MemAvailable 110 GB. Paused after
   5 runs at the request of the [other project] session: [other project]'s hosted model had run out of [hosted model provider] credit and its
   fallback was `ornith-vllm`, so [other project] on Slack could not answer anyone. Stop file 12:32, pool stopped 12:40:21, servers
@@ -167,7 +167,7 @@ Per instance (P = GAMS's integral `pt_gams`, 0–2, T = 600 s; "first inc." in s
 | 5 | satellites2-60-fs | — | — | 0.5090 | — | 0.201 |
 | 5 | supportcase22 | 2.0000 | 2.0000 | 2.0000 | — | — |
 
-| reading | 19 instances (at the stop) | 18 instances (read 14:4x; journal, D-024) |
+| reading | 19 instances (at the stop) | 18 instances (read 14:4x; journal 2026-10-13, AGENTS.md, checkpoint 2026-10-13 16:00) |
 |---|---|---|
 | R = (SGM_ours + 0.001) / (SGM_GAMS + 0.001), call clock [95 % bootstrap] | **1.390 [1.081, 1.837]** | 1.416 [1.087, 1.903] |
 | R, launch clock | 2.036 [1.572, 2.654] | 2.118 [1.629, 2.799] |
@@ -178,7 +178,7 @@ Per instance (P = GAMS's integral `pt_gams`, 0–2, T = 600 s; "first inc." in s
 | the same on the launch clock; median start-up offset | +2.173 [+2.050, +3.411] s; 2.267 s | the same |
 | **late-clock check** (median ours − GAMS over strata 0–1, ≤ +0.3 s) | **−0.119 s (n 6): passes** — stratum 0 −0.114 (n 3), stratum 1 −0.123 (n 3) | the same |
 | other strata, reported only | 2: −0.020 (n 3); 3: +28.782 (n 3); 4: −0.104 (n 3); 5: +31.550 (n 1) | the same |
-| verdict | **INCOMPLETE** (11 of 30 without a run) | INCOMPLETE (12 of 30) |
+| verdict | **INTERIM, INCOMPLETE (19 of 30)** (11 without a run) | INTERIM, INCOMPLETE (18 of 30) |
 
 Configuration hash of every chosen run: `82a371305f88`. Reference check: GAMS's z* equals our references (max
 relative difference 0). Scale from GAMS's own archive on the same 30 (D-020): GB10 cuOpt 26.04 vs 26.08 R 1.136 [0.909,
@@ -188,9 +188,9 @@ relative difference 0). Scale from GAMS's own archive on the same 30 (D-020): GB
 about 1.4 times GAMS's (20 cores, 24 threads, the whole GB10) on the same 19 instances. The excess sits in strata 3–4:
 csched008 (first incumbent 85.6 s vs 13.8 s; P 0.301 vs 0.047), dano3_3 (43.0 vs 14.2 s; 0.143 vs 0.061),
 irish-electricity (0.469 vs 0.132), neos-4300652-rahue (0.510 vs 0.148). That is consistent with fewer threads, but the
-reading is not made: D-021's footprint reading needs all 30 (band 0.870–1.150 on the call clock, feasible ±1), and the
-19-instance interval [1.081, 1.837] still reaches below the band's upper end. The late-clock check — the part that
-gates the clock every v1 decision reads — passes on what has run. D-021's earlier thin evidence that threads matter
+reading is not made: D-021's footprint reading (band 0.870–1.150 on the call clock, feasible ±1) needs all 30, and no
+interim R is read against the band. The late-clock check — the part that
+gates the clock every v1 decision reads — passes on what has run (6 of the 10 strata-0–1 instances; INTERIM). D-021's earlier thin evidence that threads matter
 little (A6 at 3 threads vs GAMS, R 1.00 [0.89, 1.12] on the 15 development instances at 120 s) came from different
 instances and a shorter budget. v1's targets are anchored on our own A6F either way (D-021).
 
@@ -222,17 +222,20 @@ instances and a shorter budget. v1's targets are anchored on our own A6F either 
 Both directions of a tolerance mismatch between our checker and the solvers turned up:
 - **Better than the proven optimum, accepted by our checker.** mas74 (M4): cuOpt's incumbent k 21 at 95.6 s has
   objective 11,801.18516 against MIPLIB's `=opt=` 11,801.18572 (integrality violation 1.03e-7, rows 2.2e-12); our
-  checker passes it, P counts γ = 0 from there, and GAMS's scoring script would raise on it (`mipfeas-report`'s
-  "beats the reference" line). glass4: the cuOpt 26.10 probe (10-13) offered cuOpt a glass4 point from a development
+  checker passes it, P counts γ = 0 from there, and GAMS's scoring script would raise on it unless the trace is on its
+  whitelist, where it sets the objective to z* (`mipfeas-report`'s "beats the reference" line). glass4: the cuOpt 26.10 probe (10-13) offered cuOpt a glass4 point from a development
   run (A3@lpd seed 0, the EA's incumbent k 30 at 92.9 s, objective 1,200,006,662.64) below MIPLIB's proven optimum
   1,200,012,599.97; cuOpt rejected it, our checker had accepted it.
-- **Scope on glass4, counted for this note** in `datasets/runs.parquet` as built 2026-10-11 14:09 (939 runs; the
-  only `=opt=` instance with such incumbents; item_placement_9903's references are provisional by design): **60 checked
-  incumbents in 8 of the 57 glass4 runs (2 more rows are synthetic) are below the proven optimum**, every one passed, worst row violation
-  ≤ 4.5e-7 relative (inside 1e-6). All 8 runs are EA arms — A3@ad1 s0, A3@cl1 s1, A3@lpd s0, A3@rc0 s0, A3@rc1 s0,
-  A3@rc1d s0, A3@stall100 s0 (roles `ea` and `solver`: SCIP took the EA's posts as its incumbents) and A5@c04 s0 (`ea`
-  only); the first such incumbent in each run comes at 47.8–119.9 s. P counts γ = 0 from that time in those runs; the
-  effect on any development reading has not been computed.
+- **Scope on glass4, counted for this note** in `datasets/runs.parquet` as built 2026-10-11 14:09 (939 rows: 921 runs + 18
+  synthetic; glass4 is the only `=opt=` instance with such incumbents; item_placement_9903's references are provisional
+  by design): **60 checked incumbents in 8 of the 57 glass4 runs (2 more glass4 rows are synthetic) beat z* by GAMS's
+  rounded test (`beats_ref`)** — 33 with role `ea` and 27 SCIP records of EA posts (role `solver`, source `ea`); by a
+  strict `obj < z*` test there are 62, the 2 more in A3@rc1d s0 at 44.5 s (9.8e-10 relative below z*). Every one passed,
+  worst row violation ≤ 4.5e-7 relative (inside 1e-6). All 8 runs are EA arms — A3@ad1 s0, A3@cl1 s1, A3@lpd s0,
+  A3@rc0 s0, A3@rc1 s0, A3@rc1d s0, A3@stall100 s0 (roles `ea` and `solver`: SCIP took the EA's posts as its incumbents)
+  and A5@c04 s0 (`ea` only); the first `beats_ref` incumbent in each run comes at 47.8–119.9 s (the first strictly below
+  z* at 44.5–119.9 s). P counts γ = 0 from that time in those runs; the effect on any development reading has not been
+  computed.
 - **Feasible for cuOpt, rejected by ours:** neos-4338804-snowy 1 and neos-933966 3 cuOpt incumbents (above). cuOpt's
   own tolerance values are not checked here.
 - Open: compare our 1e-6 rule with SCIP's and cuOpt's feasibility tolerances on glass4 (coefficients up to 8.4e6) and

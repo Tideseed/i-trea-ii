@@ -628,7 +628,7 @@ control `A9@bo1s`, see the decision record).
 - crna is bimodal: control 0.698 / 0.090, bo1 0.144 / 0.734 by seed — the EA either leads early or not at all.
 - Next candidate: phase Y only (no ladder), its own record.
 
-## D-021 measurements M1–M3 and the interim calibration (2026-10-11 15:12–18:13; 2026-10-12 12:06–12:40; 2026-10-13 12:32–15:16) — the external harness, not the method
+## D-021 measurements M1–M3 and the interim calibration (2026-10-11 15:12–18:13; 2026-10-12 12:06–12:40; 2026-10-13 12:32–15:16) — the external harness, not the method; M4 INTERIM, INCOMPLETE (19 of 30)
 Full record: [[2026-10-11 D-021 measurements M1–M3 and the interim calibration]]. Harness and calibration runs of
 [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] at A9's
 footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void and 0 compile on the clock in every pool.
@@ -641,20 +641,22 @@ footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void 
 - **M3 memory probe** (20261011-163415-1522373; 8 × A6F at cuOpt RMM 40 / host 40 GB): eilA101-2 and nw04 killed at
   the 40-GB host cap, supportcase6 at 22.6 GiB host (> 19.2) → **does not fit F: eilA101-2, nw04, supportcase6**,
   excluded from both arms; decision set 218 → 215, H_cu-unseen 65 → 64.
-- **M4 calibration, interim** (A6F × D-020's 30-instance sample × 600 s, seed 0; pools 20261012-120607-2036840, 5 runs,
-  paused for [other project], and 20261013-123201-3850111, 14 runs): **INCOMPLETE, stopped at 19 of 30** by D-024 rule 0
+- **M4 calibration — INTERIM, INCOMPLETE (19 of 30)** (A6F × D-020's 30-instance sample × 600 s, seed 0; pools 20261012-120607-2036840, 5 runs,
+  paused for [other project], and 20261013-123201-3850111, 14 runs): stopped at 19 of 30 by D-024 rule 0
   (performance runs first). Late-clock check on the 6 strata-0–1 instances run: median first-incumbent offset ours −
   GAMS −0.119 s — passes (≤ +0.3 s); 4 strata-0–1 instances still owed before v1's first external run. Footprint ratio,
   call clock: R 1.390 [1.081, 1.837] over 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x); launch clock 2.036
   [1.572, 2.654]; feasible 16 vs GAMS 16. The excess is in strata 3–4 (csched008 first incumbent 85.6 s vs 13.8 s,
-  dano3_3 43.0 vs 14.2 s): our cuOpt on 5 threads vs GAMS's 24 on the whole box. No footprint reading before 30 of 30.
+  dano3_3 43.0 vs 14.2 s), consistent with our cuOpt on 5 threads on F vs GAMS's 24 on the whole box; no footprint
+  reading before 30 of 30.
 - **Checker tolerance, found, to investigate:** in M4 our checker passed a mas74 cuOpt incumbent below MIPLIB's proven
   optimum (11,801.18516 vs 11,801.18572) and rejected 4 cuOpt incumbents (neos-4338804-snowy 1: a bound off by
   8.3e-6; neos-933966 3: integrality off by 4.8–6.5e-6; our tolerance is 1e-6). In the 2026-10-11 run table, 60 checked
-  incumbents in 8 of 57 glass4 runs are below glass4's proven optimum (all EA arms: A3@ad1, cl1, lpd, rc0, rc1, rc1d,
-  stall100, A5@c04; first at 47.8–119.9 s; worst row violation ≤ 4.5e-7 relative); cuOpt 26.10 rejected the lowest
+  incumbents in 8 of 57 glass4 runs beat glass4's proven optimum by GAMS's rounded test (`beats_ref`; 33 EA-role, 27
+  SCIP records of EA posts; 62 lie strictly below z*, the first at 44.5 s) — all 8 are EA arms: A3@ad1, cl1, lpd, rc0,
+  rc1, rc1d, stall100, A5@c04; first `beats_ref` at 47.8–119.9 s; worst row violation ≤ 4.5e-7 relative; cuOpt 26.10 rejected the lowest
   of them (1,200,006,662.64) when offered it. The effect on any glass4 development reading has not been computed (#36).
-- Running after M4 in the same window (W-1013): D-022 (set `itx-r13`, 58 runs, then `itx-r13b`, 16) from 15:16 — no
+- Running after M4 in the same window (W-1013): D-022 (set `itx-r13`: `jobs/itx-r13.jsonl`, 58 runs, then `jobs/itx-r13b.jsonl`, 16, same set) from 15:16 — no
   result exists yet; its rules were fixed before any reading ([[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]],
   second amendment f52e3e8, clarification fd75476). Then M6 (A0's CPU lanes).
 
@@ -664,7 +666,7 @@ implemented properly?" NVIDIA/cuopt#2073 (filed 2026-10-07: a `SetSolutionCallba
 closed on 2026-10-12 by PR #2098, merged into `main` = 26.10.00. Probe: `tools/probe_cuopt_setsol.py` and
 `tools/probe_cuopt_setsol_report.py` (e5217ae) on the nightly `cuopt-cu13 == libcuopt-cu13 ==
 26.10.0a294.post261013051018` in a separate venv `~/venvs/cuopt-2610n` (installed on Berk's ask; the repository venv
-stays on 26.08); 31 solves of 20–30 s, 3 threads, RMM 8 GB, short lease, both LLM servers left up (for [other project],
+stays on 26.08); 31 solves of 20–30 s (most on the nightly; the injection also on 26.08 in the repository venv), 3 threads, RMM 8 GB, short lease, both LLM servers left up (for [other project],
 as agreed on 10-12). Five development instances (glass4, sing44, neos-3024952-loue, neos-2657525-crna,
 item_placement_9903).
 - **Implemented properly:** with a SET callback, presolve stays on in 26.10 (26.08: "Presolve is disabled because
@@ -677,8 +679,8 @@ item_placement_9903).
   crna: 11 calls, all at 0.70–0.71 s, none in the remaining 29 s; sing44: the first call at 28.3 s. An outside solution
   enters only while cuOpt's own heuristics improve, not when it has stalled.
 - **Berk (11:xx): "I just got word it is integrated to 26.10."** The two upstream drafts (a thanks comment; a request to
-  poll SET on a timer) stay unposted ([[2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve]],
-  `vault/70-upstream/drafts/`). Latest cuOpt release on 2026-10-13: still v26.08.00.
+  poll SET on a timer) stay unposted (`vault/70-upstream/2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with
+  presolve.md`, `vault/70-upstream/drafts/`). Latest cuOpt release on 2026-10-13: still v26.08.00.
 - **No A9 result:** no arm ran on 26.10, and A9 is unchanged (one-way cuOpt → EA). What it opens: A9 two-way — the EA's
   and SCIP's incumbents offered to cuOpt through the SET callback with presolve on (#35); a development item after the
   26.10 re-baseline (#31) or for v1.1, with its own decision record and test before any run.

@@ -18,8 +18,9 @@ Berk usually does not coordinate the sessions — the lease does.
    **[other project]:** before stopping `ornith-vllm`, ask the [other project] session (cross-session message) — agreed on
    2026-10-12, when [other project]'s hosted model had run out of [hosted model provider] credit and `ornith-vllm` was its only way to answer
    on Slack: that day's M4 pool was stopped after 5 of 30 runs and both servers were restored 12:40–12:43 for it. Since
-   2026-10-13 09:32 (Berk's decision) [other project] answers with Claude Haiku 5.5 on the Anthropic API and no longer depends on
-   `ornith-vllm`; ask anyway, as agreed, and write its answer in the journal.
+   2026-10-13 09:32 (Berk's decision) [other project] answers with Claude Haiku 5.5 on the Anthropic API, so both local servers
+   may stop for our windows ([other project] session, 10-13); whether [other project] still uses `ornith-vllm` anywhere (a
+   fallback, its nightly canary) is not recorded here — ask anyway, as agreed, and write its answer in the journal.
 2. Look at what is running: `systemctl --user is-active ornith-vllm llama-qwen38`, `nvidia-smi` (foreign GPU
    processes), MemAvailable, the ACPI maximum (`gates.acpi_max_c()`); a GPU arm must not start above 80 °C. ITX-1
    windows (D-021 R26) open only if the hottest zone's median over the last 60 s is ≤ 50 °C after 3 min idle with

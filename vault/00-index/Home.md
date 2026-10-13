@@ -21,7 +21,7 @@ coupled arm at 120 s ([[D-011 Solver streams good infeasible solutions to the EA
 run** and every development number is descriptive. Development defaults: A3 = `configs/itrea2-dev-rc-ld.yaml`
 (`f030e23909ad`, with LP decode, D-017); A9 / A3x = `configs/itrea2-dev-rc-3way.yaml` (`1d12ad490dd0`) — A9's GPU
 back-off (D-018) was not adopted after stage 1 (2026-10-11). The external benchmark is our own standard ITX-1 (D-021,
-accepted by Berk 2026-10-11; built and merged; its calibration M4 interim at 19 of 30 runs); v1 is staged (D-024,
+accepted by Berk 2026-10-11; built and merged; its calibration M4 INTERIM, INCOMPLETE (19 of 30)); v1 is staged (D-024,
 Berk 2026-10-13). Running on 2026-10-13: D-022 (A9 with cuOpt's gaps 0, 58 + 16 runs), which also gives C1's interim A9
 hint and guard — no result yet. Daytime windows only (D-019: "No nights"); performance runs first, targeted before wide
 (Berk 2026-10-13, D-024).
@@ -42,14 +42,14 @@ hint and guard — no result yet. Daytime windows only (D-019: "No nights"); per
 ## Milestones (GitHub, `Tideseed/i-trea-ii`)
 | milestone | due | issues |
 |---|---|---|
-| **C1 checkpoint (2026-10-23)** | Fri 2026-10-23 | #23 A9 (cuOpt coupled; back-off D-018 not adopted, D-023 phase Y next; D-022 running), #26 recombine each partner incumbent with the elite (not built), #27 lp_decode (adopted for A3; open for A9 and follow-ups), #29 external harness (D-020 → D-021 ITX-1, built; M4 calibration interim 19 / 30), #30 A9 core layout (LP decode in A9); the C1 freeze `configs/frozen-v2.yaml` with prereg-v2 (#32). Status per item: [[Roadmap]] |
-| **v1 (end of November 2026)** | aim Fri 11-27, hard end Mon 11-30 | #1 screening and pool freeze (`pool-v1`), #12 paper, #31 cuOpt 26.10 (venv, API check, re-baseline; cuopt#2073 is fixed in 26.10), #32 prereg-v2, confirmatory and external runs (ITX-1, staged by D-024); not in a milestone: #35 A9 two-way through cuOpt's SET callback (26.10) |
+| **C1 checkpoint (2026-10-23)** | Fri 2026-10-23 | #23 A9 (cuOpt coupled; back-off D-018 not adopted, D-023 phase Y next; D-022 running), #26 recombine each partner incumbent with the elite (not built), #27 lp_decode (adopted for A3; open for A9 and follow-ups), #29 external harness (D-020 → D-021 ITX-1, built; M4 calibration INTERIM, INCOMPLETE (19 of 30)), #30 A9 core layout (LP decode in A9), #33 control runs moved aside by run-id reuse (cross-set case fixed), #36 checker tolerance vs cuOpt (open), #37 code owed by D-024 (D-023's amendment, A0 job file, v1 stage-1 selector and reading); the C1 freeze `configs/frozen-v2.yaml` (D-021 R33). Status per item: [[Roadmap]] |
+| **v1 (end of November 2026)** | aim Fri 11-27, hard end Mon 11-30 | #1 screening and pool freeze (`pool-v1`), #12 paper, #31 cuOpt 26.10 (venv, API check, re-baseline; cuopt#2073 is fixed in 26.10), #32 prereg-v2 (tagged before any external A9 run; date open, D-019's addendum puts it after the 26.10 re-baseline), confirmatory and external runs (ITX-1, staged by D-024); not in a milestone: #35 A9 two-way through cuOpt's SET callback (26.10) |
 
 C1 closes development on cuOpt 26.08 with an interim A9 result on the 17 development and class-probe instances × 2 seeds
 against SCIP alone and cuOpt alone, and a go / no-go for the final phase. If 26.10 is not released by Fri 11-06, the v1
-runs proceed on 26.08 and 26.10 follows as an addendum. The external runs follow ITX-1 (D-021) in stages (D-024): stage
+runs proceed on 26.08 and 26.10 follows as an addendum (to be confirmed with Berk then; D-019). The external runs follow ITX-1 (D-021) in stages (D-024): stage
 1 = the 20-instance panel + 5 instances where cuOpt finds no solution, the rest of the core only after a hint (ratio
-≤ 0.95), a guard stage always, A0 on 81 instances. The calendar is deferred by Berk ("We'll cross that bridge when we
+≤ 0.95), a guard stage always, A0 on 81 instances (only the 25 stage-1 instances if there is no hint, D-024 (f)). The calendar is deferred by Berk ("We'll cross that bridge when we
 come to it", 2026-10-11).
 
 ## Decisions
@@ -80,12 +80,13 @@ A superseding decision says what changed and why; statuses as of 2026-10-13.
 | [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] | ITX-1: equal footprint F = A9's layout for every GPU arm (A6F, A2F), no whole-box run, call clock deciding with claims on both clocks, 600 s with a stop at the proven optimum, gaps 0 and thread variables unset (harness `ext` / `itx1`), independent hard / weak sets (`datasets/mipfeas_strata.csv`), decisions on the 215 unseen instances, ε-floored guard + solutions found as the minimum, governor-aware thermal gates and voids | decided; Berk accepted every [Berk] item 2026-10-11 ("Accept all"; rests kept; 600 s; calendar deferred). F accepted by the M2 soak (steady p95 66–73 °C, max 76 °C); M3: eilA101-2, nw04, supportcase6 do not fit F; phases 1 and 2 built and merged (1,009 CPU tests on main); M4 calibration interim at 19 of 30, INCOMPLETE; v1 staging amended by D-024 |
 | [[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]] | A9 under the external harness (R13 + R14), judged on validity, mechanism and a one-sided no-harm limb on the 3 instances where cuOpt's own 1e-4 stop occurs; the same runs give C1's interim hint (ratio of means ≤ 0.95 on the fixed 11 weak instances) and guard (mean d ≥ −0.05 over the 17) | decided for development; narrowed and amended twice before any reading (2026-10-13); runs in progress (58 + 16), **no result** |
 | [[D-023 A9 back-off, phase Y only — yield until cuOpt's first incumbent, then full duty]] | the back-off without its patience ladder (`configs/itrea2-dev-rc-3way-boY.yaml`) against the shadow control, D-018's outcome rules | decided for development, tooling merged, **not run**; to be amended to 54 runs on 9 instances (D-024) before any run; runs after D-022's verdict |
-| [[D-024 Targeted first, wider only on a hint — staged testing for development and v1]] | performance runs first; targeted tests first, wider only on a hint fixed before the runs (futility-only); D-022 / D-023 narrowed; v1 external stage 1 = the panel + 5 no-solution instances, hint = ratio ≤ 0.95, guard stage always, A0 on 81 | development rules decided (Berk's instructions 2026-10-13); v1 staging accepted by Berk 2026-10-13 15:5x ("Yes, stage it"; "Guard-only stage anyway"; "Yes, 81"); its code is owed |
+| [[D-024 Targeted first, wider only on a hint — staged testing for development and v1]] | performance runs first; targeted tests first, wider only on a hint fixed before the runs (futility-only); D-022 / D-023 narrowed; v1 external stage 1 = the panel + 5 no-solution instances, hint = ratio ≤ 0.95, guard stage always, A0 on 81 (only the 25 stage-1 instances if no hint) | development rules decided (Berk's instructions 2026-10-13); v1 staging accepted by Berk 2026-10-13 15:5x ("Yes, stage it"; "Guard-only stage anyway"; "Yes, 81"); its code is owed |
 
 ## Results (`30-results/`, descriptive unless a note says otherwise)
 | note | what it holds |
 |---|---|
 | [[Development log]] | every development configuration, run set and reading: baselines, feasibility probe, adaptive strategy, LP stream, repair budget and clock, class probe, A9 pilot, D-016, D-017, D-018 stages 0 and 1 |
+| [[2026-10-11 D-021 measurements M1–M3 and the interim calibration]] | the external harness, not the method: M1 smoke passed; M2 soak passed, F accepted (steady p95 66–73 °C, max 76 °C); M3 does-not-fit list (eilA101-2, nw04, supportcase6; decision set 215); M4 calibration **INTERIM, INCOMPLETE (19 of 30)** — late-clock check passes on the 6 of 10 strata-0–1 instances run, R 1.390 [1.081, 1.837] on the call clock, no footprint reading before 30 of 30; the checker tolerance question (#36) |
 | [[Quantification 2026-10-06 (dev set)]] | A3@lps1 vs SCIP alone: 7 of 8 lower P, mean d +0.43 [+0.23, +0.65], p = 0.016; vs cuOpt alone 6 / 3, +0.11 [−0.33, +0.50] (inconclusive) |
 | [[Where cuOpt struggles (optopt background, 2026-10-07)]] | from optopt's runs: cuOpt is worse than SCIP on 16 of 22 continuous-heavy MIPLIB instances (mean d −0.35); 9 of 80 without a solution at 60 s. Background only, never a selection rule |
 | [[Where the coupling gains — instance classes (2026-10-07)]] | no pre-run structural rule separates gains from losses on the 9 instances; run-time patterns (cuOpt's early close / slow start / stall; the EA's foothold before SCIP) |

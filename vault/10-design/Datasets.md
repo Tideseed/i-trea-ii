@@ -33,7 +33,7 @@ like all of `data/`, not in git.
 | `optimalindicator.csv` | a 0 / 1 value per instance and solver column (not used here) |
 | `primalintegral.csv` | the published per-instance integral (0–2, 600 s) of every solver × machine |
 | `mipfeas.xlsx` | GAMS's results workbook (not read here) |
-| `trc_files/` (3,495 traces), `log_files/` (2,796 logs) | one GAMS trace (and log) per instance × solver × machine: cuOpt 26.08 on a GB10 (also 26.02, 26.04 on GB10; 26.04, 26.08 on a B200); CPU solvers on an Intel Core Ultra 9 285K and an AMD EPYC 9B45 |
+| `trc_files/` (3,495 traces), `log_files/` (2,796 logs) | one GAMS trace (and log) per instance × solver × machine: cuOpt 26.08 on a GB10 (also 26.02, 26.04 on GB10; 26.04, 26.08 on a B200; 26.02 on an H100); CPU solvers on an Intel Core Ultra 9 285K and an AMD EPYC 9B45 |
 
 Checked on 2026-10-11 (D-020): their script on their GB10 cuOpt-26.08 traces gives the published **0.0393** exactly;
 every published geo-mean comes out of `primalintegral.csv`; their 233 instances = `data/miplib/benchmark-v2.test` minus
@@ -59,7 +59,7 @@ M4 calibration, M0's replay of R12, and R36's published rows re-scored on our su
 |---|---|---|---|---|
 | **Development set** ([[D-010 Develop the algorithm first on a small development set]]) | `datasets/dev_set.csv` (committed) | 9 | MIPLIB optimisation-hard: `glass4`, `sing44`, `radiationm18-12-05`, `neos-960392`; MIPLIB feasibility-hard (no SCIP solution in 300 s at screening stage 1): `neos-3024952-loue`, `fhnw-binpack4-48`, `rail01`; PGLib-UC `ca__Scenario400_reserves_1` (no solution at stage 1); ML4CO `item_placement_9903` | chosen 2026-10-06 by 08:13 (commit 4127f10) from the stage-1 screening (seed 900) after looking at it, for coverage and fast runs (nnz ≤ 400k); all development work (120 s); **permanently excluded from the confirmatory selection** |
 | **Class probe** ([[D-014 Class probe — predictions fixed before the runs]]) | `datasets/classprobe_set.csv` (committed) | 8 | MIPLIB, families outside the development set, SCIP-weak at stage 1: objective with ≤ 4 non-zeros `neos-3004026-krka`, `neos-3656078-kumeu`, `chromaticindex1024-7`, `cryptanalysiskb128n5obj16`; dense objective `comp21-2idx`, `neos-4763324-toguru`; many two-variable equality rows `neos-2657525-crna`, `neos-2746589-doon` (the file also records each one's one-thread HiGHS LP time) | fixed 2026-10-07 12:04 before its runs; used in development since; **permanently excluded from the confirmatory selection** |
-| the 17 | both files | 17 | development set + class probe | D-019's interim A9 result at checkpoint C1 and the cuOpt 26.10 re-baseline (#31) run on these; D-018 stage 1 uses 14 of them (not `rail01`, `cryptanalysiskb128n5obj16`, `neos-2746589-doon`); D-022 (2026-10-13) runs 13 of them in set `itx-r13` and the other 4 (`chromaticindex1024-7`, `neos-3656078-kumeu`, `glass4`, `radiationm18-12-05`) in `itx-r13b` |
+| the 17 | both files | 17 | development set + class probe | D-019's interim A9 result at checkpoint C1 and the cuOpt 26.10 re-baseline (#31) run on these; D-018 stage 1 uses 14 of them (not `rail01`, `cryptanalysiskb128n5obj16`, `neos-2746589-doon`); D-022 (2026-10-13) runs all 17 in set `itx-r13`: 13 from `jobs/itx-r13.jsonl` and the other 4 (`chromaticindex1024-7`, `neos-3656078-kumeu`, `glass4`, `radiationm18-12-05`) from `jobs/itx-r13b.jsonl` |
 | **cuOpt's fixed 11** ([[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]], amendments of 2026-10-13) | named in D-022 | 11 | the development / class-probe instances where cuOpt alone had P(120) ≥ 0.5 in our earlier A6 runs (3 A725 cores): `neos-2746589-doon`, `cryptanalysiskb128n5obj16`, `rail01`, `neos-2657525-crna`, `neos-3024952-loue`, `sing44`, `ca__Scenario400_reserves_1`, `item_placement_9903`, `neos-960392`, `neos-4763324-toguru`, `comp21-2idx` (borderline, 0.506); fixed before any D-022 run, not re-selected on A6F | C1's interim hint: ratio of mean P A9@r13x / A6F@r13x ≤ 0.95 over these 11 (D-022's second amendment); the guard reads all 17 |
 | **R13's three** (D-022) | named in D-022 | 3 | `fhnw-binpack4-48`, `neos-3004026-krka`, `neos-960392` — the only instances of the 17 where cuOpt stopped on its own 1e-4 "optimal" in our 120-s runs (9/9, 10/10, 3/7) | D-022's R13 + R14 test (2026-10-13) |
 | **Hard pool** (confirmatory) | `datasets/hard_pool.csv` | — | selected from the screening candidates by D-002 §2 ([[Hard instance pool]]) | not frozen yet (#1): screening stage 2 is partial, and the freeze must read both exclusion lists above |
@@ -132,10 +132,12 @@ selector or job file for stage 1 exists yet (code owed, D-024, #37).
   provisional until `reference.csv` (#2).
 - **Incumbents better than a proven optimum (found 2026-10-13, to investigate).** Our checker's tolerance (1e-6:
   bounds and integrality absolute, rows relative to max(1, |side|)) accepts points whose objective lies below MIPLIB's
-  `=opt=` value: in the run table of 2026-10-11, 60 checked incumbents in 8 of the 57 glass4 runs (all EA arms; worst
-  row violation ≤ 4.5e-7 relative), and in the M4 calibration one cuOpt incumbent on mas74 (11,801.18516 vs
+  `=opt=` value: in the run table of 2026-10-11, 60 checked incumbents in 8 of the 57 glass4 runs beat z* by GAMS's
+  rounded test (`beats_ref`; 33 EA-role, 27 SCIP records of EA posts; 62 lie strictly below z*, the first at 44.5 s; all
+  8 runs are EA arms; worst row violation ≤ 4.5e-7 relative), and in the M4 calibration one cuOpt incumbent on mas74 (11,801.18516 vs
   11,801.18572). cuOpt 26.10 rejected the lowest glass4 one (1,200,006,662.64 vs 1,200,012,599.97) when offered it;
-  GAMS's scoring script raises on any incumbent better than z* (ours sets γ = 0 and flags `beats_ref`). The other way,
+  GAMS's scoring script raises on an incumbent better than z* unless the trace is on its whitelist, where it sets the
+  objective to z* (ours sets γ = 0 and flags `beats_ref`). The other way,
   4 cuOpt incumbents in M4 failed our check (bound or integrality off by 4.8e-6 – 8.3e-6). Details:
   [[2026-10-11 D-021 measurements M1–M3 and the interim calibration]] § "Checker tolerance"; issue #36.
 - **P-degenerate MIPLIB instances** (reference 0, so Berthold's gap is 1 for any other value): e.g.

@@ -23,28 +23,30 @@ whose [Berk] items Berk accepted on 2026-10-11 (section below). Its footprint F 
 66–73 °C, maximum 76 °C over 4 runs of 600 s); M3 fixed the "does not fit F" list (eilA101-2, nw04, supportcase6;
 decision set 215); phase 1 and phase 2 are merged (phase 2: 6f0339d, 2026-10-12; 1,009 CPU tests passed on main after
 the merge; on 10-13 the runner's GPU tests passed — 4 passed, 1 skipped — and a cold-cache EA test). The M4
-calibration (A6F on D-020's 30 instances, 600 s) is **INTERIM and INCOMPLETE**: stopped by the performance-first rule
-after 19 of 30 runs; the interim report at 18 runs gives R = 1.416 [1.087, 1.903] on the call clock (2.118 on the
-launch clock) — cuOpt on F's 5 cores has a shifted geometric mean about 40 % above GAMS's 24-thread whole-box run on
-the same instances — and its late-clock check passed on the 6 of 10 strata-0–1 instances run (median −0.119 s). The
-remaining strata-0–1 runs finish before v1's stage 1; the footprint reading waits for 30 of 30. Nothing in M4 decides.
+calibration (A6F on D-020's 30 instances, 600 s) is **INTERIM, INCOMPLETE (19 of 30)**: stopped by the
+performance-first rule after 19 of 30 runs; at the stop R = 1.390 [1.081, 1.837] on the call clock (2.036 on the
+launch clock; the 14:4x report on 18 runs gave 1.416 [1.087, 1.903]) — cuOpt on F's 5 cores has a shifted geometric
+mean about 1.4 times GAMS's 24-thread whole-box run on the same instances — and its late-clock check passed on the 6 of
+10 strata-0–1 instances run (median −0.119 s); result note `vault/30-results/2026-10-11 D-021 measurements M1–M3 and
+the interim calibration.md`. The remaining strata-0–1 runs finish before v1's stage 1; the footprint reading waits for
+30 of 30. Nothing in M4 decides.
 **Staged testing (D-024, Berk 2026-10-13).** Performance runs first; targeted runs where a change can act, wider only
 after a hint whose threshold is fixed before the runs (futility-only: a hint gates widening, never declares success).
 Berk accepted v1's staging: stage 1 = the 20-instance panel plus the 5 H_cu-unseen instances where cuOpt finds no
 solution, × {A9, A6F}, hint = ratio of means ≤ 0.95; the guard-only stage runs whatever the hint says; A0 only on the
-81 instances a decision reads. **D-022** (R13 + R14 for A9) was narrowed and amended twice before any run was read:
+81 instances a decision reads (only the 25 stage-1 instances if there is no hint, D-024 (f)). **D-022** (R13 + R14 for A9) was narrowed and amended twice before any run was read:
 R13 is judged on the 3 instances where cuOpt's own 1e-4 "optimal" stop occurs (fhnw-binpack4-48, neos-3004026-krka,
 neos-960392) by validity, mechanism and a one-sided floor / band no-harm rule; C1's interim hint = ratio of means of
 P(120) A9@r13x / A6F@r13x ≤ 0.95 on the fixed 11 weak development instances, and its guard = mean d ≥ −0.05 over all
 17 — 74 runs (`jobs/itx-r13.jsonl` 58 + `jobs/itx-r13b.jsonl` 16, then D-021's M6) are running in window W-1013;
 **no result of them exists yet.** **D-023** (the back-off's phase Y only) follows D-022's verdict; it is still to be
-amended (D-024: 54 runs on 9 instances, was 84) before any `backoff2` run. **cuOpt 26.10:** NVIDIA/cuopt#2073 is
+amended (D-024: 54 runs on 9 instances, was 84) before any `backoff2` run (#37, with the rest of D-024's owed code). **cuOpt 26.10:** NVIDIA/cuopt#2073 is
 fixed by PR #2098 (merged 2026-10-12, in 26.10; Berk confirmed 10-13) and verified on the nightly `26.10.0a294` in
 `~/venvs/cuopt-2610n` (presolve stays on with a SET callback; injected solutions accepted and exact; invalid offers
 rejected); limitation: cuOpt polls SET callbacks only when its GPU population records a new best. A9 two-way through
 it is #35 (not started). **Open:**
 our exact checker accepted incumbents below MIPLIB's proven optimum on glass4 (cuOpt rejects that point) and mas74,
-and rejected cuOpt incumbents on snowy (1) and neos-933966 (3) — a tolerance mismatch to investigate. **v1 target
+and rejected cuOpt incumbents on snowy (1) and neos-933966 (3) — a tolerance mismatch to investigate (#36). **v1 target
 (D-019, Berk 2026-10-10):** checkpoint C1 on Fri 2026-10-23 (development closes on cuOpt 26.08), v1 at the end of
 November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10, daytime windows only; targets in the next-but-one
 section. Newest checkpoint: `vault/90-checkpoints/2026-10-13-1600.md`. Every hypothesis and target below is
@@ -71,7 +73,8 @@ on 2026-10-06 01:4x the status read "built and tested on toy models; no commit, 
   one-way until a two-way arm has its own record and test (#35). A MIP start at launch is used with presolve on
   (verified on glass4 2026-10-07, ~10 s overhead per restart), but no arm uses it yet. **v1 runs on cuOpt
   26.10** once it is released (separate venv, API check, A6 re-baselined on the 17 instances; #31); if 26.10 is not out
-  by Fri 2026-11-06, the v1 runs proceed on 26.08 and 26.10 follows as an addendum (D-019). Numba 0.64.0 (the CPU
+  by Fri 2026-11-06, the v1 runs proceed on 26.08 and 26.10 follows as an addendum (D-019; to be confirmed with Berk
+  then). Numba 0.64.0 (the CPU
   feasibility-jump reference); redis-py 8.1.0 for the exchange platform; pandas 3.0.3 / PyArrow 23.0.1 for the derived
   tables. All pinned in `pyproject.toml`. One entry point: `itrea <command>` (`src/itrea/cli.py`; `itrea --help`).
 - Instances (public, on disk): MIPLIB 2017 benchmark, PGLib-UC unit commitment, ML4CO item placement
@@ -241,7 +244,7 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `tools/d017_report.py` | D-017's analysis: A3@ld1 vs A3@rc1e (M0–M4 and the outcome rules) | built |
 | `tools/probe_lp_decode.py` | probes the LP decode worker on stored vectors (CPU, read-only; D-017's gates before a window) | built |
 | `tools/cuopt_verify_mipstart.py` | cuOpt 26.08 MIP-start and stopping check on glass4 (GPU: only inside a window; run 2026-10-07) | built |
-| `tools/probe_cuopt_setsol.py`, `tools/probe_cuopt_setsol_report.py` | cuopt#2073's check: `SetSolutionCallback` with presolve (modes none / noop / inject / bad / raw) under any interpreter with cuOpt (the 26.08 venv or `~/venvs/cuopt-2610n`), and its report (GPU: only inside a lease; run 2026-10-13 on the 26.10 nightly, 31 solves) | built |
+| `tools/probe_cuopt_setsol.py`, `tools/probe_cuopt_setsol_report.py` | cuopt#2073's check: `SetSolutionCallback` with presolve (modes none / noop / inject / bad / raw) under any interpreter with cuOpt (the 26.08 venv or `~/venvs/cuopt-2610n`), and its report (GPU: only inside a lease; run 2026-10-13: 31 solves, most on the 26.10 nightly, the injection also on 26.08) | built |
 | `tools/agg_probe.py`, `tools/agg_improve_probe.py` | CPU probes of `ea/aggregate.py` (feasibility and improvement payoff; 2026-10-06, negative on radiationm) | built |
 | `tools/lps_smoke.py` | hand-launched smoke run of the LP stream (SCIP + the NumPy EA through a file mailbox) | built |
 | `tools/screening-night.sh` | the screening chain: stage 1 → `build_runs` → stage 2 under one deadline (D-002 v3.1 §1.2) | built |

@@ -116,3 +116,9 @@ Fixed now, before anyone reads an itx-r13 run:
   P(A9@r13) > +0.005); a gain never fails it (the second amendment's "|ΔP| ≤ 0.005" quoted D-018's two-sided floor
   value, which here would have rejected R13 for helping). The line appended at 15:2x ("the mean d is over the three")
   is superseded by the second amendment: there is no mean. `tools/d022_report.py` implements both (57 tests).
+
+## Addendum — commit times of the amendments (2026-10-13 17:5x, record-keeping only; no rule changes, no run read)
+The headings above give approximate times. From git: the first amendment was committed at 15:10:01 (15a5c81), the
+second amendment ("15:3x" above) at 15:28:42 (f52e3e8) and the one-sided floor-limb clarification ("16:0x" above) at
+15:44:09 (fd75476). The itx-r13 pool started at 15:16:11; when the second amendment was committed, 7 of its 58 runs were
+done and none had been read. The checkpoint 2026-10-13-1600 and the incident log quote the commit times.
