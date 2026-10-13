@@ -1,63 +1,80 @@
 # D-024 Targeted first, wider only on a hint — staged testing for development and v1 (2026-10-13, Berk; drafted by AgentRA)
 
-**Status:** decided by Berk's instruction (2026-10-13 15:0x); the stage rules below are AgentRA's reading, open to a
-superseding decision on evidence. Narrows [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]]
-(run order, tiers, A0's scope), [[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]]
-and [[D-023 A9 back-off, phase Y only — yield until cuOpt's first incumbent, then full duty]], before any run of theirs.
-Berk: **"Meanwhile why do we need that many experiments? Shall we do targeted and surgical tests? and only if we see
-hints of improvement we can go wider to test the methodology's limits. It will be a more efficient way than blanket
-testing."**
+**Status:** the development rules (0–4, "Development") are decided by Berk's instructions of 2026-10-13 and AgentRA's
+reading of them, open to a superseding decision on evidence. **The v1 changes ("v1, proposed") change designs Berk
+accepted on 10-11 (D-021 R21, R32) and wait for his yes per item ("Open for Berk"); until then D-021 stands for v1.**
+Revised 15:4x after an adversarial check (two Claude Code subagents: the staging is statistically sound; the draft had
+no threshold for C1's hint, an unrepresentative v1 stage-1 sample, a coin-flip "improved > worse" limb, a D-022 rule
+that read noise, and a D-023 selection that dropped where phase Y acts — all fixed below or in D-022's second amendment).
 
-## The rule
-0. **Performance runs first** (Berk, 15:1x: "We shall also always aim for performance runs unless something
-   structural is buggy in our experimentation methodology."): calibration, harness and methodology runs only for a
-   structural bug or to fill idle daytime hours. Applied at once: D-021's M4 calibration stopped after 19 of 30 runs
-   (its clock check had passed; the remaining 11 fill idle time later) so the performance runs start at once.
-1. **Stage 1, surgical.** Run first only where the change can act or where the claim lives: for a mechanism, the
-   instances where our traces show it can act (named, with the evidence, before the run); for an outcome claim, the
-   weak cases D-013 names. Two seeds in development; a fixed, already-drawn sample in v1.
-2. **A hint, fixed before stage 1:** a stated, one-sided threshold on stage 1's own data. Without it the change stops
-   there (reported as "no hint at stage 1", with its numbers) — **futility-only**: stage 1 can stop a line of tests,
-   never declare success, so the stage-2 test keeps its error rate (it is the pre-stated test on all its instances,
-   stage 1's included; the only cost is a small loss of power, stated).
-3. **Stage 2, wider:** only after a hint — the rest of the decisive set (generality, the guard against harm), then the
-   limits (other instance classes, longer T) if box time allows.
-4. Breadth that no decision reads is not run (e.g. A0 on instances no comparison uses; the 233-wide geo-mean).
+Berk (15:0x): **"Meanwhile why do we need that many experiments? Shall we do targeted and surgical tests? and only if we
+see hints of improvement we can go wider to test the methodology's limits. It will be a more efficient way than blanket
+testing."** (15:1x): **"We shall also always aim for performance runs unless something structural is buggy in our
+experimentation methodology."** (14:5x): **"If the box is idle make the most of it."**
 
-## Applied
-- **D-022** (amended before any run, 15a5c81): R13 on the 3 instances where cuOpt's 1e-4 "optimal" stop occurs
-  (18 runs, was 102); C1's interim hint A9@r13x vs A6F@r13x on cuOpt's 11 weak development instances (44 runs).
-  `jobs/itx-r13.jsonl` = 58 runs.
-- **D-023** (to be amended before any run, same way): boY vs bo1s on the instances where phase Y or the ladder showed
-  an effect in D-018 stage 1 — chromaticindex1024-7 (T, M2: + A6F), item_placement_9903, neos-3024952-loue,
-  neos-2657525-crna (M3, G), sing44, ca__Scenario400_reserves_1, glass4 (G) — × seeds 0–1 ≈ 30 runs (was 84). The
-  floor instances (krka, fhnw, radiationm: inert) and the ladder targets (kumeu, comp21, toguru: they tested the
-  ladder's step-down, which boY removes) are not run; the outcome rules read over the instances run.
-- **v1 external (D-021):**
-  - **Stage 1 = the repeatability panel** (20 of H_cu-unseen, already drawn: 10 with GAMS cuOpt P ≥ 0.5 or none, 10
-    with 0.1 ≤ P < 0.5) × {A9, A6F} at seed 2000 under `itx1`, plus A0 on the panel (the computed race). ≈ 5.6–5.9 h
-    of GPU runs ≈ 1 window; A0 ≈ 0.9 h on 4 CPU lanes.
-  - **Hint (pre-stated):** the mean `pt_gams` ratio A9 / A6F on the panel ≤ 0.95, **or** more panel instances improved
-    than worse (d_ε ±0.10). Neither → v1's external line stops: "no hint at stage 1" with the panel's numbers.
-  - **Stage 2:** the other 44 of H_cu-unseen and T2 (W-only 17 + E-sample 40) × {A9, A6F}; the decisive target, the
-    guard and solutions found are then read exactly as D-021 R19–R21 on all 64 / the decision set (stratified
-    estimates, R31), stage 1's pairs included. ≈ 21–23 h of GPU runs ≈ 4–5 windows. T3 (the rest of E), T4 (seed 2001)
-    and T5 (live A2F) only if box time remains — the limits stage.
-  - **A0** only on H_cu ∪ W_SCIP unseen (81 instances; the race and the A9-vs-A0 secondary read nothing else), panel
-    first: ≈ 2.1–2.9 h on 4 lanes (was 230 instances, 6–8.3 h).
-- **Part A (confirmatory, D-019):** staged the same way in prereg-v2 (a futility-only first stage on a fixed subsample
-  of the test set).
+## The rules
+0. **Performance runs first:** calibration, harness and methodology runs only for a structural bug or to fill idle
+   daytime hours. Applied at once: D-021's M4 calibration stopped after 19 of 30 runs. Its late-clock check passed on
+   6 of the 10 strata-0–1 instances (median −0.119 s); the remaining 4 strata-0–1 runs finish before v1's first external
+   run (the clock every v1 decision reads), and the footprint ratio stays INCOMPLETE until 30 of 30.
+1. **Targeted:** run first only where a change can act (named from our traces, with the evidence, before the run) or
+   where the claim lives (D-013's weak cases).
+2. **A hint, fixed before the runs** — one stated, one-sided threshold on the targeted runs' own data. A hint gates only
+   whether a line widens; it never declares success (**futility-only**), so the later decisive test keeps its error
+   rate (simulated: P(better shown | no effect) 0.028–0.032 with the gate vs 0.030–0.034 without). Conditional on a
+   continuation, the estimates are slightly optimistic (the 64-instance ratio by 1.2–2.5 points in simulation;
+   "better shown" ≈ 5 % instead of ≈ 3 % under a null); a stage-2-only figure is printed beside as a selection check.
+3. **Wider only after a hint:** generality, the guard against harm, then the limits, if box time allows.
+4. **Breadth no decision reads is not run.**
+5. **A test of a mechanism on every instance where it can act is a complete test**, not a stage 1 (D-022, D-023 below).
 
-## What it saves (box time, planning numbers of D-021)
-| | before | after, if the hint holds | after, if no hint |
+## Development (decided, applied)
+- **D-022** (second amendment, f52e3e8): R13 + R14 judged on validity, the mechanism and a floor / band no-harm check
+  on the three instances where cuOpt's own 1e-4 stop occurs (assumption stated: gaps act only as a termination test).
+  **C1's interim hint** (fixed before any reading): ratio of means of P(120) A9@r13x / A6F@r13x over the fixed 11 weak
+  instances ≤ 0.95; **guard** over all 17 (mean bounded d ≥ −0.05; the 4 dropped instances queued, 16 runs). Inputs
+  to C1's go / no-go, which stays Berk's.
+- **D-023** (to be amended before any backoff2 run): the instances where phase Y acts (by phase-Y length in D-018 stage
+  1's traces — chromaticindex1024-7, ca__Scenario400_reserves_1, neos-3656078-kumeu, neos-4763324-toguru) plus M3's four
+  (item_placement_9903, neos-3024952-loue, neos-960392, neos-2657525-crna) and sing44 (above its band in stage 1),
+  × {boY, bo1s, A6F} × seeds 0–1 = 54 runs (was 84). Dropped and stated: the floor instances (inert) and the 11-instance
+  mean over instances not run; the outcome rules read over the 9.
+
+## v1, proposed (waits for Berk; D-021 stands until then)
+- **(a) Stage 1 of the external set:** the 20-instance panel **plus the 5 H_cu-unseen instances where cuOpt finds no
+  solution** (bnatt400, neos-3216931-puriri, peg-solitaire-a3, supportcase19, supportcase22 — they carry 26 % of the
+  target's mass; the panel drew none) × {A9, A6F} at seed 2000 under `itx1`, plus A0 on them. ≈ 6.1–6.4 h + ≈ 1.7 h of
+  GPU runs (≈ 15 window-hours at 0.55).
+- **(b) The hint:** the ratio of means of call-clock `pt_gams` A9 / A6F over the 25 ≤ 0.95 (A9 failures are A9
+  outcomes, R29; a block skipped after its requeue makes the hint INCOMPLETE; reported with and without the exposed
+  instances, decided with them). Simulated P(hint): 0.21–0.29 under no effect, 0.80–0.87 at −10 %, 0.99–1.00 at −25 %
+  (effect concentrated on cuOpt's worst cases).
+- **(c) Stage 2 after a hint:** the rest of T1 and T2 (≈ 22–24 h of GPU runs), the decisive target / guard / solutions
+  found read exactly as D-021 R19–R21 on all instances, stage 1's included; T3–T5 only if box time remains.
+- **(d) After "no hint":** v1's external minimum (guard + solutions found, D-019's pass line) is **not evaluated** —
+  unless Berk prefers a guard-only stage 2 (T2's E-sample + W-only ≈ 8.5–9.4 h) that runs whatever the hint says.
+- **(e) Conditions:** R21's "no interim looks" becomes one registered futility-only look at stage 1; stages 1 and 2 must
+  share the frozen configuration hash, the cuOpt version and the `itx1` harness hash, else stage 1's pairs are not
+  pooled; "no hint" ends the line for that configuration, and the 25 join the exposed list for any later configuration.
+- **(f) A0** only on H_cu ∪ W_SCIP unseen (81; stage-1 instances first): ≈ 2.9–3.4 h on 4 lanes (was 230). With no
+  hint, only the stage-1 instances.
+- **(g) Part A** (confirmatory): a futility-only first stage on a fixed subsample, written into prereg-v2.
+- **(h)** D-019's literal readings and the 233-wide geo-mean only if the limits stage runs.
+
+## Code owed (before the runs that need it)
+`itx-report`: a stage-1 reading (the 25's ratio, with / without exposed, "hint present / no hint / incomplete") and the
+stage-2-only figure; `make-jobs itx-v1`: a stage-1 selector (panel + the 5 at seed 2000); `jobs/itx-a0.jsonl`
+regenerated as 81 runs (stage-1 instances first); `backoff.py` / `make-jobs backoff2`: D-023's instance sets
+parameterised; `tools/d022_report.py`: D-022's second amendment (in progress).
+
+## Box time (from the strata file and GAMS's traces, D-021's 0.55 efficiency)
+| | D-021 | D-024 if a hint | D-024 if no hint |
 |---|---|---|---|
-| D-022 | 102 runs (3.4 h) | 58 runs (≈ 2 h) | — |
-| D-023 | 84 runs (≈ 3 h) | ≈ 30 runs (≈ 1.1 h) | — |
-| v1 external GPU | 51–57 h of runs (full) / 27–29 (core) | ≈ 27–29 h (core only; T3–T5 only if time) | ≈ 6 h |
-| A0 | 230 × 600 s | 81 × 600 s | 20 × 600 s |
+| D-022 + C1 | 102 runs | 74 runs | — |
+| D-023 | 84 runs | 54 runs | — |
+| v1 external GPU | 51.3–56.1 h full / 28–30 h core | ≈ 30–32 h (core incl. the 5) | ≈ 7.8–8.1 h |
+| A0 | 230 × 600 s | 81 | 25 |
 
-## Risks
-- A real but small effect missed at stage 1 (the hint threshold is loose on purpose: 5 % or a majority of instances).
-- Selection from traces (where a mechanism "can act") is itself a choice; each record names its evidence before the
-  run.
-- The 233-wide published-comparable geo-mean is no longer produced unless the limits stage runs (reported as such).
+## Open for Berk (v1)
+Yes / no per item: (a)–(h) above. The most consequential: (d) — with no hint, is v1's external minimum left unevaluated,
+or does a guard-only stage 2 (≈ 9 h) run anyway?
