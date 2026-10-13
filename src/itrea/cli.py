@@ -15,8 +15,9 @@ the only place the mapping lives.
     itrea pair …               one run (smoke tests; the pool runs job files)
     itrea pool JOBS …          a job file under every D-002 / D-003 control
     itrea make-jobs SUB …      job files: screen1 | screen2 | e1 | e4 | confirm | smoke | backoff0 | backoff1 |
-                               mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021 phase 1) |
-                               itx-v1 --tier T1..T5 | itx-a0 | itx-m6 | itx-m6a (D-021 phase 2)
+                               backoff2 | mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021
+                               phase 1) | itx-v1 --tier T1..T5 | itx-a0 [--select all|d024|stage1] | itx-m6 | itx-m6a
+                               (D-021 phase 2; itx-a0 --select d024 = D-024 (f)'s 81, the v1 stage-1 25 first)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -26,10 +27,13 @@ the only place the mapping lives.
     itrea lineage ROOT …       the descriptive Rank 0 lineage metric
     itrea reproduce …          re-derive datasets/ and paper/generated/ and compare
     itrea backoff-report …     A9 GPU back-off (D-018): the stage-0 / stage-1 rules applied, a verdict;
-                               --stage 1y = D-023 (phase Y only: A9@boY vs A9@bo1s + A6F, set backoff2)
+                               --stage 1y = D-023 (phase Y only: A9@boY vs A9@bo1s + A6F, set backoff2), read over
+                               the 11 of D-023's amendment of 2026-10-13 (66 runs; outcome rules on the nine;
+                               G's noise = no sleep in phase Y, "still beats A6F" binds — its 23:3x clarification)
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
     itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
-    (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off, from D-022's outcome — the A9 arms' harness;
+    (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off [--instances amended|stage1|a,b], from
+     D-022's outcome — the A9 arms' harness; by default the 11 of D-023's amendment of 2026-10-13 (66 runs);
      D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
     itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
     itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
@@ -53,7 +57,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pair": ("itrea.experiments.pair", (), "one run: launch, barrier, stop, exit codes, run.json"),
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
-                  "backoff0, backoff1, mipfeas-cal, itx-m1 … itx-m5, itx-r13, itx-v1, itx-a0, itx-m6, itx-m6a)"),
+                  "backoff0, backoff1, backoff2, mipfeas-cal, itx-m1 … itx-m5, itx-r13, itx-r13f, itx-v1, itx-a0, "
+                  "itx-m6, itx-m6a)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
@@ -63,7 +68,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "lineage": ("itrea.analysis.lineage", (), "descriptive Rank 0 lineage metric"),
     "reproduce": ("itrea.analysis.reproduce", (), "re-derive datasets/ and paper/generated/ and compare"),
     "backoff-report": ("itrea.analysis.backoff", (), "A9 GPU back-off: D-018 stage 0 / 1 and D-023's stage 1y "
-                       "(phase Y only), rules applied, verdict"),
+                       "(phase Y only, on the 11 of its 2026-10-13 amendment), rules applied, verdict"),
     "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas calibration vs GAMS's cuOpt GB10 row: --arm A6F "
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
     "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "

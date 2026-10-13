@@ -667,15 +667,17 @@ def _resolved(spec):
 
 def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ctrl=None, phase_y=None,
                   boy_events=None, boy_summary=None, ctrl_summary=None, boy_row=None, censored=(), drop=(),
-                  failed=(), harness=None):
-    """14 instances x {A6F, A9@bo1s (control), A9@boY} x seeds 0-1 in set backoff2 where every D-023 rule holds unless
-    changed: `p_ctrl` = {instance: (seed 0, seed 1)} (A6F follows it), `p_boy` = {instance: P}, `leads_boy` /
+                  failed=(), harness=None, extra=(), extra_seeds=None):
+    """The 11 instances of D-023's amendment (BR.STAGE1Y) x {A6F, A9@bo1s (control), A9@boY} x seeds 0-1 in set backoff2
+    where every D-023 rule holds unless changed, plus the instances `extra` (outside the amended set: run in the set,
+    read by no rule): `p_ctrl` = {instance: (seed 0, seed 1)} (A6F follows it), `p_boy` = {instance: P}, `leads_boy` /
     `leads_ctrl` = {instance: {seed: lead times}}, `phase_y` = {(instance, seed): (exit_t, exit_busy_s)} of boY (default
     0.4 s / 0.2 s, the partner posts at 0.3 s), `boy_events` = {instance: extra EA events}, `boy_summary` /
     `ctrl_summary` = {instance: extra EA-summary fields}, `boy_row` = {instance: extra run-table fields}, `censored` =
-    {(instance, arm, seed)} whose cuOpt found nothing, `drop` = {(instance, arm, seed)} not run, `failed` = same,
-    status failed; `harness` = {(instance, arm, seed): a run.json config.harness (a resolved dict, or None)} — every run
-    carries the resolved ext harness by default (D-022 adopted)."""
+    {(instance, arm, seed)} whose cuOpt found nothing, `drop` = {(instance, arm, seed)} not run, `failed` = same, status
+    failed; `harness` = {(instance, arm, seed): a run.json config.harness (a resolved dict, or None)} — every run
+    carries the resolved ext harness by default (D-022 adopted); `extra_seeds` = {instance: seeds beyond 0-1} run in
+    the set (outside the amended set's seeds: read by no rule)."""
     from itrea.experiments import make_jobs as MJ
     S = "backoff2"
     ext = _resolved(MJ.ITX_EXT)
@@ -687,9 +689,10 @@ def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ct
     p_ctrl, p_boy, phase_y = p_ctrl or {}, p_boy or {}, phase_y or {}
     leads_boy, leads_ctrl, boy_events = leads_boy or {}, leads_ctrl or {}, boy_events or {}
     boy_summary, ctrl_summary, boy_row = boy_summary or {}, ctrl_summary or {}, boy_row or {}
+    extra_seeds = extra_seeds or {}
     send = [dict(t=0.3, kind="incumbent", obj=1.0), dict(t=0.3, kind="send", k=1)]
-    for i in BR.STAGE1:
-        for s in BR.STAGE1_SEEDS:
+    for i in BR.STAGE1Y + tuple(extra):
+        for s in BR.STAGE1_SEEDS + tuple(extra_seeds.get(i, ())):
             p0 = p_ctrl[i][s] if i in p_ctrl else base[i]
             p1 = p_boy.get(i, 0.11 if i == BR.CHROMATIC else p0)
             a6 = min(1.0, p0 + 0.3) if i not in BR.FLOOR else p0
@@ -728,6 +731,7 @@ def stage1y_world(tmp_path, *, p_ctrl=None, p_boy=None, leads_boy=None, leads_ct
 
 
 GATES_Y = ("M1", "M2", "M3", "M4", "M5", "T", "G", "ladder", "F", "mean_guard")
+_LADDER_Y = ("neos-3656078-kumeu", "neos-4763324-toguru")          # the ladder targets of the amended set
 
 
 def failed_gates_y(res: dict) -> set[str]:
@@ -739,9 +743,10 @@ def test_stage1y_adopt_when_everything_holds(tmp_path):
     runs = stage1y_world(tmp_path)
     res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
     assert not res["missing"] and not failed_gates_y(res), failed_gates_y(res)
+    assert res["expected"] == 66 and res["instances"] == list(BR.STAGE1Y) and not res["outside"]
     m = res["mechanism"]
-    assert len(m["M1"]["rows"]) == 28 and not m["M1"]["n_a"] and m["M1"]["limit_s"] == 1.0
-    assert m["M4"]["busy_share"] == pytest.approx(0.5) and len(m["M4"]["rows"]) == 28
+    assert len(m["M1"]["rows"]) == 22 and not m["M1"]["n_a"] and m["M1"]["limit_s"] == 1.0
+    assert m["M4"]["busy_share"] == pytest.approx(0.5) and len(m["M4"]["rows"]) == 22
     assert all(r["leads_boY"] == r["leads_ctrl"] == 6 for r in m["M3"]["rows"])
     assert res["outcome"]["T"]["d"] == pytest.approx(0.8)
     assert res["verdict"].startswith("ADOPT boY")
@@ -751,12 +756,12 @@ def test_stage1y_adopt_when_everything_holds(tmp_path):
         BR.print_stage1y(res, out=f)
     txt = (tmp_path / "out.txt").read_text()
     assert "VERDICT: ADOPT boY" in txt and "D-018's own rules on these runs (reported, not gating)" in txt
-    assert "ladder targets (a gate in 1y): hold" in txt
+    assert "ladder targets (a gate in 1y): hold" in txt and "runs: 66 of 66" in txt
 
 
 @pytest.mark.parametrize("case, kw, gate", [
     # M1: phase Y ends 1.2 s after the partner's first post (0.3 s) on one run
-    ("M1", dict(phase_y={("glass4", 0): (1.5, 0.75)}), "M1"),
+    ("M1", dict(phase_y={(BR.SING44, 0): (1.5, 0.75)}), "M1"),
     # M2: chromaticindex cuOpt first incumbent 30 s inside boY against A6F's 8 s (> 2x)
     ("M2", dict(boy_row={BR.CHROMATIC: dict(cuopt_t_first=30.0)}), "M2"),
     # M3: item_placement 1 + 1 leads under boY against 3 + 3 (2 < 0.8 x 6)
@@ -764,18 +769,21 @@ def test_stage1y_adopt_when_everything_holds(tmp_path):
     # M4: phase Y busy 70 % on every boY run (pooled 0.7 > 0.6)
     ("M4", dict(phase_y={(i, s): (0.4, 0.28) for i in BR.STAGE1 for s in (0, 1)}), "M4"),
     # M5: an accounting breach / cap hits per call 0.25 against the control's 0.10 (+0.15)
-    ("M5 accounting", dict(boy_events={BR.COMP21: [dict(t=95.0, kind="rclock", gen=9, gen_s=2.0, bo_paused_s=0.5,
-                                                        bo_wall_s=2.8, o_s=0.5, calls=[dict(s=1.5, cf=True)])]}),
-     "M5"),
-    ("M5 cap hits", dict(boy_summary={BR.COMP21: dict(ls_cap_hits=25)}), "M5"),
+    # M5 on a floor instance of the amended set: the mechanism rules read all 11
+    ("M5 accounting", dict(boy_events={"fhnw-binpack4-48": [dict(t=95.0, kind="rclock", gen=9, gen_s=2.0,
+                                                                 bo_paused_s=0.5, bo_wall_s=2.8, o_s=0.5,
+                                                                 calls=[dict(s=1.5, cf=True)])]}), "M5"),
+    ("M5 cap hits", dict(boy_summary={"neos-4763324-toguru": dict(ls_cap_hits=25)}), "M5"),
     ("T", dict(p_boy={BR.CHROMATIC: 0.35}), "T"),
-    # G: glass4 worse beyond its band with phase Y >= 1 s (the noise rule does not exempt it)
-    ("G", dict(p_boy={BR.GLASS4: 0.60}, phase_y={(BR.GLASS4, 0): (1.2, 0.6), (BR.GLASS4, 1): (1.2, 0.6)}), "G"),
-    # the ladder targets gate in 1y: comp21 d = -0.33 beyond its band 0.05 (the mean over 11 stays >= 0)
-    ("ladder", dict(p_boy={BR.COMP21: 0.6}), "ladder"),
+    # G: sing44 worse beyond its band with phase Y >= 1 s (the noise rule does not exempt it)
+    ("G", dict(p_boy={BR.SING44: 0.60}, phase_y={(BR.SING44, 0): (1.2, 0.6), (BR.SING44, 1): (1.2, 0.6)}), "G"),
+    # the ladder targets gate in 1y: kumeu d = -0.33 beyond its band 0.05 (the mean over the nine stays >= 0)
+    ("ladder", dict(p_boy={"neos-3656078-kumeu": 0.6}), "ladder"),
+    # F, one-sided: krka's boY loses 0.015 > 0.005
     ("F", dict(p_boy={"neos-3004026-krka": 0.02}), "F"),
-    # the mean over the 11 non-floor instances < 0 with every ladder target inside its wide band (seed spread 0.75)
-    ("mean guard", dict(p_ctrl={i: (0.2, 0.8) for i in _LADDER}, p_boy={i: 0.5 / 0.6 for i in _LADDER}),
+    # the mean over the nine < 0 with both ladder targets inside their wide band (seed spread 0.75): chromaticindex
+    # +0.8 and kumeu, toguru -0.444 each
+    ("mean guard", dict(p_ctrl={i: (0.2, 0.8) for i in _LADDER_Y}, p_boy={i: 0.9 for i in _LADDER_Y}),
      "mean_guard"),
 ])
 def test_stage1y_each_adoption_gate_fails_on_its_own(tmp_path, case, kw, gate):
@@ -811,16 +819,16 @@ def test_stage1y_d023_limits_differ_from_d018s(tmp_path):
 
 def test_stage1y_m4_is_pooled_not_per_run(tmp_path):
     """Short phase Y runs have share 1.0 (no sleep falls due before the bucket's burst is spent): the arm's pooled
-    share decides — 24 runs at 0.3 s busy throughout, chromaticindex 10 s and ca 30 s at half duty: 47.2 / 87.2 = 0.54
-    <= 0.6 — and the per-run shares are listed."""
-    py = {(i, s): (0.3, 0.3) for i in BR.STAGE1 for s in (0, 1)}               # every short phase Y at share 1.0
+    share over the 11 decides — 18 runs at 0.3 s busy throughout, chromaticindex 10 s and ca 30 s at half duty: 45.4 /
+    85.4 = 0.53 <= 0.6 — and the per-run shares are listed."""
+    py = {(i, s): (0.3, 0.3) for i in BR.STAGE1Y for s in (0, 1)}              # every short phase Y at share 1.0
     py.update({(BR.CHROMATIC, 0): (10.0, 5.0), (BR.CHROMATIC, 1): (10.0, 5.0), (BR.CA, 0): (30.0, 15.0),
                (BR.CA, 1): (30.0, 15.0)})
     runs = stage1y_world(tmp_path, phase_y=py)
     m4 = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)["mechanism"]["M4"]
-    want = (24 * 0.3 + 2 * 5.0 + 2 * 15.0) / (24 * 0.3 + 2 * 10.0 + 2 * 30.0)
+    want = (18 * 0.3 + 2 * 5.0 + 2 * 15.0) / (18 * 0.3 + 2 * 10.0 + 2 * 30.0)
     assert m4["busy_share"] == pytest.approx(want) and m4["ok"]
-    assert sum(1 for r in m4["rows"] if r["share"] == pytest.approx(1.0)) == 24
+    assert sum(1 for r in m4["rows"] if r["share"] == pytest.approx(1.0)) == 18
     # a phase Y that never ended is read from length_s and busy_per_level["Y"]
     rv = BR.RunView(dict(), tmp_path)
     rv._cache[("summary", "ea")] = dict(backoff=dict(phase_y=dict(length_s=120.0, exit_t=None, reason="never"),
@@ -852,7 +860,7 @@ def test_stage1y_m1_counts_runs_without_a_partner_post_as_na(tmp_path):
     for role in ("solver", "cuopt"):
         (d / f"{role}.events.jsonl").write_text("")
     m1 = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)["mechanism"]["M1"]
-    assert m1["ok"] and len(m1["rows"]) == 27 and [(r["instance"], r["seed"]) for r in m1["n_a"]] == [(BR.SING44, 1)]
+    assert m1["ok"] and len(m1["rows"]) == 21 and [(r["instance"], r["seed"]) for r in m1["n_a"]] == [(BR.SING44, 1)]
 
 
 def test_stage1y_cli(tmp_path):
@@ -875,7 +883,7 @@ def test_stage1y_harness_leg(tmp_path):
     off = _resolved(MJ.ITX_R13_CONTROL)
     a9 = (BR.BOY, BR.CTRL1)
     # r13-off on both A9 arms, A6F ext: valid; named in the header; --harness r13-off agrees, --harness ext does not
-    runs = stage1y_world(tmp_path, harness={(i, a, s): off for i in BR.STAGE1 for a in a9 for s in (0, 1)})
+    runs = stage1y_world(tmp_path, harness={(i, a, s): off for i in BR.STAGE1Y for a in a9 for s in (0, 1)})
     res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
     assert res["harness"]["ok"] and res["harness"]["a9"] == "r13-off" and res["verdict"].startswith("ADOPT boY")
     assert any("not checked against D-022's recorded outcome" in n for n in res["notes"])
@@ -887,7 +895,7 @@ def test_stage1y_harness_leg(tmp_path):
         BR.print_stage1y(bad, out=f)
     assert "harness: A9 arms r13-off, A6F ext (D-022's outcome given: ext) — FAILS" in (tmp_path / "out.txt").read_text()
     # seed 0 under ext, seed 1 under r13-off (every A9 run): INVALID with both groups named
-    mix = stage1y_world(tmp_path / "m", harness={(i, a, 1): off for i in BR.STAGE1 for a in a9})
+    mix = stage1y_world(tmp_path / "m", harness={(i, a, 1): off for i in BR.STAGE1Y for a in a9})
     r = BR.stage1y(mix, None, "backoff2", root=tmp_path / "m", stage0_set=None)
     assert r["verdict"].startswith("INVALID") and "2 harnesses" in r["verdict"] and not r["harness"]["ok"]
     assert {g["name"] for g in r["harness"]["a9_groups"]} == {"ext", "r13-off"}
@@ -897,7 +905,7 @@ def test_stage1y_harness_leg(tmp_path):
     assert r["verdict"].startswith("INVALID") and r["harness"]["a6f_not_ext"] == [dict(instance=BR.CA, seed=0,
                                                                                        harness=off)]
     # a run without a harness (none in run.json, none in the table): INVALID
-    nh = stage1y_world(tmp_path / "n", harness={(BR.GLASS4, BR.BOY, 1): None})
+    nh = stage1y_world(tmp_path / "n", harness={(BR.SING44, BR.BOY, 1): None})
     assert BR.stage1y(nh, None, "backoff2", root=tmp_path / "n", stage0_set=None)["verdict"].startswith("INVALID")
     # the run table's `harness` column stands in when run.json has none
     nh["harness"] = json.dumps(_resolved(MJ.ITX_EXT), sort_keys=True)
@@ -924,6 +932,181 @@ def test_stage1y_harness_leg(tmp_path):
         BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None, harness="nope")
 
 
+def test_stage1y_reads_the_amended_set(tmp_path):
+    """D-023's amendment of 2026-10-13 (D-024 rule 5), fixed before any backoff2 run: 11 instances / 66 runs; T, G,
+    the ladder and the mean guard read the nine, F (one-sided) reads krka and fhnw, the mechanism rules all 11; comp21
+    (ladder target), glass4 (guard) and radiationm18 (floor) are not run and print as such."""
+    assert BR.STAGE1Y == ("chromaticindex1024-7", "neos-3656078-kumeu", "neos-4763324-toguru", "item_placement_9903",
+                          BR.CA, "neos-3024952-loue", "neos-2657525-crna", "neos-960392", BR.SING44,
+                          "neos-3004026-krka", "fhnw-binpack4-48")
+    assert BR.Y_OUTCOME == BR.STAGE1Y[:9] and BR.Y_FLOOR == ("neos-3004026-krka", "fhnw-binpack4-48")
+    assert set(BR.STAGE1Y_NOT_RUN) == {BR.COMP21, BR.GLASS4, "radiationm18-12-05"}
+    assert set(BR.STAGE1Y) | set(BR.STAGE1Y_NOT_RUN) == set(BR.STAGE1)
+    runs = stage1y_world(tmp_path)
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    o = res["outcome"]
+    assert [r["instance"] for r in o["G"]["rows"]] == ["item_placement_9903", BR.CA, "neos-3024952-loue",
+                                                       "neos-2657525-crna", BR.SING44]
+    assert o["G"]["not_run"] == [BR.GLASS4]
+    # the guard-set mean: D-018's 7 GUARDS (glass4 included) -> the 6 in the nine
+    assert len(BR.GUARDS) == 7 and o["G"]["mean_over"] == ["item_placement_9903", BR.CA, "neos-3024952-loue",
+                                                           "neos-2657525-crna", "neos-960392", BR.SING44]
+    assert [r["instance"] for r in o["ladder"]["rows"]] == list(_LADDER_Y) and o["ladder"]["not_run"] == [BR.COMP21]
+    assert [r["instance"] for r in o["F"]["rows"]] == list(BR.Y_FLOOR) and o["F"]["one_sided"]
+    assert o["F"]["not_run"] == ["radiationm18-12-05"] and o["mean_guard"]["n"] == 9
+    assert set(res["not_run"]) == set(BR.STAGE1Y_NOT_RUN)
+    assert res["reports"]["d013"]["cuOpt"]["n_with_baseline"] == 9        # the nine, not the floor
+    with open(tmp_path / "out.txt", "w") as f:
+        BR.print_stage1y(res, out=f)
+    txt = (tmp_path / "out.txt").read_text()
+    for i in BR.STAGE1Y_NOT_RUN:
+        assert f"not run (D-023 amendment 2026-10-13): {i}" in txt
+    assert "F (one-sided, P boY − P ctrl <= +0.005" in txt and "mean guard (the nine, 9 with a d" in txt
+    assert "ladder targets (a gate in 1y): hold" in txt and "not run (D-023 amendment 2026-10-13): comp21-2idx)" in txt
+    assert "(F and mechanism only: its d and band are read by no rule)" in txt
+    # F is one-sided: fhnw's boY better by 0.016 holds (D-018's two-sided |dP| <= 0.005 would fail it) …
+    better = stage1y_world(tmp_path / "b", p_ctrl={"fhnw-binpack4-48": (0.02, 0.02)},
+                           p_boy={"fhnw-binpack4-48": 0.004})
+    rb = BR.stage1y(better, None, "backoff2", root=tmp_path / "b", stage0_set=None)
+    assert rb["outcome"]["F"]["ok"] and rb["verdict"].startswith("ADOPT boY")
+    R = {k: v for k, v in BR.load(better, "backoff2", tmp_path / "b").items() if k[0] in BR.STAGE1Y}
+    eff = BR._effects(R, BR.BOY, BR.CTRL1, BR.A6F, BR.STAGE1Y)
+    assert not BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y)[0]["F"]["ok"]       # two-sided: fails
+    # … while krka's boY worse by 0.004 holds and by 0.006 fails
+    for worse, ok in ((0.009, True), (0.011, False)):
+        w = stage1y_world(tmp_path / f"w{worse}", p_boy={"neos-3004026-krka": worse})
+        rw = BR.stage1y(w, None, "backoff2", root=tmp_path / f"w{worse}", stage0_set=None)
+        assert rw["outcome"]["F"]["ok"] is ok and failed_gates_y(rw) == (set() if ok else {"F"})
+    # completeness: n of 66
+    d = stage1y_world(tmp_path / "d", drop={("fhnw-binpack4-48", BR.A6F, 1)})
+    rd = BR.stage1y(d, None, "backoff2", root=tmp_path / "d", stage0_set=None)
+    assert rd["verdict"].startswith("INCOMPLETE: 65 of 66 runs") and rd["missing"] == [("fhnw-binpack4-48", BR.A6F, 1)]
+
+
+def test_stage1y_outside_runs_are_named_and_read_by_no_rule(tmp_path):
+    """Runs of instances outside the amended set (here comp21, glass4 and radiationm18, each set to fail its old rule,
+    one under another harness, one failed) are named under `outside` and change nothing: no rule row, no harness
+    problem, no kept failed run."""
+    from itrea.experiments import make_jobs as MJ
+    off = _resolved(MJ.ITX_R13_CONTROL)
+    extra = (BR.COMP21, BR.GLASS4, "radiationm18-12-05")
+    runs = stage1y_world(tmp_path, extra=extra, p_boy={BR.COMP21: 0.9, BR.GLASS4: 0.9, "radiationm18-12-05": 0.5},
+                         harness={(BR.GLASS4, BR.BOY, 0): off}, failed={(BR.COMP21, BR.BOY, 1)})
+    res = BR.run_stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert res["verdict"].startswith("ADOPT boY") and res["kept_failed"] == [] and res["harness"]["ok"]
+    assert len(res["outside"]) == 18 and {r["instance"] for r in res["outside"]} == set(extra)
+    assert dict(instance=BR.COMP21, arm=BR.BOY, seed=1, status="failed") in res["outside"]
+    assert set(res["effects"]) == set(BR.STAGE1Y) and not res["missing"]
+    m = res["mechanism"]
+    seen = {r["instance"] for k in ("M1", "M4") for r in m[k]["rows"]} | \
+        {r["instance"] for r in res["mechanism_d018"]["M1"]["rows"]}
+    assert seen == set(BR.STAGE1Y) and len(m["M4"]["rows"]) == 22
+    o = res["outcome"]
+    assert not {r["instance"] for k in ("G", "ladder", "F") for r in o[k]["rows"]} & set(extra)
+    assert any("lie outside the amended set and are read by no rule" in n for n in res["notes"])
+    with open(tmp_path / "out.txt", "w") as f:
+        BR.print_stage1y(res, out=f)
+    assert "outside the amended set, read by no rule (18 runs): comp21-2idx A6F s0 (completed)" in \
+        (tmp_path / "out.txt").read_text()
+
+
+def test_stage1y_still_beats_binds_a_noise_guard(tmp_path):
+    """D-023 (13:5x clarification, the amendment and the 23:3x clarification): a guard under the noise conditions is
+    exempt from its own band only — "still beats A6F" binds it. item_placement: the governor slept 0 s in phase Y on
+    both seeds, its own band holds (seed spread 0.1 / 0.7: band 0.86), the guard-set mean holds (loue improved), but
+    boY beats A6F by d 0.114 < 0.15 where the control beat it by 0.43: G fails in 1y. The same inputs under D-018
+    stage 1's reading (noise test on length, "still beats" exempt too) hold."""
+    ip = "item_placement_9903"
+    kw = dict(p_ctrl={ip: (0.1, 0.7)}, p_boy={ip: 0.62, "neos-3024952-loue": 0.35},
+              phase_y={(ip, 0): (0.3, 0.3), (ip, 1): (0.3, 0.3)})
+    runs = stage1y_world(tmp_path, **kw)
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    g = res["outcome"]["G"]
+    assert failed_gates_y(res) == {"G"} and res["verdict"] == "DO NOT ADOPT boY: failed G"
+    assert next(r for r in g["rows"] if r["instance"] == ip)["ok"] and g["mean_d"] >= BR.GUARD_MEAN
+    b = next(x for x in g["still_beats_A6"] if x["instance"] == ip)
+    assert not b["ok"] and b["d_bo1_vs_A6"] == pytest.approx(0.08 / 0.7) and b["d_bo0_vs_A6"] >= BR.BEAT_A6
+    assert g["noise"] == [] and g["noise_test"] == "slept" and g["still_beats_noise_exempt"] is False
+    with open(tmp_path / "out.txt", "w") as f:
+        BR.print_stage1y(res, out=f)
+    assert "still beating A6F (binds every guard)" in (tmp_path / "out.txt").read_text()
+    # D-018 stage 1's reading of the same runs: item_placement is noise and its "still beats" failure is exempt
+    R = {k: v for k, v in BR.load(runs, "backoff2", tmp_path).items() if k[0] in BR.STAGE1Y}
+    eff = BR._effects(R, BR.BOY, BR.CTRL1, BR.A6F, BR.STAGE1Y)
+    g18 = BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, f_one_sided=True)[0]["G"]
+    assert g18["ok"] and g18["noise"] == [ip] and "noise_test" not in g18
+    with pytest.raises(ValueError):
+        BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, noise_test="nope")
+
+
+def test_stage1y_noise_test_is_no_sleep_in_phase_y(tmp_path):
+    """1y's noise test (D-023 clarification 2026-10-13 23:3x): the governor slept 0 s in phase Y on every boY run, not
+    D-018's "phase Y < 1 s". crna fails its own band (boY 0.3 vs 0.1, band 0.05) while still beating A6F (0.4): slept
+    0.25 s inside a 0.8-s phase Y on both seeds -> not noise, G fails (D-018's length test would exempt it); slept 0 s
+    in the same 0.8 s -> noise, G holds."""
+    crna = "neos-2657525-crna"
+    base = dict(p_ctrl={crna: (0.1, 0.1)}, p_boy={crna: 0.3, "neos-3024952-loue": 0.1})
+    slept = stage1y_world(tmp_path, **base, phase_y={(crna, 0): (0.8, 0.55), (crna, 1): (0.8, 0.55)})
+    res = BR.stage1y(slept, None, "backoff2", root=tmp_path, stage0_set=None)
+    g = res["outcome"]["G"]
+    assert failed_gates_y(res) == {"G"} and g["noise"] == [] and g["mean_d"] >= BR.GUARD_MEAN
+    assert not next(r for r in g["rows"] if r["instance"] == crna)["ok"]
+    assert next(b for b in g["still_beats_A6"] if b["instance"] == crna)["ok"]
+    R = {k: v for k, v in BR.load(slept, "backoff2", tmp_path).items() if k[0] in BR.STAGE1Y}
+    assert BR._y_slept(R[(crna, BR.BOY, 0)]) == pytest.approx(0.25)
+    eff = BR._effects(R, BR.BOY, BR.CTRL1, BR.A6F, BR.STAGE1Y)
+    g18 = BR._outcome(R, None, eff, BR.BOY, BR.A6F, BR.STAGE1Y, f_one_sided=True)[0]["G"]
+    assert g18["ok"] and g18["noise"] == [crna]                       # D-018's length test: 0.8 s < 1 s, exempt
+    awake = stage1y_world(tmp_path / "a", **base, phase_y={(crna, 0): (0.8, 0.8), (crna, 1): (0.8, 0.8)})
+    ra = BR.stage1y(awake, None, "backoff2", root=tmp_path / "a", stage0_set=None)
+    assert not failed_gates_y(ra) and ra["outcome"]["G"]["noise"] == [crna] and ra["verdict"].startswith("ADOPT boY")
+    # a phase Y that never ended is not noise (no exit record to read the sleep from)
+    rv = BR.RunView(dict(), tmp_path)
+    rv._cache[("summary", "ea")] = dict(backoff=dict(phase_y=dict(length_s=120.0, exit_t=None, reason="never")))
+    assert math.isnan(BR._y_slept(rv))
+
+
+def test_stage1y_other_seeds_are_outside(tmp_path):
+    """Runs of the 11 at a seed other than 0-1 are named under `outside` and read by no rule (D-023 clarification
+    2026-10-13 23:3x): ca at seed 2 with boY's phase Y never yielding (100 s, M1 and M4 would fail), its control under
+    r13-off (the harness leg would fail) and its A6F failed (no kept failed run) change nothing."""
+    from itrea.experiments import make_jobs as MJ
+    off = _resolved(MJ.ITX_R13_CONTROL)
+    runs = stage1y_world(tmp_path, extra_seeds={BR.CA: (2,)}, phase_y={(BR.CA, 2): (100.0, 100.0)},
+                         harness={(BR.CA, BR.CTRL1, 2): off}, failed={(BR.CA, BR.A6F, 2)})
+    res = BR.run_stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert res["verdict"].startswith("ADOPT boY") and res["kept_failed"] == [] and res["harness"]["ok"]
+    assert {(r["instance"], r["arm"], r["seed"], r["status"]) for r in res["outside"]} == {
+        (BR.CA, BR.A6F, 2, "failed"), (BR.CA, BR.CTRL1, 2, "completed"), (BR.CA, BR.BOY, 2, "completed")}
+    m = res["mechanism"]
+    assert len(m["M4"]["rows"]) == 22 and len(m["M1"]["rows"]) == 22 and m["M4"]["busy_share"] == pytest.approx(0.5)
+    assert res["expected"] == 66 and not res["missing"]
+
+
+def test_stage1y_f_one_sided_at_exactly_the_limit(tmp_path):
+    """F's one-sided limit compares with REL_TOL: krka's boY worse by exactly 0.005 (0.012 -> 0.017, a float
+    difference of -0.005000000000000001) holds; by 0.0051 it fails."""
+    for p_boy, ok in ((0.017, True), (0.0171, False)):
+        w = stage1y_world(tmp_path / str(p_boy), p_ctrl={"neos-3004026-krka": (0.012, 0.012)},
+                          p_boy={"neos-3004026-krka": p_boy})
+        r = BR.stage1y(w, None, "backoff2", root=tmp_path / str(p_boy), stage0_set=None)
+        assert r["outcome"]["F"]["ok"] is ok and failed_gates_y(r) == (set() if ok else {"F"})
+    assert 0.012 - 0.017 < -BR.FLOOR_DP                                       # the float edge the tolerance absorbs
+
+
+def test_stage1y_t_failure_inside_its_band_is_not_adopted(tmp_path):
+    """D-023: a T failure inside chromaticindex's band is NOT ADOPTED (clarification 2026-10-13 23:3x); D-018's
+    "inside the band: seeds 3 and 4" class is printed as information, not as a pending verdict. Control 0.3 / 0.8
+    (band 0.625), boY 0.6: d −0.083; kumeu improved so the mean over the nine holds."""
+    runs = stage1y_world(tmp_path, p_ctrl={BR.CHROMATIC: (0.3, 0.8)},
+                         p_boy={BR.CHROMATIC: 0.6, "neos-3656078-kumeu": 0.2})
+    res = BR.stage1y(runs, None, "backoff2", root=tmp_path, stage0_set=None)
+    assert failed_gates_y(res) == {"T"} and res["verdict"] == "DO NOT ADOPT boY: failed T"
+    inside = [c for c in res["classification"] if c.startswith("inside the band")]
+    assert len(inside) == 1 and BR.CHROMATIC in inside[0] and "NOT ADOPTED" in inside[0]
+    assert "not pre-registered" in inside[0]
+
+
 # ======================================================================================== D-023 config and jobs
 def test_boy_config_file():
     """configs/itrea2-dev-rc-3way-boY.yaml (D-023) = bo1's back-off values in active mode with the four patiences at
@@ -947,24 +1130,34 @@ def test_boy_config_file():
 
 
 def test_backoff2_jobs(tmp_path):
-    """D-023's job file: the 14 instances x seeds x {A9@boY, A9@bo1s, A6F}, 120 s, set backoff2, one block per
-    instance x seed, the harness of D-022's outcome on both A9 arms (required: no default) and ext on A6F in either
-    outcome (D-021 R13 / R6; D-022's reject clause covers only A9's rows). Written to a temporary directory only —
-    jobs/dev-backoff2-*.jsonl wait for D-022."""
+    """D-023's job file, as amended on 2026-10-13: the 11 instances of STAGE1Y x seeds x {A9@boY, A9@bo1s, A6F},
+    120 s, set backoff2, one block per instance x seed (66 runs), the harness of D-022's outcome on both A9 arms
+    (required: no default) and ext on A6F in either outcome (D-021 R13 / R6; D-022's reject clause covers only A9's
+    rows); `instances` "stage1" = D-018 stage 1's 14 (84), or named instances."""
     from itrea.experiments import make_jobs as MJ
     from itrea.experiments import pair
     with pytest.raises(MJ.JobError, match="harness"):
         MJ.backoff2(seeds=(0,))
     jobs = MJ.backoff2(seeds=(0, 1), harness="ext")
-    assert len(jobs) == len(BR.STAGE1) * 2 * 3 == 84
+    assert len(jobs) == len(BR.STAGE1Y) * 2 * 3 == 66
     assert {pair.arm_label(j) for j in jobs} == {BR.BOY, BR.CTRL1, BR.A6F}
     assert all(j["budget"] == 120.0 and j["set"] == "backoff2" and j["split"] == "dev" and j["harness"] == "ext"
                for j in jobs)
     blocks: dict = {}
     for j in jobs:
         blocks.setdefault(j["block"], set()).add(pair.arm_label(j))
-    assert len(blocks) == 28 and all(len(v) == 3 for v in blocks.values())
-    assert {j["name"] for j in jobs} == set(BR.STAGE1)
+    assert len(blocks) == 22 and all(len(v) == 3 for v in blocks.values())
+    assert {j["name"] for j in jobs} == set(BR.STAGE1Y)
+    assert MJ.backoff2(seeds=(0, 1), harness="ext", instances="amended") == jobs
+    old = MJ.backoff2(seeds=(0, 1), harness="ext", instances="stage1")
+    assert len(old) == 84 and {j["name"] for j in old} == set(BR.STAGE1)
+    assert all(j in old for j in jobs)                       # the same 66 jobs (so run ids) as in the 84
+    two = MJ.backoff2(seeds=(0,), harness="ext", instances=[BR.SING44, BR.CA, BR.SING44])
+    assert len(two) == 6 and {j["name"] for j in two} == {BR.SING44, BR.CA}
+    with pytest.raises(MJ.JobError, match="not in"):
+        MJ.backoff2(seeds=(0,), harness="ext", instances=["nothere"])
+    with pytest.raises(MJ.JobError):
+        MJ.backoff2(seeds=(0,), harness="ext", instances="nine")
     for j in jobs:
         if j["arm"] == "A9":
             cfg, ov = pair.effective_config(j)
@@ -973,7 +1166,7 @@ def test_backoff2_jobs(tmp_path):
         else:
             assert j["config"] is None and "variant" not in j
     off = MJ.backoff2(seeds=(0,), harness="r13-off")
-    assert len(off) == 42
+    assert len(off) == 33
     assert all(j["harness"] == (MJ.ITX_R13_CONTROL if j["arm"] == "A9" else "ext") for j in off)
     a9_off = next(j for j in off if j["arm"] == "A9")
     a6_off = next(j for j in off if j["arm"] == "A6F")
@@ -983,11 +1176,11 @@ def test_backoff2_jobs(tmp_path):
     # harness outcomes, A6F's are the same run under both
     b1 = {pair.run_id_for(j) for j in MJ.backoff_stage1(seeds=(0,))}
     ext0 = {pair.run_id_for(j) for j in jobs if j["seed"] == 0}
-    assert not b1 & ext0 and len(ext0) == 42
+    assert not b1 & ext0 and len(ext0) == 33
     ids = {h: {(j["arm"], pair.run_id_for(j)) for j in js if j["seed"] == 0} for h, js in (("ext", jobs), ("off", off))}
     a6 = {h: {i for a, i in v if a == "A6F"} for h, v in ids.items()}
     a9 = {h: {i for a, i in v if a == "A9"} for h, v in ids.items()}
-    assert a6["ext"] == a6["off"] and len(a6["ext"]) == 14 and not a9["ext"] & a9["off"]
+    assert a6["ext"] == a6["off"] and len(a6["ext"]) == 11 and not a9["ext"] & a9["off"]
     with pytest.raises(MJ.JobError):
         MJ.backoff2(seeds=(0,), harness="nope")
     # the CLI: --harness required; a file in a temporary directory, never jobs/
@@ -998,3 +1191,20 @@ def test_backoff2_jobs(tmp_path):
     with pytest.raises(SystemExit):
         MJ.main(["backoff2", "--seeds", "0", "--out", str(tmp_path / "x.jsonl")])
     assert not (tmp_path / "x.jsonl").exists()
+    assert MJ.main(["backoff2", "--harness", "ext", "--instances", "stage1", "--out", str(out)]) == 0
+    assert len(out.read_text().splitlines()) == 84
+    assert MJ.main(["backoff2", "--harness", "ext", "--instances", f"{BR.CA},{BR.SING44}", "--seeds", "0", "--out",
+                    str(out)]) == 0
+    assert len(out.read_text().splitlines()) == 6
+    assert MJ.main(["backoff2", "--harness", "ext", "--instances", "nothere", "--out", str(out)]) == 2
+
+
+def test_backoff2_job_file_is_the_writers_output(tmp_path):
+    """jobs/backoff2.jsonl (D-023 as amended on 2026-10-13, D-022's outcome ext) is exactly `make-jobs backoff2
+    --harness ext`: 66 runs, every A9 configuration file present."""
+    from itrea.experiments import make_jobs as MJ
+    out = tmp_path / "b2.jsonl"
+    assert MJ.main(["backoff2", "--harness", "ext", "--out", str(out)]) == 0
+    assert out.read_bytes() == (ROOT / "jobs" / "backoff2.jsonl").read_bytes()
+    jobs = [json.loads(x) for x in out.read_text().splitlines()]
+    assert len(jobs) == 66 and all((ROOT / j["config"]).is_file() for j in jobs if j["arm"] == "A9")

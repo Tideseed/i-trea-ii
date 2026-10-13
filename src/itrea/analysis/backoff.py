@@ -52,11 +52,29 @@ sing44 fallbacks, "T fails with M2 failing" and "inside the band" are classified
 the mean guard and M1–M5 hold. The D-013 weak-set report, the relay latency (cuOpt send -> SCIP incumbent made from
 it) and the HiGHS LP-point arrival are reported, not judged.
 
-Stage 1y (D-023, phase Y only; 2026-10-12, fixed before any run): A9@boY (bo1's values, active, the ladder disabled by
-patience 100000 s) vs the control A9@bo1s, same-day A6F (cuOpt alone on A9's footprint, D-021) in A6's place, set
-backoff2, the 14 instances x seeds 0–1, under D-022's harness. Outcome: D-018 stage 1's rules unchanged — T, G (noise
-rule, guard-set mean, "still beats A6F"), the ladder targets, F, the mean guard; band_i on the control or A6F — the
-same code as stage 1 with the arms as parameters. Mechanism, D-023 exactly:
+Stage 1y (D-023, phase Y only; 2026-10-12, fixed before any run; amended 2026-10-13 22:5x before any backoff2 run, D-024
+rule 5): A9@boY (bo1's values, active, the ladder disabled by patience 100000 s) vs the control A9@bo1s, same-day A6F
+(cuOpt alone on A9's footprint, D-021) in A6's place, set backoff2, seeds 0–1, under D-022's harness (ext), on the 11
+instances of `STAGE1Y` = 66 runs: **the nine** (`Y_OUTCOME`: chromaticindex1024-7, ca__Scenario400_reserves_1,
+neos-3656078-kumeu, neos-4763324-toguru, item_placement_9903, neos-3024952-loue, neos-960392, neos-2657525-crna, sing44
+— where phase Y slept in D-018 stage 1's bo1 runs, M3's four, toguru as M1's binding case and a ladder target, sing44
+above its band) and two floor instances where phase Y slept (`Y_FLOOR`: neos-3004026-krka, fhnw-binpack4-48), read by F
+and the mechanism rules only (not d, band or a mean). Not run, and printed as "not run (D-023 amendment 2026-10-13)":
+comp21-2idx, glass4 and radiationm18-12-05 (phase Y never paused). A run of any other instance in the set, or of the
+11 at a seed other than 0–1 (clarification of 2026-10-13 23:3x), is named as outside the amended set and read by no
+rule (the harness leg included); completeness is n of 66. Outcome: T unchanged; G: item_placement, ca, loue, crna,
+sing44 each d >= −band_i, neos-960392 ΔP >= −max(0.01, spread), the guard-set mean over the 6 guards in the nine
+(D-018: the 7 of GUARDS, glass4 included), "still beats A6F" and the noise rule over them; the ladder targets kumeu and
+toguru (comp21 not run); F on krka and fhnw ONE-SIDED — fails only when P(boY) − P(bo1s) > +0.005 on seed means,
+compared with REL_TOL (D-018: |ΔP| <= 0.005, which fails a treatment for helping); the mean guard over the nine (D-018:
+the 11 non-floor instances); band_i on the control or A6F — the same code as stage 1 with the arms and the instance set
+as parameters. G's noise rule in 1y (D-023's 13:5x clarification and its clarification of 2026-10-13 23:3x, before any
+backoff2 run): a guard is noise only where the governor slept 0 s in phase Y (`phase_y.exit_t` − `exit_busy_s` <= 1 ms)
+on every boY run and never left level 0 (D-018: phase Y < 1 s, a length proxy — crna slept 0.25 s inside a 0.77-s
+phase Y); noise exempts only the guard's own band and neos-960392's ΔP limit — the guard-set mean and "still beats
+A6F" bind every guard (stage 1's code, as computed for D-018 on 2026-10-11, exempts "still beats" too; unchanged). A T
+failure inside its band is NOT ADOPTED: the "inside the band" class (seeds 3 and 4) is printed as D-018's follow-up,
+which D-023 does not pre-register. Mechanism, D-023 exactly, over the 11:
   - M1: phase Y ends within 1.0 s of the first posted partner incumbent on every boY run where a partner posted (the
     runs without a post are listed as n/a, as in D-018);
   - M2: chromaticindex's cuOpt first incumbent inside boY <= 2 x A6F's on both seeds (censoring as in D-018's M2);
@@ -70,17 +88,18 @@ same code as stage 1 with the arms as parameters. Mechanism, D-023 exactly:
   - M5: the busy / paused accounting of every boY `rclock` event within 2 % (D-018's accounting leg) and local-search
     cap hits per call within +0.10 of the same-seed control's.
 D-018's own M1 (0.5 s), M3 (per seed, with the first-lead and level-0 limbs) and M5 (every leg, cap hits +0) are
-computed on the same runs and printed beside (`mechanism_d018`, not gating). Adopt boY only if M1–M5, T, G, the
-ladder, F and the mean guard all hold: D-023 asks every outcome rule to hold and lists the ladder targets among them,
-whereas D-018 stage 1 (design §5) reported the ladder without gating — stage 1 keeps that. Failed runs: both readings
-(`--failed both`, the default for 1y): kept as D-002 §6 keeps crashes in full, the excluded reading's verdict beside.
+computed on the same runs and printed beside (`mechanism_d018`, not gating). Adopt boY only if M1–M5, T, G, the ladder,
+F and the mean guard all hold: D-023 asks every outcome rule to hold and lists the ladder targets among them, whereas
+D-018 stage 1 (design §5) reported the ladder without gating — stage 1 keeps that. Failed runs: both readings (`--failed
+both`, the default for 1y): kept as D-002 §6 keeps crashes in full, the excluded reading's verdict beside; only the 11's
+failed runs at seeds 0–1 are read.
 In 1y's result the effect keys keep stage 1's names (`*_bo1` = boY, `*_bo0` = the control, `*_A6` = A6F).
-Harness (validity of 1y; D-023 runs under D-022's harness outcome): every run of the set's three arms (completed, and
-failed under the kept reading; not voided, not synthetic; every attempt, not only the one `load` keeps) carries a
-resolved harness — run.json `config.harness`, else the run table's `harness` column —; the two A9 arms share ONE
-harness (so every block is equal), every A6F run is `pair.resolve_harness("ext")` (D-021 R13 / R6: D-022's outcome
-sets only A9's harness), and with `--harness ext|r13-off` the A9 harness must be that outcome's. Otherwise the
-verdict is INVALID with the runs listed; the header names the A9 harness found.
+Harness (validity of 1y; D-023 runs under D-022's harness outcome): every run of the set's three arms on the 11 at
+seeds 0–1 (completed, and failed under the kept reading; not voided, not synthetic; every attempt, not only the one `load`
+keeps) carries a resolved harness — run.json `config.harness`, else the run table's `harness` column —; the two A9
+arms share ONE harness (so every block is equal), every A6F run is `pair.resolve_harness("ext")` (D-021 R13 / R6:
+D-022's outcome sets only A9's harness), and with `--harness ext|r13-off` the A9 harness must be that outcome's.
+Otherwise the verdict is INVALID with the runs listed; the header names the A9 harness found.
 """
 from __future__ import annotations
 
@@ -117,6 +136,24 @@ STAGE1 = TARGET + LADDER + GUARDS + FLOOR
 M3_SET = ("item_placement_9903", "neos-3024952-loue", GUARD_960, "neos-2657525-crna")
 M4_SET = ("neos-3656078-kumeu", COMP21, "neos-4763324-toguru", "radiationm18-12-05")
 STAGE1_SEEDS = (0, 1)
+# D-023 amendment (2026-10-13 22:5x, before any backoff2 run; D-024 rule 5): stage 1y reads 11 instances (66 runs).
+# Phase Y can act only where the governor sleeps in it; from D-018 stage 1's A9@bo1 runs (seed 0 / 1), phase-Y length
+# `phase_y.exit_t` and seconds paused in it (exit_t − exit_busy_s): chromaticindex 9.54 / 12.47 s (paused 4.64 / 6.23),
+# ca 30.00 / 29.91 (14.94 / 14.81), kumeu 3.90 / 3.40 (1.85 / 1.57), crna 0.77 / 0.76 (0.25 / 0.25), fhnw-binpack4-48
+# 1.03 / 1.62 (0.50 / 0.54), krka 0.49 / 1.31 (0.00 / 0.53); no pause on toguru (2.01 / 2.06: the first pace point is
+# the exit), sing44 0.53 / 0.53, radiationm18 0.495 / 0.511, glass4 0.29 / 0.02, loue 0.30 / 0.29, neos-960392 0.23 /
+# 0.24, comp21 0.19 / 0.19, item_placement 0.09 / 0.07. The outcome set ("the nine": T, G, the ladder, d, band and the
+# means) = where phase Y slept + M3's four + toguru (M1's binding case, a ladder target) + sing44 (above its band in
+# stage 1); fhnw and krka (slept) are read by F (one-sided) and the mechanism rules only; comp21, glass4 and
+# radiationm18 are not run.
+Y_OUTCOME = tuple(i for i in STAGE1 if i in {CHROMATIC, CA, "neos-3656078-kumeu", "neos-4763324-toguru", SING44}
+                  | set(M3_SET))
+Y_FLOOR = ("neos-3004026-krka", "fhnw-binpack4-48")
+STAGE1Y = tuple(i for i in STAGE1 if i in set(Y_OUTCOME + Y_FLOOR))
+AMEND_Y = "D-023 amendment 2026-10-13"
+STAGE1Y_NOT_RUN = {COMP21: "phase Y 0.19 / 0.19 s in D-018 stage 1, never paused",
+                   GLASS4: "phase Y 0.29 / 0.02 s in D-018 stage 1, never paused",
+                   "radiationm18-12-05": "phase Y 0.495 / 0.511 s in D-018 stage 1, never paused"}
 # stage-0 thresholds
 S_FIRST_MAX, S_SING_MAX, P_COMP_SLACK = 2.0, 1.15, 0.02
 V_STAR_S = 60.0                           # rule (b): v* = A2's best cuOpt objective by this time
@@ -138,6 +175,12 @@ M5_ACC, M5_STOP = 0.02, 0.25
 # over the seeds; M4 the arm's busy share in phase Y; M5 cap hits per call within +0.10 of the control's
 Y_M1_S, Y_M3_LEADS, Y_M4_SHARE, Y_M5_CAP = 1.0, 0.8, 0.6, 0.10
 Y_HARNESS = ("ext", "r13-off")             # D-022's outcomes -> make_jobs.ITX_EXT / ITX_R13_CONTROL (A9 arms only)
+# stage-1y noise test (D-023 clarification 2026-10-13 23:3x, before any backoff2 run): a guard is noise only where the
+# governor slept 0 s in phase Y (exit_t − exit_busy_s) on every boY run — D-018's "phase Y < 1 s" is a length proxy,
+# and the amendment selects on seconds slept (crna slept 0.25 s inside a 0.77-s phase Y in stage 1). A sleep is at
+# least one 0.25-s slice (stage 1's bo1 records: exactly 0 or >= 0.25 s), so 1 ms separates the two.
+Y_NOISE_SLEPT_S = 1e-3
+AMEND_Y2 = "D-023 clarification 2026-10-13 23:3x"
 REL_TOL = 1e-9
 
 
@@ -673,12 +716,12 @@ def _all_inc(inc, run_id, T) -> list[tuple[float, float]]:
     return sorted(zip(g["t"].astype(float), g["obj_recomputed"].astype(float)))
 
 
-def _effects(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
-    """Per instance of STAGE1: d of the treatment vs the control (seed means), both against the cuOpt-alone arm, the
-    band. The keys keep stage 1's names: `*_bo1` = the treatment, `*_bo0` = the control, `*_A6` = the cuOpt-alone arm
-    (A6F in stage 1y)."""
+def _effects(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6, insts=STAGE1) -> dict:
+    """Per instance of `insts` (STAGE1; stage 1y: STAGE1Y): d of the treatment vs the control (seed means), both
+    against the cuOpt-alone arm, the band. The keys keep stage 1's names: `*_bo1` = the treatment, `*_bo0` = the
+    control, `*_A6` = the cuOpt-alone arm (A6F in stage 1y)."""
     eff = {}
-    for i in STAGE1:
+    for i in insts:
         d, pa, pc = _d(R, i, treat, ctrl)
         d0a6, _, _ = _d(R, i, ctrl, a6)
         d1a6, _, _ = _d(R, i, treat, a6)
@@ -689,11 +732,11 @@ def _effects(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
     return eff
 
 
-def _m1_rows(R, treat: str = BO1, limit_s: float = M1_S) -> tuple[list[dict], list[dict]]:
-    """M1's rows: phase Y of every treatment run ends within `limit_s` of the first posted partner incumbent; and the
-    runs where no partner posted (the rule does not apply: n/a)."""
+def _m1_rows(R, treat: str = BO1, limit_s: float = M1_S, insts=STAGE1) -> tuple[list[dict], list[dict]]:
+    """M1's rows: phase Y of every treatment run of `insts` ends within `limit_s` of the first posted partner
+    incumbent; and the runs where no partner posted (the rule does not apply: n/a)."""
     m1, na = [], []
-    for i in STAGE1:
+    for i in insts:
         for s in STAGE1_SEEDS:
             r = R.get((i, treat, s))
             if r is None:
@@ -820,9 +863,34 @@ def _m5_d018(R, treat: str = BO1, ctrl: str = CTRL1, a6: str = A6) -> dict:
     return dict(ok=not any(m5.values()), **m5)
 
 
-def _outcome(R, inc, eff: dict, treat: str = BO1, a6: str = A6) -> tuple[dict, list, list, list]:
+def _y_slept(r: RunView) -> float:
+    """Seconds the governor slept in phase Y: `phase_y.exit_t` − `phase_y.exit_busy_s` of the EA summary's `backoff`
+    block (the governor's own record of the exit; the measure of D-023's amendment). NaN when phase Y never ended or
+    the run has no record."""
+    py = r.bo.get("phase_y") if isinstance(r.bo.get("phase_y"), dict) else {}
+    w, b = _f(py.get("exit_t")), _f(py.get("exit_busy_s"))
+    return w - b if _fin(w) and _fin(b) else math.nan
+
+
+def _outcome(R, inc, eff: dict, treat: str = BO1, a6: str = A6, insts=STAGE1, f_one_sided: bool = False,
+             noise_test: str = "length", noise_exempts_beat: bool = True) -> tuple[dict, list, list, list]:
     """D-018 stage 1's outcome rules: T, G (with the noise rule, the guard-set mean and "still beats A6"), the ladder
-    targets, F and the mean guard over the 11 non-floor instances. Returns (out, guard rows, ladder rows, noise)."""
+    targets, F and the mean guard over the 11 non-floor instances. Returns (out, guard rows, ladder rows, noise).
+    `insts` other than STAGE1 (stage 1y: STAGE1Y, D-023's amendment of 2026-10-13) reads every rule over the
+    instances in it: the per-instance guards, the guard-set mean and "still beats" over GUARDS ∩ insts, the ladder over
+    LADDER ∩ insts, F over FLOOR ∩ insts, the mean guard over insts minus FLOOR; a rule's instances outside `insts` are
+    listed under `not_run` (F without any floor instance: `ok` None, no gate). `f_one_sided` (1y, the amendment): F
+    fails only when the treatment loses more than FLOOR_DP, P(treat) − P(ctrl) > +0.005 on seed means (D-018: two-sided
+    |ΔP| <= 0.005), compared with REL_TOL (a difference of exactly 0.005 holds whatever its float rounding).
+    The noise rule (D-018: a guard failing by the letter while the treatment never left level 0 and phase Y lasted
+    < 1 s on its runs is reported, not counted): `noise_test` "length" is that test; "slept" (1y, D-023's clarification
+    of 2026-10-13 23:3x) asks instead that the governor slept 0 s in phase Y (`_y_slept` <= Y_NOISE_SLEPT_S) on every
+    treatment run, never leaving level 0. `noise_exempts_beat` True (D-018 stage 1, as computed on 2026-10-11): a noise
+    guard is exempt from "still beats A6" too; False (1y, D-023's 13:5x clarification and its amendment): "still beats
+    A6F" binds every guard, noise or not — the noise rule exempts only a guard's own band and neos-960392's ΔP limit.
+    Stage 1's result is unchanged."""
+    if noise_test not in ("length", "slept"):
+        raise ValueError(f"noise_test must be 'length' or 'slept', not {noise_test!r}")
     out: dict = {}
     e = eff[CHROMATIC]
     out["T"] = dict(ok=bool(_fin(e["d"]) and e["d"] >= T_D and _fin(e["p_bo1"]) and e["p_bo1"] <= T_P),
@@ -831,9 +899,18 @@ def _outcome(R, inc, eff: dict, treat: str = BO1, a6: str = A6) -> tuple[dict, l
     def noise(i) -> bool:
         rs = [R.get((i, treat, s)) for s in STAGE1_SEEDS]
         rs = [r for r in rs if r is not None]
+        if noise_test == "slept":
+            return bool(rs) and all(r.max_level_p() == 0 and _y_slept(r) <= Y_NOISE_SLEPT_S for r in rs)
         return bool(rs) and all(r.max_level_p() == 0 and _fin(r.phase_y()[0]) and r.phase_y()[0] < 1.0 for r in rs)
+
+    def not_run(names) -> dict:                  # only when `insts` drops some: stage 1's result keeps its keys
+        nr = [i for i in names if i not in insts]
+        return dict(not_run=nr) if nr else {}
+    guards = tuple(i for i in GUARDS if i in insts)
     g_rows, noise_list = [], []
     for i in GUARDS_D:
+        if i not in insts:
+            continue
         e = eff[i]
         ok = _fin(e["d"]) and e["d"] >= -e["band"]
         if not ok and noise(i):
@@ -844,48 +921,62 @@ def _outcome(R, inc, eff: dict, treat: str = BO1, a6: str = A6) -> tuple[dict, l
     ok960 = _fin(e["dP"]) and e["dP"] >= lim960
     if not ok960 and noise(GUARD_960):
         noise_list.append(GUARD_960)
-    gd = [eff[i]["d"] for i in GUARDS if _fin(eff[i]["d"])]
+    gd = [eff[i]["d"] for i in guards if _fin(eff[i]["d"])]
     gmean = float(np.mean(gd)) if gd else math.nan
     beat = [dict(instance=i, d_bo0_vs_A6=eff[i]["d_bo0_vs_A6"], d_bo1_vs_A6=eff[i]["d_bo1_vs_A6"],
                  ok=bool(_fin(eff[i]["d_bo1_vs_A6"]) and eff[i]["d_bo1_vs_A6"] >= BEAT_A6))
-            for i in GUARDS if _fin(eff[i]["d_bo0_vs_A6"]) and eff[i]["d_bo0_vs_A6"] >= BEAT_A6]
-    for b in beat:
-        if not b["ok"] and b["instance"] not in noise_list and noise(b["instance"]):
-            noise_list.append(b["instance"])
-    # the noise rule: a per-instance guard failure is reported but not counted; the guard-set mean is not exempt
+            for i in guards if _fin(eff[i]["d_bo0_vs_A6"]) and eff[i]["d_bo0_vs_A6"] >= BEAT_A6]
+    if noise_exempts_beat:
+        for b in beat:
+            if not b["ok"] and b["instance"] not in noise_list and noise(b["instance"]):
+                noise_list.append(b["instance"])
+    # the noise rule: a per-instance guard failure is reported but not counted; the guard-set mean is not exempt, nor
+    # (noise_exempts_beat False, 1y) "still beats"
     counted = [r for r in g_rows if r["instance"] not in noise_list]
+    beat_exempt = noise_list if noise_exempts_beat else []
     g_ok = (all(r["ok"] for r in counted) and (ok960 or GUARD_960 in noise_list)
-            and _fin(gmean) and gmean >= GUARD_MEAN and all(b["ok"] for b in beat if b["instance"] not in noise_list))
+            and _fin(gmean) and gmean >= GUARD_MEAN and all(b["ok"] for b in beat if b["instance"] not in beat_exempt))
     out["G"] = dict(ok=bool(g_ok), rows=g_rows, neos960=dict(dP=e["dP"], limit=lim960, ok=bool(ok960)),
-                    mean_d=gmean, still_beats_A6=beat, noise=noise_list)
+                    mean_d=gmean, still_beats_A6=beat, noise=noise_list, **not_run(GUARDS))
+    if guards != GUARDS:
+        out["G"]["mean_over"] = list(guards)
+    if noise_test != "length" or not noise_exempts_beat:          # 1y only: stage 1's result keeps its keys
+        out["G"].update(noise_test=noise_test, still_beats_noise_exempt=bool(noise_exempts_beat))
     l_rows = [dict(instance=i, d=eff[i]["d"], band=eff[i]["band"],
-                   ok=bool(_fin(eff[i]["d"]) and eff[i]["d"] >= -eff[i]["band"])) for i in LADDER]
+                   ok=bool(_fin(eff[i]["d"]) and eff[i]["d"] >= -eff[i]["band"])) for i in LADDER if i in insts]
     ld = [r["d"] for r in l_rows if _fin(r["d"])]
-    out["ladder"] = dict(ok=all(r["ok"] for r in l_rows), rows=l_rows, mean_d=float(np.mean(ld)) if ld else math.nan)
+    out["ladder"] = dict(ok=all(r["ok"] for r in l_rows), rows=l_rows, mean_d=float(np.mean(ld)) if ld else math.nan,
+                         **not_run(LADDER))
     f_rows = []
     for i in FLOOR:
+        if i not in insts:
+            continue
         e = eff[i]
-        row = dict(instance=i, dP=e["dP"], ok=bool(_fin(e["dP"]) and abs(e["dP"]) <= FLOOR_DP))
+        ok = _fin(e["dP"]) and (e["dP"] >= -FLOOR_DP - REL_TOL if f_one_sided else abs(e["dP"]) <= FLOOR_DP)
+        row = dict(instance=i, dP=e["dP"], ok=bool(ok))
         row["seconds"] = floor_seconds(R, inc, i, treat=treat, a6=a6)
         f_rows.append(row)
-    out["F"] = dict(ok=all(r["ok"] for r in f_rows), rows=f_rows)
-    nf = [eff[i]["d"] for i in STAGE1 if i not in FLOOR and _fin(eff[i]["d"])]
+    out["F"] = dict(ok=all(r["ok"] for r in f_rows) if f_rows else None, rows=f_rows, **not_run(FLOOR))
+    if f_one_sided:
+        out["F"]["one_sided"] = True
+    nf = [eff[i]["d"] for i in insts if i not in FLOOR and _fin(eff[i]["d"])]
     out["mean_guard"] = dict(ok=bool(nf and float(np.mean(nf)) >= 0.0), mean_d=float(np.mean(nf)) if nf else math.nan,
                              n=len(nf))
     return out, g_rows, l_rows, noise_list
 
 
 def _classify(R, runs: pd.DataFrame, eff: dict, out: dict, m2_ok: bool, g_rows, l_rows, noise_list,
-              stage0_set: str | None, root: Path, treat: str = BO1, ctrl: str = CTRL1, tlabel: str = "bo1") -> list:
+              stage0_set: str | None, root: Path, treat: str = BO1, ctrl: str = CTRL1, tlabel: str = "bo1",
+              insts=STAGE1) -> list:
     """The failure classes D-018 names (the ca / glass4 / sing44 fallbacks, "T fails with M2 failing", "inside the
-    band")."""
+    band"), for the instances of `insts` (stage 1y: STAGE1Y — no glass4 fallback, no comp21 "inside the band")."""
     cls: list[str] = []
-    ca_row = next(r for r in g_rows if r["instance"] == CA)
-    if not ca_row["ok"] and CA not in noise_list:
+    ca_row = next((r for r in g_rows if r["instance"] == CA), None)
+    if ca_row is not None and not ca_row["ok"] and CA not in noise_list:
         cls.append(classify_ca(R, runs, stage0_set, root, treat=treat, ctrl=ctrl, tlabel=tlabel))
     for i in (GLASS4, SING44):
-        row = next(r for r in g_rows if r["instance"] == i)
-        if not row["ok"] and i not in noise_list:
+        row = next((r for r in g_rows if r["instance"] == i), None)
+        if row is not None and not row["ok"] and i not in noise_list:
             if any(_esc_before_lead(R.get((i, treat, s))) for s in STAGE1_SEEDS):
                 po = None
                 for s in STAGE1_SEEDS:
@@ -900,7 +991,7 @@ def _classify(R, runs: pd.DataFrame, eff: dict, out: dict, m2_ok: bool, g_rows, 
     if not out["T"]["ok"] and not m2_ok:
         cls.append("T fails with M2 failing: duty does not restore cuOpt at run level although stage 0 said it "
                    "would. STOP and report; MPS needs Berk.")
-    inside = [i for i in TARGET + LADDER if _fin(eff[i]["d"]) and abs(eff[i]["d"]) <= eff[i]["band"]
+    inside = [i for i in TARGET + LADDER if i in insts and _fin(eff[i]["d"]) and abs(eff[i]["d"]) <= eff[i]["band"]
               and not (out["T"]["ok"] if i in TARGET else next(r for r in l_rows if r["instance"] == i)["ok"])]
     if inside:
         cls.append("inside the band: seeds 3 and 4 on " + ", ".join(inside) + ", same rules")
@@ -1021,14 +1112,20 @@ def _run_harness(row: dict, root: Path) -> dict | None:
     return h if isinstance(h, dict) else None
 
 
-def harness_check(runs: pd.DataFrame, set_name: str | None, root: Path, expect: str | None = None) -> dict:
+def harness_check(runs: pd.DataFrame, set_name: str | None, root: Path, expect: str | None = None,
+                  insts=None, seeds=None) -> dict:
     """Stage 1y's harness leg (module docstring): over every completed, not voided, not synthetic run of the set's
     three arms — every attempt — the A9 arms (boY and the control) share one resolved harness, A6F runs under ext, and
-    the A9 harness is `expect`'s ("ext" / "r13-off", D-022's outcome) when given."""
+    the A9 harness is `expect`'s ("ext" / "r13-off", D-022's outcome) when given. `insts` / `seeds`: only the runs of
+    these instances and seeds (stage 1y: STAGE1Y, seeds 0–1 — a run outside them is read by no rule)."""
     from itrea.experiments.make_jobs import ITX_EXT, ITX_R13_CONTROL
     from itrea.experiments.pair import resolve_harness
     named = {"ext": resolve_harness(ITX_EXT), "r13-off": resolve_harness(ITX_R13_CONTROL)}
     df = runs if set_name is None else runs[runs["set"] == set_name]
+    if insts is not None:
+        df = df[df["instance"].isin(list(insts))]
+    if seeds is not None:
+        df = df[df["seed"].isin(list(seeds))]
 
     def flag(col):
         return df[col].fillna(False).astype(bool) if col in df else pd.Series(False, index=df.index)
@@ -1066,21 +1163,33 @@ def harness_check(runs: pd.DataFrame, set_name: str | None, root: Path, expect: 
 
 def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
             stage0_set: str | None = "backoff0", harness: str | None = None) -> dict:
-    """D-023: A9@boY (phase Y only) vs the control A9@bo1s, same-day A6F; D-018 stage 1's outcome rules unchanged and
-    D-023's mechanism rules M1–M5 (module docstring). D-018's own M1 / M3 / M5 on the same runs are returned under
-    `mechanism_d018` (reported, not gating). `harness`: D-022's outcome ("ext" / "r13-off") the A9 arms must carry,
-    or None (the harness found is reported and must still be one for both A9 arms, ext for A6F). Returns the stage-1
-    keys plus `mechanism_d018` and `harness`."""
+    """D-023 as amended on 2026-10-13 (D-024 rule 5): A9@boY (phase Y only) vs the control A9@bo1s, same-day A6F, on
+    the 11 instances of STAGE1Y — D-018 stage 1's outcome rules over the nine of Y_OUTCOME (T, G, the ladder, the mean
+    guard), F one-sided over the two of Y_FLOOR, D-023's mechanism rules M1–M5 over all 11 (module docstring); the
+    rules whose instances are not run are listed as such (`not_run`). Runs of any other instance in the set, and runs
+    of the 11 at a seed other than 0–1 (D-023's clarification of 2026-10-13 23:3x), are named under `outside` and read
+    by no rule (the harness leg included). G's noise rule is 1y's (`noise_test` "slept", "still beats A6F" not
+    exempt); a T failure inside its band is NOT ADOPTED (the "inside the band" class is printed as D-018's
+    follow-up, which D-023 does not pre-register). D-018's own M1 / M3 / M5 on the same runs are
+    returned under `mechanism_d018` (reported, not gating). `harness`: D-022's outcome ("ext" / "r13-off") the A9 arms
+    must carry, or None (the harness found is reported and must still be one for both A9 arms, ext for A6F). Returns
+    the stage-1 keys plus `mechanism_d018`, `harness`, `instances`, `outside`, `expected` and `not_run`."""
     if harness is not None and harness not in Y_HARNESS:
         raise ValueError(f"harness must be one of {Y_HARNESS}, not {harness!r}")
-    R = load(runs, set_name, root)
-    hz = harness_check(runs, set_name, root, harness)
+    insts = STAGE1Y
+    R = {k: v for k, v in load(runs, set_name, root).items() if k[0] in insts and k[2] in STAGE1_SEEDS}
+    df = runs if set_name is None else runs[runs["set"] == set_name]
+    in_scope = df["instance"].isin(list(insts)) & df["seed"].isin(list(STAGE1_SEEDS))
+    outside = sorted({(str(r["instance"]), str(r["arm"]), int(r["seed"]), str(r["status"]))
+                      for r in df[~in_scope].to_dict("records")})
+    hz = harness_check(runs, set_name, root, harness, insts=insts, seeds=STAGE1_SEEDS)
     notes: list[str] = []
-    missing = [(i, a, s) for i in STAGE1 for a in (CTRL1, BOY, A6F) for s in STAGE1_SEEDS if (i, a, s) not in R]
-    eff = _effects(R, BOY, CTRL1, A6F)
+    expected = [(i, a, s) for i in insts for a in (CTRL1, BOY, A6F) for s in STAGE1_SEEDS]
+    missing = [k for k in expected if k not in R]
+    eff = _effects(R, BOY, CTRL1, A6F, insts)
     mech: dict = {}
-    # M1: phase Y ends within 1.0 s of the first partner incumbent, every boY run where a partner posted
-    m1, m1_na = _m1_rows(R, BOY, Y_M1_S)
+    # M1: phase Y ends within 1.0 s of the first partner incumbent, every boY run of the 11 where a partner posted
+    m1, m1_na = _m1_rows(R, BOY, Y_M1_S, insts)
     mech["M1"] = dict(ok=bool(m1) and all(x["ok"] for x in m1), rows=m1, n_a=m1_na, limit_s=Y_M1_S)
     # M2: chromaticindex's cuOpt first incumbent inside boY <= 2 x A6F's, both seeds
     mech["M2"] = _m2(R, BOY, A6F, "boY", "A6F")
@@ -1100,7 +1209,7 @@ def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backo
         m3.append(dict(instance=i, leads_boY=nr, leads_ctrl=nc, ratio=nr / nc if nc else math.nan,
                        missing_seeds=miss, ok=bool(ok)))
     mech["M3"] = dict(ok=all(x["ok"] for x in m3), rows=m3)
-    # M4: boY's busy share in phase Y <= 0.6, pooled over the arm's runs (per run reported)
+    # M4: boY's busy share in phase Y <= 0.6, pooled over the arm's runs of the 11 (per run reported)
     m4, no_rec = [], []
     for (i, a, s), r in sorted(R.items()):
         if a != BOY:
@@ -1125,38 +1234,65 @@ def stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backo
             cap.append(dict(instance=i, seed=s, boY=_cap_per_call(r), ctrl=_cap_per_call(c)))
     mech["M5"] = dict(ok=not acc and not cap, accounting=acc, cap_hits=cap, cap_slack=Y_M5_CAP)
     mech_ok = all(mech[k]["ok"] for k in ("M1", "M2", "M3", "M4", "M5"))
-    # D-018's own M1 / M3 / M5 on the same runs, for comparison (not gating)
-    d1, _ = _m1_rows(R, BOY, M1_S)
+    # D-018's own M1 / M3 / M5 on the same runs (the 11), for comparison (not gating)
+    d1, _ = _m1_rows(R, BOY, M1_S, insts)
     d018 = dict(M1=dict(ok=bool(d1) and all(x["ok"] for x in d1), rows=d1, limit_s=M1_S),
                 M3=_m3_d018(R, BOY, CTRL1), M5=_m5_d018(R, BOY, CTRL1, A6F))
-    # outcome: D-018 stage 1's rules unchanged; the ladder targets gate here (D-023: every outcome rule must hold)
-    out, g_rows, l_rows, noise_list = _outcome(R, inc, eff, BOY, A6F)
+    # outcome: D-018 stage 1's rules over the nine (the guards, the ladder and the mean guard intersect with them),
+    # F one-sided on fhnw / krka; the ladder targets gate here (D-023: every outcome rule must hold)
+    # G's noise rule as D-023 states it for 1y (clarification 2026-10-13 23:3x): noise = slept 0 s in phase Y on every
+    # boY run; "still beats A6F" binds every guard
+    out, g_rows, l_rows, noise_list = _outcome(R, inc, eff, BOY, A6F, insts, f_one_sided=True, noise_test="slept",
+                                               noise_exempts_beat=False)
     cls = _classify(R, runs, eff, out, mech["M2"]["ok"], g_rows, l_rows, noise_list, stage0_set, root, BOY, CTRL1,
-                    "boY")
-    reports = dict(d013=d013_report(R, runs, STAGE1, a6=A6F, arms=(CTRL1, BOY)),
+                    "boY", insts)
+    cls = [c + f" — D-018's follow-up, printed for information: under D-023 the verdict stands, NOT ADOPTED; seeds 3 "
+               f"and 4 are not pre-registered and would need their own record ({AMEND_Y2})"
+           if c.startswith("inside the band") else c for c in cls]
+    reports = dict(d013=d013_report(R, runs, Y_OUTCOME, a6=A6F, arms=(CTRL1, BOY)),
                    relay=relay_latency(R, (CTRL1, BOY)), lp_arrival=lp_arrival(R, (CTRL1, BOY)))
-    gates = ("T", "G", "ladder", "F", "mean_guard")
+    gates = tuple(k for k in ("T", "G", "ladder", "F", "mean_guard") if out[k]["ok"] is not None)
     adopt = mech_ok and all(out[k]["ok"] for k in gates)
+    not_run = {i: STAGE1Y_NOT_RUN.get(i, "") for i in STAGE1 if i not in insts}
     if not hz["ok"]:
         verdict = "INVALID (harness: " + "; ".join(hz["problems"]) + "); the rules below are not decided"
     elif missing:
-        verdict = f"INCOMPLETE: {len(missing)} missing runs (first: {missing[:3]})"
+        verdict = (f"INCOMPLETE: {len(expected) - len(missing)} of {len(expected)} runs, {len(missing)} missing "
+                   f"(first: {missing[:3]})")
     elif adopt:
-        verdict = ("ADOPT boY as A9's development default: M1–M5 (D-023), T, G, the ladder targets, F and the mean "
-                   "guard hold")
+        verdict = ("ADOPT boY as A9's development default: M1–M5 (D-023), T, G, the ladder targets ("
+                   + ", ".join(r["instance"] for r in l_rows) + "), F (one-sided, "
+                   + ", ".join(r["instance"] for r in out["F"]["rows"]) + ") and the mean guard over the nine hold ("
+                   + AMEND_Y + ")")
     else:
         failed = [k for k in ("M1", "M2", "M3", "M4", "M5") if not mech[k]["ok"]] + \
                  [k for k in gates if not out[k]["ok"]]
         verdict = "DO NOT ADOPT boY: failed " + ", ".join(failed)
+    notes.append(f"{AMEND_Y} (D-024 rule 5): {len(insts)} instances, {len(expected)} runs; T, G, the ladder and the "
+                 f"mean guard read the nine, F (one-sided: P boY − P ctrl <= +{FLOOR_DP:g}) reads "
+                 f"{', '.join(Y_FLOOR)}, the mechanism rules all {len(insts)}; not run: {', '.join(not_run)} — no "
+                 f"{COMP21} ladder target, no {GLASS4} guard; the guard-set mean is over "
+                 f"{len(out['G'].get('mean_over', GUARDS))} guards (D-018: {len(GUARDS)}), the mean guard over the "
+                 f"nine (D-018: the 11 non-floor instances)")
     notes.append("the ladder targets gate the verdict here; D-018 stage 1 reported them without gating (design §5: "
                  "adopt if T, G, F, the mean guard and M1–M5 hold) — D-023 asks every outcome rule to hold")
+    notes.append(f"G's noise rule ({AMEND_Y2}): a guard is noise only where the governor slept 0 s in phase Y "
+                 f"(exit_t − exit_busy_s <= {Y_NOISE_SLEPT_S:g} s) on every boY run, never leaving level 0 (D-018: phase "
+                 f"Y < 1 s); noise exempts only the guard's own band and neos-960392's ΔP limit — the guard-set mean "
+                 f"and \"still beats A6F\" bind every guard (D-018 stage 1's code exempted \"still beats\" too)")
     notes.append(f"M4 reads the arm's pooled phase-Y busy share (sum of exit_busy_s / sum of exit_t over every boY "
                  f"run); a phase Y shorter than ~2 x burst_s ends before the first sleep falls due, so a per-run share "
                  f"is 1.0 by construction there (per run listed)")
+    if outside:
+        notes.append(f"{len(outside)} runs of the set lie outside the amended set and are read by no rule: "
+                     + ", ".join(f"{i} {a} s{s} ({st})" for i, a, s, st in outside[:6])
+                     + (" …" if len(outside) > 6 else ""))
     if harness is None and hz["ok"]:
         notes.append(f"the A9 harness ({hz['a9']}) was not checked against D-022's recorded outcome (--harness)")
     return dict(stage="1y", set=set_name, effects=eff, mechanism=mech, mechanism_d018=d018, outcome=out,
-                classification=cls, reports=reports, verdict=verdict, notes=notes, missing=missing, harness=hz)
+                classification=cls, reports=reports, verdict=verdict, notes=notes, missing=missing, harness=hz,
+                instances=list(insts), outside=[dict(instance=i, arm=a, seed=s, status=st) for i, a, s, st in outside],
+                expected=len(expected), not_run=not_run)
 
 
 def run_stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "backoff2", root: Path = ROOT,
@@ -1164,8 +1300,11 @@ def run_stage1y(runs: pd.DataFrame, inc: pd.DataFrame | None, set_name: str = "b
     """Stage 1y under a reading of the set's failed runs (D-023: "read as D-002 §6 keeps crashes, reported both
     ways"): "keep" (kept, truncated at the crash, as build-runs scores them), "exclude" (missing: the verdict is then
     INCOMPLETE) or "both" (the kept reading in full, the excluded reading's verdict and missing runs under
-    `exclude_reading`). Without failed runs the readings coincide and one is returned."""
-    sel = (runs["set"] == set_name) & (runs["status"] == "failed")
+    `exclude_reading`). Without failed runs the readings coincide and one is returned. Only the 11's failed runs at
+    seeds 0–1 are read either way; a failed run outside them is listed under `outside` (D-023 amendment 2026-10-13
+    and its clarification of 23:3x)."""
+    sel = ((runs["set"] == set_name) & (runs["status"] == "failed") & runs["instance"].isin(list(STAGE1Y))
+           & runs["seed"].isin(list(STAGE1_SEEDS)))
     failed_ids = sorted(runs.loc[sel, "run_id"].astype(str))
     if failed == "exclude" or not failed_ids:
         res = stage1y(runs, inc, set_name, root, stage0_set, harness)
@@ -1441,7 +1580,14 @@ def print_stage1(res: dict, out=sys.stdout) -> None:
 def print_stage1y(res: dict, out=sys.stdout) -> None:
     p = lambda *a: print(*a, file=out)  # noqa: E731
     p(f"Stage 1y (D-023, phase Y only) — {BOY} (active, no ladder) vs {CTRL1} (shadow control), same-day {A6F}, "
-      f"set {res['set']}")
+      f"set {res['set']}; {len(res['instances'])} instances ({AMEND_Y}): the nine {', '.join(Y_OUTCOME)} and, for F "
+      f"and the mechanism rules only, {', '.join(Y_FLOOR)}")
+    n_exp = res["expected"]
+    p(f"runs: {n_exp - len(res['missing'])} of {n_exp} (the {len(res['instances'])} x {{{BOY}, {CTRL1}, {A6F}}} x "
+      f"seeds {', '.join(map(str, STAGE1_SEEDS))})" + (f"; missing {res['missing'][:6]}" if res["missing"] else ""))
+    if res["outside"]:
+        p(f"outside the amended set, read by no rule ({len(res['outside'])} runs): "
+          + ", ".join(f"{r['instance']} {r['arm']} s{r['seed']} ({r['status']})" for r in res["outside"]))
     hz = res["harness"]
     p(f"harness: A9 arms {hz['a9'] or [g['harness'] for g in hz['a9_groups']]}, A6F ext"
       + (f" (D-022's outcome given: {hz['expect']})" if hz["expect"] else " (not checked against D-022's outcome)")
@@ -1451,7 +1597,8 @@ def print_stage1y(res: dict, out=sys.stdout) -> None:
     p("instance                       P ctrl  P boY   d       band   d ctrl|A6F d boY|A6F")
     for i, e in res["effects"].items():
         p(f"{i:<30} {_fmt(e['p_bo0']):<7} {_fmt(e['p_bo1']):<7} {_fmt(e['d']):<7} {_fmt(e['band'], 2):<6} "
-          f"{_fmt(e['d_bo0_vs_A6']):<10} {_fmt(e['d_bo1_vs_A6'])}")
+          f"{_fmt(e['d_bo0_vs_A6']):<10} {_fmt(e['d_bo1_vs_A6'])}"
+          + ("   (F and mechanism only: its d and band are read by no rule)" if i in Y_FLOOR else ""))
     m, d18 = res["mechanism"], res["mechanism_d018"]
     hold = lambda ok: "holds" if ok else "FAILS"  # noqa: E731
     bad1 = [(r["instance"], r["seed"], _fmt(r["exit_t"] - r["partner_t"] if _fin(r["exit_t"]) else math.nan, 2))
@@ -1487,19 +1634,36 @@ def print_stage1y(res: dict, out=sys.stdout) -> None:
       f"{hold(d18['M5']['ok'])} {b5}")
     o = res["outcome"]
     p(f"T: {hold(o['T']['ok'])} (chromaticindex d {_fmt(o['T']['d'])}, P {_fmt(o['T']['p_bo1'])})")
-    p(f"G: {hold(o['G']['ok'])} (guard mean d {_fmt(o['G']['mean_d'])}; neos-960392 dP "
+    def nr(k: str) -> str:
+        return (f"; not run ({AMEND_Y}): " + ", ".join(o[k]["not_run"])) if o[k].get("not_run") else ""
+    p(f"G: {hold(o['G']['ok'])} (guard mean d {_fmt(o['G']['mean_d'])} over "
+      f"{', '.join(o['G'].get('mean_over', GUARDS))}; neos-960392 dP "
       f"{_fmt(o['G']['neos960']['dP'])} >= {_fmt(o['G']['neos960']['limit'])}; failing "
-      f"{[r['instance'] for r in o['G']['rows'] if not r['ok']]}; noise {o['G']['noise']}; still beating A6F "
-      f"{[(b['instance'], b['ok']) for b in o['G']['still_beats_A6']]})")
-    p(f"ladder targets (a gate in 1y): {'hold' if o['ladder']['ok'] else 'FAIL'} "
-      f"(mean d {_fmt(o['ladder']['mean_d'])}; failing {[r['instance'] for r in o['ladder']['rows'] if not r['ok']]})")
-    p(f"F: {hold(o['F']['ok'])} ({[(r['instance'], _fmt(r['dP'], 4)) for r in o['F']['rows']]})")
+      f"{[r['instance'] for r in o['G']['rows'] if not r['ok']]}; noise {o['G']['noise']} (slept 0 s in phase Y on "
+      f"every boY run; exempts the own band / ΔP limit only); still beating A6F (binds every guard) "
+      f"{[(b['instance'], b['ok']) for b in o['G']['still_beats_A6']]}{nr('G')})")
+    for r in o["G"]["rows"]:
+        p(f"   {r['instance']}: d {_fmt(r['d'])} >= -band {_fmt(r['band'], 2)} {'ok' if r['ok'] else 'FAILS'}")
+    lad = ", ".join(f"{r['instance']} d {_fmt(r['d'])} band {_fmt(r['band'], 2)}" for r in o["ladder"]["rows"])
+    p(f"ladder targets (a gate in 1y): {'hold' if o['ladder']['ok'] else 'FAIL'} ({lad}; "
+      f"mean d {_fmt(o['ladder']['mean_d'])}; failing {[r['instance'] for r in o['ladder']['rows'] if not r['ok']]}"
+      f"{nr('ladder')})")
+    if o["F"]["ok"] is None:
+        p(f"F (floor |dP| <= {FLOOR_DP:g}): not run ({AMEND_Y}): {', '.join(o['F'].get('not_run', FLOOR))}")
+    else:
+        rule = (f"one-sided, P boY − P ctrl <= +{FLOOR_DP:g} ({AMEND_Y})" if o["F"].get("one_sided")
+                else f"|dP| <= {FLOOR_DP:g}")
+        p(f"F ({rule}): {hold(o['F']['ok'])} (dP = P ctrl − P boY: "
+          f"{[(r['instance'], _fmt(r['dP'], 4)) for r in o['F']['rows']]}{nr('F')})")
     for r in o["F"]["rows"]:
         p(f"   {r['instance']} seconds: " + ", ".join(f"{k} {_fmt(v, 2)}" for k, v in r["seconds"].items()))
-    p(f"mean guard (11 non-floor): {hold(o['mean_guard']['ok'])} (mean d {_fmt(o['mean_guard']['mean_d'])})")
+    p(f"mean guard (the nine, {o['mean_guard']['n']} with a d; was the 11 non-floor): "
+      f"{hold(o['mean_guard']['ok'])} (mean d {_fmt(o['mean_guard']['mean_d'])})")
+    for i, why in res["not_run"].items():
+        p(f"not run ({AMEND_Y}): {i} — {why}")
     rep = res["reports"]
     for b, v in rep["d013"].items():
-        p(f"D-013 {b}: weak set {v['weak_set']}; " + "; ".join(
+        p(f"D-013 {b} (the nine): weak set {v['weak_set']}; " + "; ".join(
             f"{arm}: improved {v[arm]['improved']}, P {_fmt(v[arm]['mean_P_B'])} -> {_fmt(v[arm]['mean_P_arm'])}, "
             f"mean d {_fmt(v[arm]['mean_d_weak'])}, worst {_fmt(v[arm]['worst_P'])}, all-mean d "
             f"{_fmt(v[arm]['mean_d_all'])}" for arm in (CTRL1, BOY)))
@@ -1537,7 +1701,11 @@ def main(argv: list[str] | None = None) -> int:
                                  "of D-018 and stage 1y (D-023, phase Y only) applied to the run table and the run "
                                  "directories")
     ap.add_argument("--stage", choices=("0", "1", "1y"), required=True,
-                    help="0 / 1: D-018's calibration and test; 1y: D-023 (A9@boY vs A9@bo1s + A6F, set backoff2)")
+                    help="0 / 1: D-018's calibration and test; 1y: D-023 (A9@boY vs A9@bo1s + A6F, set backoff2) on "
+                         "the 11 of its amendment of 2026-10-13 (66 runs: the outcome rules on the nine, F one-sided "
+                         "on krka / fhnw; comp21-2idx, glass4 and radiationm18 not run, their rules printed as such; "
+                         "other instances, and the 11 at other seeds, are named and read by no rule; G's noise = no sleep in "
+                         "phase Y, 'still beats A6F' binds — the 23:3x clarification)")
     ap.add_argument("--set", dest="set_", default=None, help="run set (default backoff0 / backoff1 / backoff2)")
     ap.add_argument("--stage0-set", default="backoff0", help="stage 1 / 1y: the stage-0 set (ca's class-(Y) fallback)")
     ap.add_argument("--runs", default=str(DATASETS / "runs.parquet"))
