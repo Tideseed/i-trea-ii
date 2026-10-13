@@ -27,11 +27,12 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs smoke --instance /tmp/toy.mps --arms A0,A1 --out /tmp/smoke.jsonl
     python -m itrea.experiments.make_jobs backoff0 --out jobs/dev-backoff0.jsonl
     python -m itrea.experiments.make_jobs backoff1 --seeds 0 --out jobs/dev-backoff1-s0.jsonl   (and --seeds 1)
-    python -m itrea.experiments.make_jobs backoff2 --harness ext|r13-off --seeds 0 --out jobs/dev-backoff2-s0.jsonl
+    python -m itrea.experiments.make_jobs backoff2 --harness ext --out jobs/backoff2.jsonl   (D-023 amended: 66 runs)
     python -m itrea.experiments.make_jobs itx-r13f --instances a,b|all --out jobs/itx-r13f.jsonl   (D-022 follow-up)
     python -m itrea.experiments.make_jobs mipfeas-cal [--out jobs/mipfeas-cal-26.08.jsonl]
     python -m itrea.experiments.make_jobs itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13   [--out jobs/itx-<k>.jsonl]
     python -m itrea.experiments.make_jobs itx-a0 | itx-m6 | itx-m6a                       [--out jobs/itx-<k>.jsonl]
+    python -m itrea.experiments.make_jobs itx-a0 --select d024 [--out jobs/itx-a0-81.jsonl]     (D-024 (f): 81 runs)
     python -m itrea.experiments.make_jobs itx-v1 --tier T1 [--cuopt 26.10] --out FILE
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
@@ -41,11 +42,15 @@ and glass4 x A9@bo0, and sing44 x A2 (SCIP || cuOpt, zero EA duty: rule (b)'s sa
 configuration files configs/itrea2-dev-rc-3way-<variant>.yaml (the runner adds exchange.from_cuopt); A6 and A2 run no
 EA (config null). Instance paths come from datasets/dev_set.csv and datasets/classprobe_set.csv.
 
-`backoff2` writes D-023's test (A9 back-off, phase Y only): D-018 stage 1's 14 instances x seeds x {A9@boY, A9@bo1s,
-A6F}, 120 s, set `backoff2`, one block per instance x seed (42 runs per seed; jobs/dev-backoff2-s0.jsonl, -s1.jsonl).
-`--harness` is required and is D-022's outcome, carried by both A9 arms: `ext` (R13 + R14 adopted) or `r13-off`
-(rejected: the ext harness with cuOpt's default gaps and its thread variables kept); A6F runs under `ext` either way
-(D-021 R13: gaps 0 for every cuOpt process; R6: A6F is our cuOpt alone; D-022's reject clause covers only A9's rows).
+`backoff2` writes D-023's test (A9 back-off, phase Y only), as amended on 2026-10-13 before any run (D-024 rule 5): the
+11 instances of `analysis.backoff.STAGE1Y` (the nine of its outcome rules — where phase Y slept in D-018 stage 1, M3's
+four, toguru, sing44 — and the floor instances krka and fhnw, where it slept too) x seeds x {A9@boY, A9@bo1s, A6F},
+120 s, set `backoff2`, one block per instance x seed (33 runs per seed, 66 for seeds 0-1; jobs/backoff2.jsonl);
+`--instances stage1` writes D-018 stage 1's 14 (D-023 as first written: 84), `--instances a,b` named development
+instances (`backoff-report --stage 1y` reads only the 11 and names any other). `--harness` is required and is D-022's
+outcome, carried by both A9 arms: `ext` (R13 + R14 adopted — D-022's verdict of 2026-10-13) or `r13-off` (rejected: the
+ext harness with cuOpt's default gaps and its thread variables kept); A6F runs under `ext` either way (D-021 R13: gaps 0
+for every cuOpt process; R6: A6F is our cuOpt alone; D-022's reject clause covers only A9's rows).
 
 `itx-r13f` writes D-022's INCONCLUSIVE follow-up (its clarification of 2026-10-12): the instances the seeds 0-1 report
 names (`--instances a,b` or `all`) x seeds 2-3 x the same three arms and harnesses as `itx-r13`, 120 s, set `itx-r13f`.
@@ -74,7 +79,11 @@ D-021 phase 2 (`itx-v1`, `itx-a0`, `itx-m6`, `itx-m6a`; the instance sets from d
 tiers T1–T5 (`itx_v1`: blocks {A9, A6F} at seed 2000, T4 the panel at 2001, T5 live A2F on the panel at 2000 in its
 own blocks; the `itx1` harness, 600 s, split "ext", variant v1c<cuOpt tag>, sets itx-t1 … itx-t5 for cuOpt 26.10 —
 written only once 26.10 is in, `--out` has no default), A0 on the 230 (`itx_a0`, jobs/itx-a0.jsonl: H_cu ∪ W_SCIP
-unseen first by the jobs' `priority`) and M6 (`itx_m6` / `itx_m6a`, jobs/itx-m6.jsonl, jobs/itx-m6a.jsonl).
+unseen first by the jobs' `priority`) and M6 (`itx_m6` / `itx_m6a`, jobs/itx-m6.jsonl, jobs/itx-m6a.jsonl). D-024 (f)
+(Berk 2026-10-13: "Yes, 81"): `itx-a0 --select d024` writes only the 81 (H_cu ∪ W_SCIP unseen), the v1 stage-1
+instances first (priority 0: the 20-instance panel + the 5 H_cu-unseen instances where cuOpt finds no solution,
+`v1_stage1_mask`; priority 1: the other 56) — jobs/itx-a0-81.jsonl, the same jobs and run ids as those 81 lines of
+jobs/itx-a0.jsonl —; `--select stage1` only the 25 (D-024 (f) after "no hint").
 """
 from __future__ import annotations
 
@@ -122,6 +131,7 @@ BACKOFF2_SET, BACKOFF2_BUDGET = "backoff2", 120.0
 BACKOFF2_VARIANTS = ("boY", "bo1s")
 BACKOFF2_A6 = "A6F"                         # cuOpt alone at A9's footprint (D-021); it needs a harness
 BACKOFF2_HARNESS = ("ext", "r13-off")      # -> ITX_EXT / ITX_R13_CONTROL for the two A9 arms (`backoff2`); A6F: ext
+BACKOFF2_AMENDED = "amended"               # D-023's amendment of 2026-10-13: analysis.backoff.STAGE1Y (11 instances)
 # D-022's INCONCLUSIVE follow-up (clarification 2026-10-12): seeds 2-3 of the named instances, its own set
 ITX_R13F_SET, ITX_R13F_SEEDS = "itx-r13f", (2, 3)
 INSTANCE_TABLES = ("datasets/dev_set.csv", "datasets/classprobe_set.csv")
@@ -153,6 +163,7 @@ ITX_A9_FROZEN = FROZEN_V2_CONFIG                     # A9's v1 configuration: th
 ITX_CUOPT = "26.10"                                  # v1's cuOpt (D-019); another version gets its own set and variant
 ITX_TIERS = ("T1", "T2", "T3", "T4", "T5")
 ITX_A0_SET, ITX_A0_VARIANT = "itx-a0", "v1"
+ITX_A0_SELECT = {"all": "jobs/itx-a0.jsonl", "d024": "jobs/itx-a0-81.jsonl", "stage1": "jobs/itx-a0-25.jsonl"}
 # M6: SCIP's node throughput alone vs beside 3 busy lanes on 3 development instances x 60 s (the fastest-node ones
 # that SCIP does not solve in 120 s: 1,251 / 897 / 575 nodes/s in the development A0 runs), inside 30+ min of 4 busy
 # lanes (the other 14 development / class-probe instances x 600 s)
@@ -546,22 +557,34 @@ def backoff_stage1(seeds=(0, 1), budget: float = BACKOFF1_BUDGET, set_: str = BA
 
 
 def backoff2(seeds=(0, 1), harness=None, budget: float = BACKOFF2_BUDGET, set_: str = BACKOFF2_SET,
-             tables=INSTANCE_TABLES) -> list[dict]:
-    """D-023 (A9 back-off, phase Y only): D-018 stage 1's 14 instances (`analysis.backoff.STAGE1`) x seeds x {A9@boY
-    (configs/itrea2-dev-rc-3way-boY.yaml: bo1's values, active, the ladder disabled by unbounded patience), A9@bo1s (the
-    control: bo1's values in shadow mode), A6F (cuOpt alone on A9's footprint F)}, 120 s, one block per instance x seed
-    (84 runs for seeds 0-1). `harness` is D-022's outcome and goes on the two A9 arms: "ext" (D-022 adopts R13 + R14)
+             tables=INSTANCE_TABLES, instances=None) -> list[dict]:
+    """D-023 (A9 back-off, phase Y only), as amended on 2026-10-13 (D-024 rule 5): the 11 instances of
+    `analysis.backoff.STAGE1Y` (default; `instances` = "stage1" for D-018 stage 1's 14, "amended" for the 11, or a
+    sequence of development instance names) x seeds x {A9@boY (configs/itrea2-dev-rc-3way-boY.yaml: bo1's values,
+    active, the ladder disabled by unbounded patience), A9@bo1s (the control: bo1's values in shadow mode), A6F (cuOpt
+    alone on A9's footprint F)}, 120 s, one block per instance x seed (66 runs for seeds 0-1; 84 with "stage1").
+    `harness` is D-022's outcome and goes on the two A9 arms: "ext" (D-022 adopts R13 + R14 — its verdict of 2026-10-13)
     or "r13-off" (rejects: ext with cuOpt's default gaps and its thread variables kept), or a harness spec as
     `pair.resolve_harness` takes it. A6F runs under ext in either case: D-022's reject clause covers only A9's rows,
-    D-021 R13 sets gaps 0 for every cuOpt process and R6 makes A6F our cuOpt alone, so A6F's runs (and run ids) are
-    the same under both outcomes. No default: the file is written once D-022 has decided."""
-    from itrea.analysis.backoff import STAGE1
+    D-021 R13 sets gaps 0 for every cuOpt process and R6 makes A6F our cuOpt alone, so A6F's runs (and run ids) are the
+    same under both outcomes. No default: the file is written once D-022 has decided."""
+    from itrea.analysis.backoff import STAGE1, STAGE1Y
     if harness is None:
         raise JobError("backoff2 needs the harness of D-022's outcome (ext or r13-off)")
+    if instances is None or instances == BACKOFF2_AMENDED:
+        names = STAGE1Y
+    elif instances == "stage1":
+        names = STAGE1
+    elif isinstance(instances, str):
+        raise JobError(f"backoff2 --instances: {BACKOFF2_AMENDED!r}, 'stage1' or a list of names, not {instances!r}")
+    else:
+        names = tuple(dict.fromkeys(instances))
+        if not names:
+            raise JobError("backoff2: no instances")
     spec = {"ext": ITX_EXT, "r13-off": ITX_R13_CONTROL}.get(harness, harness) if isinstance(harness, str) else harness
-    where = instance_paths(STAGE1, tables)
+    where = instance_paths(names, tables)
     out = []
-    for n in STAGE1:
+    for n in names:
         for seed in seeds:
             common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}")
             for v in BACKOFF2_VARIANTS:
@@ -776,22 +799,47 @@ def itx_v1(tier: str, cuopt: str = ITX_CUOPT, strata=None, a9_config: str = ITX_
     return _sorted(out)
 
 
+def v1_stage1_mask(df):
+    """D-024 (a), Berk's "Yes, stage it" (2026-10-13 15:5x): v1's external stage 1 = the 20-instance repeatability panel
+    plus the H_cu-unseen instances where cuOpt finds no solution (GAMS's cuOpt-GB10 `pt_gams` = 2, `p_cuopt` >=
+    itx_strata.NO_SOLUTION; bnatt400, neos-3216931-puriri, peg-solitaire-a3, supportcase19, supportcase22), the
+    does-not-fit list excluded — 25 on the committed strata table. A boolean mask over a strata table's rows."""
+    from itrea.analysis.itx_strata import NO_SOLUTION
+    return df["panel"] | (df["unseen"] & df["H_cu"] & ~df["does_not_fit"] & (df["p_cuopt"] >= NO_SOLUTION))
+
+
 def itx_a0(strata=None, budget: float = ITX_V1_BUDGET, seed: int = ITX_V1_SEED, set_: str = ITX_A0_SET,
-           data: Path | None = None) -> list[dict]:
+           data: Path | None = None, select: str = "all") -> list[dict]:
     """D-021's A0 = SCIP alone on one X925 core (R7), harness-matched to A9's SCIP (the `itx1` harness, R12's stop
-    included): the 233 minus the does-not-fit list (230) x 600 s, seed 2000, split "ext" (A0 may run before prereg-v2,
-    R33: only validity is read), label A0@v1, one block per instance. H_cu ∪ W_SCIP unseen first (`priority` 0: what
-    the decisions on A0 need — the computed race on H_cu-unseen and A9 vs A0 on W_SCIP-unseen), the rest after
-    (priority 1); inside each, the pool's seeded order, strata interleaved. CPU-only: run on 4 single-core X925 lanes
-    (`--layout screen --cpu-lanes 4`, or 3 if M6 says so), both model servers stopped (a harness)."""
+    included), 600 s, seed 2000, split "ext" (A0 may run before prereg-v2, R33: only validity is read), label A0@v1, one
+    block per instance. `select` "all" (D-021): the 233 minus the does-not-fit list (230), H_cu ∪ W_SCIP unseen first
+    (`priority` 0: what the decisions on A0 need — the computed race on H_cu-unseen and A9 vs A0 on W_SCIP-unseen), the
+    rest after (priority 1). "d024" (D-024 (f), Berk 2026-10-13 "Yes, 81"): only those 81, v1's stage-1 instances first
+    (`v1_stage1_mask`: priority 0, 25) and the other 56 after (priority 1) — the same jobs, so the same run ids, as
+    the 81 of "all". "stage1" (D-024 (f) after "no hint"): only the 25, priority 0. Inside a priority, the pool's
+    seeded order, strata interleaved. CPU-only: run on 4 single-core X925 lanes (`--layout screen --cpu-lanes 4`, or 3
+    if M6 says so), both model servers stopped (a harness)."""
     from itrea.analysis.itx_strata import STRATA_CSV, read_strata
+    if select not in ITX_A0_SELECT:
+        raise JobError(f"itx-a0 --select must be one of {', '.join(ITX_A0_SELECT)}, not {select!r}")
     df = read_strata(strata or STRATA_CSV)
     rows = df[~df["does_not_fit"]]
+    decide = rows["unseen"] & (rows["H_cu"] | rows["W_SCIP"])
+    stage1 = v1_stage1_mask(rows)
+    if select != "all" and (stage1 & ~decide).any():
+        raise JobError(f"v1's stage-1 instances outside H_cu ∪ W_SCIP unseen: {sorted(rows[stage1 & ~decide]['name'])}")
+    if select == "d024":
+        rows = rows[decide]
+    elif select == "stage1":
+        rows = rows[stage1]
     where = _miplib_paths(sorted(rows["name"]), data)
     out = []
     for _, r in rows.sort_values("name").iterrows():
         n = r["name"]
-        first = bool(r["unseen"] and (r["H_cu"] or r["W_SCIP"]))
+        if select == "all":
+            first = bool(r["unseen"] and (r["H_cu"] or r["W_SCIP"]))
+        else:
+            first = bool(stage1[r.name])
         out.append(job(where[n], set_, "A0", seed, budget, name=n, config=None, stratum=itx_stratum(r),
                        split=EXT_SPLIT, block=f"{n}__s{int(seed)}__{set_}", variant=ITX_A0_VARIANT,
                        harness=ITX_V1_HARNESS, priority=0 if first else 1))
@@ -879,12 +927,16 @@ def main(argv=None) -> int:
     b1.add_argument("--seeds", default="0,1", help="comma-separated (one window per seed: 0, then 1)")
     for p in (s1, s2, e1, e4, cf, sm, b0, b1):
         p.add_argument("--out", required=True, type=Path)
-    b2 = sub.add_parser("backoff2", help="D-023: A9@boY (phase Y only) vs A9@bo1s + A6F under D-022's harness "
-                                         "(42 runs per seed)")
+    b2 = sub.add_parser("backoff2", help="D-023 (amended 2026-10-13): A9@boY (phase Y only) vs A9@bo1s + A6F under "
+                                         "D-022's harness on its 11 instances (33 runs per seed)")
     b2.add_argument("--harness", required=True, choices=BACKOFF2_HARNESS,
                     help="D-022's outcome, for both A9 arms: ext (R13 + R14 adopted) or r13-off (rejected: cuOpt's "
                          "default gaps and thread variables); A6F stays ext per D-021 R13 / R6")
-    b2.add_argument("--seeds", default="0,1", help="comma-separated (jobs/dev-backoff2-s0.jsonl, -s1.jsonl)")
+    b2.add_argument("--seeds", default="0,1", help="comma-separated (default 0,1: jobs/backoff2.jsonl)")
+    b2.add_argument("--instances", default=BACKOFF2_AMENDED,
+                    help=f"{BACKOFF2_AMENDED} (default): the 11 of D-023's amendment of 2026-10-13 "
+                         "(analysis.backoff.STAGE1Y); stage1: D-018 stage 1's 14 (D-023 as first written); or "
+                         "comma-separated development instance names")
     b2.add_argument("--budget", type=float, default=BACKOFF2_BUDGET)
     b2.add_argument("--out", required=True, type=Path)
     rf = sub.add_parser("itx-r13f", help="D-022's INCONCLUSIVE follow-up: the named instances x seeds 2-3 x itx-r13's "
@@ -906,17 +958,23 @@ def main(argv=None) -> int:
                        "(102 runs)"}
     itx_help.update({
         "a0": "D-021 A0 (SCIP alone, itx1 harness): the 233 minus the does-not-fit list x 600 s, seed 2000, H_cu ∪ "
-              "W_SCIP unseen first (230 runs; 4 CPU lanes: --layout screen --cpu-lanes 4)",
+              "W_SCIP unseen first (230 runs; 4 CPU lanes: --layout screen --cpu-lanes 4); --select d024: only "
+              "those 81, v1's stage-1 25 first (D-024 (f)); --select stage1: the 25",
         "m6": "D-021 M6: 14 development loads x 600 s + 3 measured x 60 s beside 3 busy lanes (17 runs; "
               "--layout screen --cpu-lanes 4)",
         "m6a": "D-021 M6's reference: the 3 measured instances x 60 s alone (3 runs; --layout screen --cpu-lanes 1)"})
     itx = {k: sub.add_parser(f"itx-{k}", help=h) for k, h in itx_help.items()}
     for k, p in itx.items():
-        p.add_argument("--out", type=Path, default=paths.ROOT / ITX_OUT[k])
+        p.add_argument("--out", type=Path, default=None if k == "a0" else paths.ROOT / ITX_OUT[k],
+                       help=f"default {ITX_OUT[k]}" + (" (--select d024: jobs/itx-a0-81.jsonl, stage1: "
+                                                      "jobs/itx-a0-25.jsonl)" if k == "a0" else ""))
         if k in ("m3", "m4", "m5", "a0"):
             p.add_argument("--data", type=Path, default=paths.DATA)
         if k == "a0":
             p.add_argument("--strata", type=Path, default=None, help="default datasets/mipfeas_strata.csv")
+            p.add_argument("--select", choices=tuple(ITX_A0_SELECT), default="all",
+                           help="all: the 230 (D-021), H_cu ∪ W_SCIP unseen first; d024: only those 81, v1's stage-1 "
+                                "25 first (D-024 (f), Berk 2026-10-13); stage1: only the 25 (D-024 (f), no hint)")
     v1 = sub.add_parser("itx-v1", help="D-021 v1 external tier T1..T5 ({A9, A6F} x seed 2000; T4 the panel at 2001; "
                                        "T5 live A2F on the panel), itx1 harness, 600 s, split ext")
     v1.add_argument("--tier", required=True, choices=ITX_TIERS)
@@ -951,7 +1009,9 @@ def main(argv=None) -> int:
         elif a.cmd == "backoff1":
             jobs = backoff_stage1(tuple(int(x) for x in a.seeds.split(",") if x), a.budget)
         elif a.cmd == "backoff2":
-            jobs = backoff2(tuple(int(x) for x in a.seeds.split(",") if x), a.harness, a.budget)
+            sel = a.instances if a.instances in (BACKOFF2_AMENDED, "stage1") else \
+                [x for x in a.instances.split(",") if x]
+            jobs = backoff2(tuple(int(x) for x in a.seeds.split(",") if x), a.harness, a.budget, instances=sel)
         elif a.cmd == "itx-r13f":
             jobs = itx_r13_followup([x for x in a.instances.split(",") if x])
         elif a.cmd == "mipfeas-cal":
@@ -969,7 +1029,8 @@ def main(argv=None) -> int:
         elif a.cmd == "itx-r13":
             jobs = itx_r13()
         elif a.cmd == "itx-a0":
-            jobs = itx_a0(a.strata, data=a.data)
+            jobs = itx_a0(a.strata, data=a.data, select=a.select)
+            a.out = a.out or paths.ROOT / ITX_A0_SELECT[a.select]
         elif a.cmd == "itx-m6":
             jobs = itx_m6()
         elif a.cmd == "itx-m6a":

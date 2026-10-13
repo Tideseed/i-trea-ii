@@ -371,3 +371,46 @@ def test_itx_a0_and_m6(tmp_path):
     assert {j["name"] for j in m6a} == set(mj.ITX_M6_MEASURED) and {j["variant"] for j in m6a} == {"m6a"}
     ids = [pair.run_id_for(j) for j in a0 + m6 + m6a]
     assert len(set(ids)) == len(ids)
+
+
+def test_itx_a0_d024_selection(tmp_path):
+    """D-024 (f) (Berk 2026-10-13: "Yes, 81"): `itx-a0 --select d024` = only H_cu ∪ W_SCIP unseen (81), v1's stage-1
+    instances first — priority 0: the 20-instance panel + the 5 H_cu-unseen instances where cuOpt finds no solution
+    (D-024 (a)), priority 1: the other 56 — the same jobs (so run ids) as those 81 lines of the 230; `--select stage1`
+    the 25 alone; the 230 unchanged."""
+    from itrea.analysis.itx_strata import read_strata
+    from itrea.experiments import pair
+    from itrea.experiments.pool import order_blocks
+    data = _strata_data(tmp_path / "data")
+    df = read_strata()
+    st1 = set(df[mj.v1_stage1_mask(df)]["name"])
+    five = {"bnatt400", "neos-3216931-puriri", "peg-solitaire-a3", "supportcase19", "supportcase22"}
+    assert len(st1) == 25 and five <= st1 and st1 - five == set(df[df["panel"]]["name"])
+    every = mj.itx_a0(data=data)
+    a81 = mj.itx_a0(data=data, select="d024")
+    assert len(a81) == 81 and {j["priority"] for j in every if j["name"] in {x["name"] for x in a81}} == {0}
+    assert [{k: v for k, v in j.items() if k != "priority"} for j in a81] == \
+        [{k: v for k, v in j.items() if k != "priority"} for j in every if j["priority"] == 0]
+    assert {j["name"] for j in a81 if j["priority"] == 0} == st1 and sum(j["priority"] == 1 for j in a81) == 56
+    assert [b.priority for b in order_blocks(make_blocks(a81))] == [0] * 25 + [1] * 56
+    assert {pair.run_id_for(j) for j in a81} == {pair.run_id_for(j) for j in every if j["priority"] == 0}
+    a25 = mj.itx_a0(data=data, select="stage1")
+    assert {j["name"] for j in a25} == st1 and {j["priority"] for j in a25} == {0}
+    assert len(every) == 230 and sum(j["priority"] == 0 for j in every) == 81            # "all" unchanged
+    with pytest.raises(mj.JobError, match="select"):
+        mj.itx_a0(data=data, select="81")
+    out = tmp_path / "a81.jsonl"
+    assert mj.main(["itx-a0", "--select", "d024", "--data", str(data), "--out", str(out)]) == 0
+    assert [json.loads(x) for x in out.read_text().splitlines()] == a81
+    assert mj.ITX_A0_SELECT["d024"] == "jobs/itx-a0-81.jsonl" and "a0-81" not in mj.ITX_OUT
+
+
+def test_itx_a0_81_file_is_the_writers_output(tmp_path):
+    """jobs/itx-a0-81.jsonl (D-024 (f), first written 2026-10-13 by a throwaway script from jobs/itx-a0.jsonl) is
+    exactly `make-jobs itx-a0 --select d024` (skipped without the instances)."""
+    from itrea.analysis.itx_strata import read_strata
+    if not all((paths.DATA / "miplib" / "inst" / f"{n}.mps.gz").is_file() for n in read_strata()["name"]):
+        pytest.skip("the MIPLIB 2017 instances are not under data/")
+    out = tmp_path / "a81.jsonl"
+    assert mj.main(["itx-a0", "--select", "d024", "--out", str(out)]) == 0
+    assert out.read_bytes() == (paths.ROOT / "jobs" / "itx-a0-81.jsonl").read_bytes()
