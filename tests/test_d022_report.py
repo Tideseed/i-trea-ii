@@ -865,3 +865,21 @@ def test_a_missing_or_failed_rule_set_run_changes_the_d022_verdict(tmp_path):
     assert by["exclude"]["verdict"].startswith("INCOMPLETE")
     assert by["keep"]["verdict"].startswith("ADOPT") and "1 failed runs kept as D-002 §6" in by["keep"]["verdict"]
     assert by["keep"]["c1_completeness"]["complete"] and not by["exclude"]["c1_completeness"]["complete"]
+
+
+def test_gaps_from_the_runner_cmd_when_cuopt_was_killed(tmp_path):
+    """A cuOpt process the runner stopped after a partner's proof writes no summary (no interrupt API; with gaps 0 it
+    does not stop on its own — fhnw / krka A9@r13x, 2026-10-13): its gap setting is read from the runner's record of
+    its command line (--mip-gap-zero present = gaps 0, absent = default), not counted as wrong."""
+    import json as _json
+    for flag, want in ((True, "zero"), (False, "default")):
+        d = tmp_path / ("z" if flag else "d")
+        d.mkdir()
+        cmd = ["taskset", "-c", "1,2,3", "python", "-m", "itrea.solvers.cuopt_run"] + (["--mip-gap-zero"] if flag else [])
+        rj = dict(base_arm="A9", processes=[dict(role="solver", exit_t=13.6), dict(role="ea", exit_t=14.2),
+                                            dict(role="cuopt", exit_t=84.0, stopped_by_runner=True, killed="SIGKILL",
+                                                 cmd=cmd, cpu_user_s=200.0, cpu_sys_s=1.0)])
+        (d / "run.json").write_text(_json.dumps(rj))
+        x = D.run_info(dict(run_dir=str(d), arm="A9@r13x"), tmp_path)
+        assert x["settings_from"].startswith("runner cmd")
+        assert x["gap_zero"] is (want == "zero") and x["gap_default"] is (want == "default")

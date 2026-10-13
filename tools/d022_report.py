@@ -254,6 +254,14 @@ def run_info(row: dict, root: Path) -> dict:
     if base == "A9" and (cupy or es.get("compiled_on_clock")):
         compiled.append("CuPy cache")
     st = cs.get("settings") if isinstance(cs.get("settings"), dict) else None
+    settings_from = "summary" if st is not None else None
+    if st is None and cu.get("stopped_by_runner") and isinstance(cu.get("cmd"), list):
+        # cuOpt killed by the runner after a partner's proof writes no summary (no interrupt API; with gaps 0 it does
+        # not stop on its own — found 2026-10-13 on fhnw / krka A9@r13x): the gaps come from the runner's own record
+        # of its command line, which carries --mip-gap-zero exactly when the harness set it.
+        gz = "--mip-gap-zero" in cu["cmd"]
+        st = dict(mip_absolute_gap=0.0, mip_relative_gap=0.0) if gz else {}
+        settings_from = "runner cmd (cuOpt stopped by the runner, no summary)"
     gaps = None if st is None else (st.get("mip_absolute_gap"), st.get("mip_relative_gap"))
     exits = {x.get("role"): x.get("exit_t") for x in procs if isinstance(x, dict)}
     t_cu = exits.get("cuopt")
@@ -265,7 +273,7 @@ def run_info(row: dict, root: Path) -> dict:
             harness = json.loads(row["harness"])
         except ValueError:
             harness = None
-    return dict(dir=str(d), base_arm=base, compiled=compiled, settings=st, gaps=gaps,
+    return dict(dir=str(d), base_arm=base, compiled=compiled, settings=st, settings_from=settings_from, gaps=gaps,
                 gap_zero=bool(gaps is not None and gaps[0] == 0.0 and gaps[1] == 0.0),
                 gap_default=bool(st is not None and "mip_absolute_gap" not in st and "mip_relative_gap" not in st),
                 env_unset=sorted(cu.get("env_unset") or []), cuopt_exit=cs.get("exit_reason"), cuopt_exit_t=t_cu,
