@@ -38,7 +38,8 @@ experimentation methodology."** (14:5x): **"If the box is idle make the most of 
   1's traces — chromaticindex1024-7, ca__Scenario400_reserves_1, neos-3656078-kumeu, neos-4763324-toguru) plus M3's four
   (item_placement_9903, neos-3024952-loue, neos-960392, neos-2657525-crna) and sing44 (above its band in stage 1),
   × {boY, bo1s, A6F} × seeds 0–1 = 54 runs (was 84). Dropped and stated: the floor instances (inert) and the 11-instance
-  mean over instances not run; the outcome rules read over the 9.
+  mean over instances not run; the outcome rules read over the 9. (amended 2026-10-13, see D-023: on the phase-Y
+  evidence, 11 instances, 66 runs — also in place of the Box-time row's 54.)
 
 ## v1, proposed (waits for Berk; D-021 stands until then)
 - **(a) Stage 1 of the external set:** the 20-instance panel **plus the 5 H_cu-unseen instances where cuOpt finds no
