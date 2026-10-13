@@ -19,7 +19,8 @@ description: >
 - Since 2026-10-06 the algorithm is developed on the development set and the class-probe instances (D-010, judged on
   the coupled arm, D-011). A development test is a decision record D-NNN written before any run: one variable, the
   mechanism and outcome rules with per-instance noise bands, and a control re-run in the same window under a fresh
-  variant name (`rc1d`, `rc1e`) so earlier runs are not reused; amendments are dated and made before the first run.
+  variant name (`rc1d`, `rc1e`) so earlier runs are not reused; amendments are dated and made before the first run
+  — or, under D-024, while runs execute but before any run of the set is read (stated as such; below).
 - **Staged testing (D-024, Berk 2026-10-13: "Shall we do targeted and surgical tests? and only if we see hints of
   improvement we can go wider"; "always aim for performance runs unless something structural is buggy in our
   experimentation methodology"; "If the box is idle make the most of it").** Before writing the job file:

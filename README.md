@@ -93,8 +93,9 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
     −0.033 [−0.122, +0.050] — kept as an option (`ranks.rank1_mode`, off by default), not adopted.
   - A9 GPU back-off (`D-018`): stage 0 (18 runs) gave PROCEED; **stage 1 (84 runs, 2026-10-11) NOT ADOPTED** — every
     outcome rule held (chromaticindex1024-7: A9's P 0.545 → 0.091, cuOpt alone 0.083; back-off vs its shadow control
-    9 better / 5 worse, mean d +0.083 [−0.054, +0.232]) but the mechanism failed (M1, M3, M5: the duty ladder stepped
-    the EA down while it still led). Its phase Y alone (yield until cuOpt's first incumbent, then full duty) is the
+    9 better / 5 worse, mean d +0.083 [−0.054, +0.232]) but the mechanism failed (M3: the duty ladder stepped the EA down
+    while it still led; M1: phase Y ended 0.56 / 0.80 s after cuOpt's first incumbent on toguru, limit 0.5 s; M5:
+    more local-search cap hits per call on ca and item_placement). Its phase Y alone (yield until cuOpt's first incumbent, then full duty) is the
     next test (`D-023`, not run yet).
 - **External harness** (`D-020`, `D-021`). GAMS's published MIPfeas archive is on disk and its primal integral is
   ported exactly (equal to GAMS's own function on all 3,495 of its traces). ITX-1's footprint F passed its thermal soak
