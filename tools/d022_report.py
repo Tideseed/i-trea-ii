@@ -96,8 +96,9 @@ of n and worse, mean P before -> after (and its relative reduction), mean d with
 coupling, and the instances `stats.compare` would leave out (both P = 1 on every seed). The same numbers on each
 baseline's weak set re-read on these runs (A6F@r13x P >= 0.5; A0 P >= 0.5; seed means). Its completeness line: the
 runs of set (b) present, missing (failed runs are missing under `exclude`, kept under `keep`), without P(120), and
-A0's runs on set (b). Caveats printed with it: set (b) was chosen on earlier 3-core A6 runs; cuOpt's weak set is
-selected on the same runs it is compared with; the A0 runs are from earlier days.
+A0's runs on set (b); the block reads what is there (seed means over the seeds present: an instance with a missing
+run is read on its other seed). Caveats printed with it: set (b) was chosen on earlier 3-core A6 runs; cuOpt's weak
+set is selected on the same runs it is compared with; the A0 runs are from earlier days.
 
 Failed runs: both readings (`--failed both`, the default; produced when the readings' own runs — the rule set's, set
 (b)'s, the follow-up's — include a failed one) — `exclude` (the letter: a failed run is missing, the verdict
@@ -718,8 +719,8 @@ def _c1_completeness_line(c: dict, keep: bool) -> str:
             + f"; without P(120) {len(c['no_p'])}" + (f" {c['no_p'][:6]}" if c["no_p"] else "")
             + f"; A0 (dev / classprobe) {c['n_a0']} of {c['n_a0_expected']}"
             + (f", missing {c['a0_missing'][:6]}" if c["a0_missing"] else "")
-            + (" — complete" if c["complete"] and not c["a0_missing"] else " — INCOMPLETE (the C1 block reads what is "
-               "there; D-022's verdict is not affected)"))
+            + (" — set (b) complete" if c["complete"] else " — set (b) INCOMPLETE (the C1 block reads what is there; "
+               "D-022's verdict is not affected)"))
 
 
 def print_report(res: dict, out=sys.stdout) -> None:

@@ -634,7 +634,7 @@ def test_default_sets_are_the_job_files():
     assert set(D.RULE_INSTANCES) <= dev and set(D.C1_INSTANCES) <= dev
 
 
-def test_58_run_layout_gives_a_complete_verdict_and_a_complete_c1_block(tmp_path, monkeypatch):
+def test_58_run_layout_gives_a_complete_verdict_and_a_complete_c1_block(tmp_path):
     """The defaults on the 58-run layout: the rule reads the 18 runs of the 3 (ADOPT, validity holding, mean over the
     3; the header says the other 14 are not run), C1 reads its 44 (complete, A0 22 of 22): A9@r13x 0.4 vs A6F 0.6 on
     all 11 and A0 0.9 on all 11 — improved 11 of 11 against both; A6F's weak set on these runs = all 11."""
@@ -660,7 +660,7 @@ def test_58_run_layout_gives_a_complete_verdict_and_a_complete_c1_block(tmp_path
     txt = text(res)
     assert "The other 14 development + class-probe instances are not run: R13 cannot act there" in txt
     assert "mean d over the 3 of the rule set" in txt and "44 of 44 runs" in txt and "A0 (dev / classprobe) 22 of 22" \
-        in txt and "— complete" in txt and "VERDICT (exclude): ADOPT" in txt
+        in txt and "— set (b) complete" in txt and "VERDICT (exclude): ADOPT" in txt
     assert "all 11: improved 11 of 11, mean P 0.600 -> 0.400 (-33 %), worse 0" in txt
     # the CLI's defaults are the same two sets; --instances overrides the rule set and the header says so
     runs.to_parquet(tmp_path / "runs.parquet")
@@ -714,7 +714,7 @@ def test_a_missing_or_failed_c1_run_does_not_change_the_d022_verdict(tmp_path):
     assert not c["complete"] and c["missing"] == [("sing44", D.TREAT, 1)] and c["n_runs"] == 43
     assert rd["c1"][D.A6F][D.TREAT]["all"]["n"] == 11                     # sing44 still has seed 0 of both arms
     txt = text(gone)
-    assert "missing 1 [('sing44', 'A9@r13x', 1)]" in txt and "INCOMPLETE (the C1 block reads what is there" in txt
+    assert "missing 1 [('sing44', 'A9@r13x', 1)]" in txt and "set (b) INCOMPLETE (the C1 block reads what is" in txt
     assert f"VERDICT (exclude): {v0}" in txt
     fl = D.report(world58(tmp_path / "f", status={("rail01", D.A6F, 0): "failed"}), tmp_path / "f")
     by = {r["reading"]: r for r in fl["readings"]}
