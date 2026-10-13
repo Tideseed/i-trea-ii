@@ -317,6 +317,9 @@ a control. Skills: `itrea-window`, `itrea-new-experiment`.
   test there on the CPU only on cores outside the run
   lane (`CUDA_VISIBLE_DEVICES="" PYTHONPATH=$PWD/src OMP_NUM_THREADS=1 ../i-trea-ii/.venv/bin/python -m pytest -q -m
   "not gpu"`), and merge after the pool has ended.
+- **Performance runs first (Berk 2026-10-13).** Box time goes to runs that measure the method (A9 against the solvers,
+  development mechanisms where they can act), targeted first and wider only on a pre-stated hint (D-024). Calibration,
+  harness and methodology runs only when something structural is broken, or to fill otherwise idle daytime hours.
 - **Development changes: one variable, the test fixed first.** Each change gets a decision record whose mechanism
   check and outcome rules (per-instance bands from the control's seed-to-seed spread) are written before any run; the
   control is re-run in the same window; a rule that fails by the letter is recorded as a stated deviation, never
