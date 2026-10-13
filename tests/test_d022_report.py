@@ -637,18 +637,23 @@ def full_layout(added: bool = True) -> list[tuple[str, str, int]]:
         [(i, a, s) for i in rest for a in D.C1_ARMS for s in D.SEEDS]
 
 
-def job_layout() -> list[tuple[str, str, int]]:
-    """(instance, arm label, seed) of every job in `jobs/itx-r13.jsonl`."""
+def job_layout(names=("itx-r13.jsonl", "itx-r13b.jsonl")) -> list[tuple[str, str, int]]:
+    """(instance, arm label, seed) of every job of set itx-r13 in `jobs/` — `itx-r13.jsonl` (the first amendment's
+    58) and `itx-r13b.jsonl` (the guard's 16, D-022's second amendment) when present."""
     from itrea.experiments import pair
-    jobs = [json.loads(x) for x in (ROOT / "jobs" / "itx-r13.jsonl").read_text().splitlines() if x.strip()]
+    jobs = []
+    for n in names:
+        f = ROOT / "jobs" / n
+        if f.exists():
+            jobs += [json.loads(x) for x in f.read_text().splitlines() if x.strip()]
     assert {j["set"] for j in jobs} == {D.SET} and {float(j["budget"]) for j in jobs} == {D.BUDGET}
     return [(j["name"], pair.arm_label(j), int(j["seed"])) for j in jobs]
 
 
 def world74(root: Path, *, added=True, p=None, drop=(), a0=None, extra=(), **per_run) -> pd.DataFrame:
-    """Set itx-r13 in `full_layout(added)` (P: control 0.4, treatment 0.4, A6F 0.6 unless `p` = {(instance, arm):
-    (seed 0, seed 1)}) and A0 of set dev on the fixed 11 (0.9 unless `a0` = {instance: P}); `per_run`, `drop`,
-    `extra` as in `world`."""
+    """Set itx-r13 in `full_layout(added)` (the job files' layout, checked in `test_default_sets_…`; P: control 0.4,
+    treatment 0.4, A6F 0.6 unless `p` = {(instance, arm): (seed 0, seed 1)}) and A0 of set dev on the fixed 11 (0.9
+    unless `a0` = {instance: P}); `per_run`, `drop`, `extra` as in `world`."""
     p, a0 = p or {}, a0 or {}
     dflt = {D.CTRL: 0.4, D.TREAT: 0.4, D.A6F: 0.6}
     rows = []
@@ -667,17 +672,21 @@ def world74(root: Path, *, added=True, p=None, drop=(), a0=None, extra=(), **per
 
 def test_default_sets_are_the_amendments_and_the_job_files():
     """The defaults: the rule set (3), the fixed 11 and the four added for the guard make the 17 development +
-    class-probe instances; `jobs/itx-r13.jsonl` holds the 58 of the first amendment, or the 74 once the four's 16
-    runs are appended (they may also land in a file of their own)."""
+    class-probe instances; `jobs/itx-r13.jsonl` holds the first amendment's 58 and `jobs/itx-r13b.jsonl` the guard's
+    16 (ae46e7f): together the 74 of `full_layout`."""
     dev = set(D.development_instances())
     assert set(D.RULE_INSTANCES) | set(D.C1_INSTANCES) | set(D.GUARD_ADDED) == dev and len(dev) == 17
     assert set(D.RULE_INSTANCES) & set(D.C1_INSTANCES) == {"neos-960392"} and set(D.FLOOR_INSTANCES) < \
         set(D.RULE_INSTANCES)
     assert not set(D.GUARD_ADDED) & (set(D.RULE_INSTANCES) | set(D.C1_INSTANCES))
     assert len(D.C1_INSTANCES) == len(set(D.C1_INSTANCES)) == 11 and len(full_layout()) == 74
+    first = job_layout(("itx-r13.jsonl",))
+    assert len(first) == len(set(first)) == 58 and set(first) == set(full_layout(added=False))
     lay = job_layout()
     assert len(lay) == len(set(lay)) and len(lay) in (58, 74)
     assert set(full_layout(added=False)) <= set(lay) <= set(full_layout())
+    if (ROOT / "jobs" / "itx-r13b.jsonl").exists():
+        assert set(lay) == set(full_layout()) and {i for i, _, _ in set(lay) - set(first)} == set(D.GUARD_ADDED)
 
 
 def test_full_layout_gives_a_complete_verdict_hint_and_guard(tmp_path):
