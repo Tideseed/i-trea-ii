@@ -20,6 +20,12 @@ SCIP-accepted posts. Change notes say what was changed and why, with the commit.
 | 2026-10-08 | (this commit) | **Rank 1 as a distinct elite** ([[D-016 Rank 1 as a distinct elite — cuOpt's clearing rule, development test]], #25): `ranks.rank1_mode: clearing` chooses Rank 1 best-first by cuOpt's clearing rule (a feasible candidate joins only if it differs from every member already chosen in ≥ k integer variables, k from n_int as in cuOpt's `get_max_var_threshold`, at most ⌈y·P⌉ = 26 members, no twin rule, no ratchet); `ea/elite.py` (blocked device distances, one copy per 32 rows), `ranks.rank1_cap`, `r1_n / r1_dmax / r1_dmax_band / r1_gap` in every gen event in both modes, `r1_cleared` / `rank1_cleared` in clearing mode; the new kernels are warmed in both modes. Off by default; `rank1_*` in `_LATE_DEFAULTS` — every recorded hash unchanged (9ac4a93bf93b, 1d12ad490dd0). Adversarial review (4 lenses, 2 refuters each): 12 confirmed, none a blocker, all fixed before any run (warm-up, per-member syncs, no-integer fallback, size record, GPU test, and three changes to D-016's mechanism test). Test: `jobs/dev-cl1.jsonl` = 18 blocks × (A3@rc1d control re-run, A3@cl1, A3@tp1 size-only control) | Berk's "keep a percentage of good feasible solutions as well as the best … more diversity": measured, Rank 1 keeps 1–9 near-copies; cuOpt's population keeps up to 32 distinct ones ([[2026-10-08 cuOpt population and diversity — what transfers]]) |
 | 2026-10-09 | 87bc759 (lp_decode 6be1c22…71eefc0) | **LP decode** ([[D-017 LP decode — re-optimise the continuous variables of selected candidates]], #27): `repair.continuous: lp_decode` — a persistent HiGHS worker process re-optimises the continuous variables of up to 4 candidates per generation with their integers fixed (polish feasible rows, complete super-optimal infeasible ones), copies enter as ordinary rows; refused in A9 / A3x. Two adversarial reviews (27 + 9 findings), three fix rounds; the warm-up now runs every crossover / mutation operator on 1/2/3-child batches (a cold-cache GPU test caught a one-child block-crossover kernel compiling after t0). **Adopted 2026-10-09 as the A3 development default** (`configs/itrea2-dev-rc-ld.yaml`, f030e23909ad) | cuOpt runs this LP after every recombination; FJ moves continuous values by jump values only — probe on stored vectors: sing44 −30 % objective |
 | 2026-10-09 | a1fd414 … 4493045 | **A9 GPU back-off** ([[D-018 A9 — the EA backs off the GPU beside cuOpt (contribution-gated duty cycle)]], #23): section `backoff` (off by default; inert unless `exchange.from_cuopt`) — phase Y at reduced duty until the first incumbent, a busy-second patience ladder in phase P, a token bucket at two empty-queue points, shadow / forced modes, busy-time accounting for the repair clock and FJ; `itrea backoff-report`; review 21 findings (15 confirmed) fixed; stage 0 complete → PROCEED (D_Y ½, floor ⅛, 30 s, 40 / 40); stage-1 configs bo1 / bo1s | the A9 pilot lost to cuOpt alone through GPU contention (chromaticindex 65 s vs 8 s) |
+| 2026-10-11 | 78ae305 | `backoff-report`: `_band` reads the stage-1 control `A9@bo1s` (it read the old control `A9@bo0`, so every stage-1 band fell back to A6's spread or 0.05); `--failed keep` (D-002 §6). Fixed before D-018 stage 1's verdict; the verdict is the same either way | a bug found while reading stage 1 |
+| 2026-10-11 | 2a18819 | MIPfeas harness ([[D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt 26.08]], #29): arm A6m and `--layout full`, GAMS's integral ported exactly (`pt_gams` on the call clock, `pt_gams_launch`), `itrea mipfeas-report`; build_runs qualifies a run id reused in another set as `<run_id>#<set>` (#33). No existing arm's plan changed | the external benchmark's metric and clock (D-019) |
+| 2026-10-11 | 0708835, 7998ab4 | D-021 phase 1 (ITX-1, [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]]): arms A6F / A2F on F, the job-level `harness` (preset `ext`), named scopes, the fan-governor start gate, cap / thermal-watch / cuOpt-memory / external-kill / CUDA-compile voids, R26's breaker, job files `itx-m1` … `itx-m5`, `itx-r13`, `mipfeas-report --arm A6F`. A harness enters the run hash only when present: every earlier run id unchanged (20,432 plan records byte-identical); A9's EA configuration unchanged | Berk 10-11: "a better (more fair) and safer (not burning up dgx spark) set of rules" |
+| 2026-10-12 | 6f0339d | D-021 phase 2: R12's stop at the proven optimum (`ref_stop`), cuOpt SIGKILLed after a definitive end (`cuopt_kill_on_end`), `scoped_hash`, preset `itx1`, `datasets/mipfeas_strata.csv`, `make-jobs itx-v1 / itx-a0 / itx-m6`, `itrea gams-trc`, `itrea itx-report`, `tools/m0_replay.py`, the prereg-v2 registration gate; 1,009 CPU tests pass on main. Every pre-existing plan byte-identical (35,337 records) | v1's external run (D-021) |
+| 2026-10-12 | 3fe5612 | D-022 / D-023 tooling: `tools/d022_report.py` (`itrea d022-report`), `configs/itrea2-dev-rc-3way-boY.yaml` (5c8b535fb245: bo1's values, ladder disabled by unbounded patience), `make-jobs backoff2 --harness ext\|r13-off`, `make-jobs itx-r13f`, `backoff-report --stage 1y` | the two decision records, written before any run |
+| 2026-10-13 | e1403fa, ae46e7f; 75caa6d … fd75476 | `jobs/itx-r13.jsonl` narrowed from 102 to 58 runs and `jobs/itx-r13b.jsonl` (16) added, both before any run of them was read; `d022_report` implements D-022's second amendment and its clarification (no mean; floor limb one-sided; C1 hint and guard); 57 tests | Berk 10-13: targeted tests first ([[D-024 Targeted first, wider only on a hint — staged testing for development and v1]]) |
 
 ## Results
 | date | cfg | instance | seed | P_SCIP | P_EA | P_port | ttf (s) | posts/acc | notes |
@@ -621,3 +627,58 @@ control `A9@bo1s`, see the decision record).
   +0.798]. Weak sets selected on the compared control runs (descriptive).
 - crna is bimodal: control 0.698 / 0.090, bo1 0.144 / 0.734 by seed — the EA either leads early or not at all.
 - Next candidate: phase Y only (no ladder), its own record.
+
+## D-021 measurements M1–M3 and the interim calibration (2026-10-11 15:12–18:13; 2026-10-12 12:06–12:40; 2026-10-13 12:32–15:16) — the external harness, not the method
+Full record: [[2026-10-11 D-021 measurements M1–M3 and the interim calibration]]. Harness and calibration runs of
+[[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] at A9's
+footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void and 0 compile on the clock in every pool.
+- **M1 smoke** (pool 20261011-151204-1160038; fhnw-binpack4-48, glass4, radiationm18-12-05 × {A9, A6F, A6F with the
+  thread variables kept, A2F} × 120 s, seed 0): 12 / 12; every harness setting as specified (cuOpt threads 5 / 4 / 3 by
+  arm, gaps 0, RMM 24 GB / host 24 GB, named scopes, SM 2,392–2,405 MHz, ≤ 78.5 °C). R14 inert: cuOpt CPU-s per wall-s
+  5.02 / 4.99 / 5.03 with the thread variables unset, 5.02 / 4.98 / 5.03 with them set.
+- **M2 soak** (20261011-153534-1276706; comp21-2idx, neos-4763324-toguru × {A9, A6F} × 600 s): 4 / 4; steady-state
+  p95 66–73 °C, maximum 76 °C, no cap, busy SM 2,392 MHz → **F accepted** for v1 (R23).
+- **M3 memory probe** (20261011-163415-1522373; 8 × A6F at cuOpt RMM 40 / host 40 GB): eilA101-2 and nw04 killed at
+  the 40-GB host cap, supportcase6 at 22.6 GiB host (> 19.2) → **does not fit F: eilA101-2, nw04, supportcase6**,
+  excluded from both arms; decision set 218 → 215, H_cu-unseen 65 → 64.
+- **M4 calibration, interim** (A6F × D-020's 30-instance sample × 600 s, seed 0; pools 20261012-120607-2036840, 5 runs,
+  paused for [other project], and 20261013-123201-3850111, 14 runs): **INCOMPLETE, stopped at 19 of 30** by D-024 rule 0
+  (performance runs first). Late-clock check on the 6 strata-0–1 instances run: median first-incumbent offset ours −
+  GAMS −0.119 s — passes (≤ +0.3 s); 4 strata-0–1 instances still owed before v1's first external run. Footprint ratio,
+  call clock: R 1.390 [1.081, 1.837] over 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x); launch clock 2.036
+  [1.572, 2.654]; feasible 16 vs GAMS 16. The excess is in strata 3–4 (csched008 first incumbent 85.6 s vs 13.8 s,
+  dano3_3 43.0 vs 14.2 s): our cuOpt on 5 threads vs GAMS's 24 on the whole box. No footprint reading before 30 of 30.
+- **Checker tolerance, found, to investigate:** in M4 our checker passed a mas74 cuOpt incumbent below MIPLIB's proven
+  optimum (11,801.18516 vs 11,801.18572) and rejected 4 cuOpt incumbents (neos-4338804-snowy 1: a bound off by
+  8.3e-6; neos-933966 3: integrality off by 4.8–6.5e-6; our tolerance is 1e-6). In the 2026-10-11 run table, 60 checked
+  incumbents in 8 of 57 glass4 runs are below glass4's proven optimum (all EA arms: A3@ad1, cl1, lpd, rc0, rc1, rc1d,
+  stall100, A5@c04; first at 47.8–119.9 s; worst row violation ≤ 4.5e-7 relative); cuOpt 26.10 rejected the lowest
+  of them (1,200,006,662.64) when offered it. The effect on any glass4 development reading has not been computed (#36).
+- Running after M4 in the same window (W-1013): D-022 (set `itx-r13`, 58 runs, then `itx-r13b`, 16) from 15:16 — no
+  result exists yet; its rules were fixed before any reading ([[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]],
+  second amendment f52e3e8, clarification fd75476). Then M6 (A0's CPU lanes).
+
+## cuOpt 26.10 nightly — the cuopt#2073 probe (2026-10-13 10:1x–10:5x) — no A9 result
+Berk (10:00): "If the nightly for the next version is up can you check if our feature request in Github issues is
+implemented properly?" NVIDIA/cuopt#2073 (filed 2026-10-07: a `SetSolutionCallback` disables cuOpt's presolve) was
+closed on 2026-10-12 by PR #2098, merged into `main` = 26.10.00. Probe: `tools/probe_cuopt_setsol.py` and
+`tools/probe_cuopt_setsol_report.py` (e5217ae) on the nightly `cuopt-cu13 == libcuopt-cu13 ==
+26.10.0a294.post261013051018` in a separate venv `~/venvs/cuopt-2610n` (installed on Berk's ask; the repository venv
+stays on 26.08); 31 solves of 20–30 s, 3 threads, RMM 8 GB, short lease, both LLM servers left up (for [other project],
+as agreed on 10-12). Five development instances (glass4, sing44, neos-3024952-loue, neos-2657525-crna,
+item_placement_9903).
+- **Implemented properly:** with a SET callback, presolve stays on in 26.10 (26.08: "Presolve is disabled because
+  set_solution callbacks are provided"); solutions injected in the original variable order are accepted 1–6 ms after the
+  offer, echoed back unchanged (max |Δ| ≤ 1e-12) and pass our exact checker on all five; infeasible offers (a fractional
+  integer, a shifted vector) are rejected; the glass4 point below MIPLIB's proven optimum is rejected. Papilo's dual
+  reductions are off while a SET callback is registered: the presolved size was unchanged on 4 of 5, crna 308 vs 305
+  variables.
+- **Limitation (not changed by #2098):** cuOpt polls SET callbacks only when its GPU population records a new best —
+  crna: 11 calls, all at 0.70–0.71 s, none in the remaining 29 s; sing44: the first call at 28.3 s. An outside solution
+  enters only while cuOpt's own heuristics improve, not when it has stalled.
+- **Berk (11:xx): "I just got word it is integrated to 26.10."** The two upstream drafts (a thanks comment; a request to
+  poll SET on a timer) stay unposted ([[2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve]],
+  `vault/70-upstream/drafts/`). Latest cuOpt release on 2026-10-13: still v26.08.00.
+- **No A9 result:** no arm ran on 26.10, and A9 is unchanged (one-way cuOpt → EA). What it opens: A9 two-way — the EA's
+  and SCIP's incumbents offered to cuOpt through the SET callback with presolve on (#35); a development item after the
+  26.10 re-baseline (#31) or for v1.1, with its own decision record and test before any run.
