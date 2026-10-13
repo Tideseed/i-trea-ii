@@ -20,6 +20,33 @@ description: >
   the coupled arm, D-011). A development test is a decision record D-NNN written before any run: one variable, the
   mechanism and outcome rules with per-instance noise bands, and a control re-run in the same window under a fresh
   variant name (`rc1d`, `rc1e`) so earlier runs are not reused; amendments are dated and made before the first run.
+- **Staged testing (D-024, Berk 2026-10-13: "Shall we do targeted and surgical tests? and only if we see hints of
+  improvement we can go wider"; "always aim for performance runs unless something structural is buggy in our
+  experimentation methodology"; "If the box is idle make the most of it").** Before writing the job file:
+  - **Performance runs first.** Box time goes to runs that measure the method (A9 against the solvers, a development
+    mechanism where it can act). Calibration, harness and methodology runs only for a structural bug, or to fill
+    otherwise idle daytime hours (D-021's M4 was stopped after 19 of 30 runs on that rule; its remaining strata-0–1 runs
+    come before v1's stage 1).
+  - **Targeted.** Name, in the decision record and before any run, the instances where the change can act, with the
+    trace evidence (D-022's amendment: in the 141 recorded cuOpt runs at 120 s on the 17 instances, cuOpt's own 1e-4
+    "optimal" stop occurred only on fhnw-binpack4-48 9/9, neos-3004026-krka 10/10, neos-960392 3/7 — so R13 is tested
+    on those three), or where the claim lives (D-013's weak cases). A test of a mechanism on every instance where it can
+    act is a complete test, not a stage 1. State any assumption the selection rests on (D-022: cuOpt uses the MIP gaps
+    only as a termination test — not verified) and let the wider guard carry its check.
+  - **The hint is written before the runs start:** one one-sided threshold on the targeted runs' own data (e.g. C1's
+    ratio of means of P(120) A9@r13x / A6F@r13x ≤ 0.95 on the fixed 11 weak instances; v1 stage 1's ratio of call-clock
+    `pt_gams` A9 / A6F ≤ 0.95 on the panel + the 5 no-solution instances), the fixed instance set it reads (never
+    re-selected on the runs it judges), how failures and skipped blocks count, and **what it gates** (which line widens,
+    which stage runs anyway — v1's guard-only stage runs whatever the hint says). A hint is **futility-only**: it gates
+    widening and never declares success; the decisive reading comes later on all instances, the targeted ones
+    included. Do not use an "improved > worse" count as a hint (under no effect it passes about half the time), nor a
+    mean over a handful of floor-level instances (it reads noise; use D-018's floor rule and per-instance bands).
+  - **Never read a run before the rule is fixed.** A rule or hint may be amended while runs are executing only if no
+    run of the set has been read; the amendment is dated and states how many runs are done and that none were read
+    (D-022's second amendment: 7 of 58 done, none read). After any reading, a change is a stated deviation or a new
+    record, never a silent re-reading.
+  - **Breadth no decision reads is not run** (D-024 rule 4): A0 runs only on the instances a comparison reads (v1: the
+    81 of H_cu ∪ W_SCIP unseen; the stage-1 instances first).
 - Timeline (D-019, GitHub milestones `C1 checkpoint (2026-10-23)` and `v1 (end of November 2026)`): development on cuOpt
   26.08 closes at C1, Fri 2026-10-23; v1 (A9 frozen) runs its confirmatory test and the MIPfeas run under prereg-v2
   (#32) on cuOpt 26.10 (#31; on 26.08 if 26.10 is not out by 2026-11-06).
@@ -34,8 +61,10 @@ description: >
   pre-registered starting configuration. Development defaults: **A3** → `configs/itrea2-dev-rc-ld.yaml` (f030e23909ad,
   lp_decode adopted, D-017); **A9** and its matched control **A3x** → `configs/itrea2-dev-rc-3way.yaml` (1d12ad490dd0;
   the runner adds `exchange.from_cuopt` for A9 and refuses `repair.continuous: lp_decode` in A9 / A3x until the
-  two-core layout, #30); D-018 stage 1 → `itrea2-dev-rc-3way-bo1.yaml` (active) vs `-bo1s.yaml` (shadow control);
-  `ranks.rank1_mode` stays off (D-016 not adopted). Ablations:
+  two-core layout, #30); D-018 stage 1 → `itrea2-dev-rc-3way-bo1.yaml` (active) vs `-bo1s.yaml` (shadow control) — not
+  adopted; D-023 → `itrea2-dev-rc-3way-boY.yaml` (phase Y only, `5c8b535fb245`) vs `-bo1s.yaml`, under the harness
+  D-022 leaves (`make-jobs backoff2 --harness ext|r13-off`; A6F always ext); `ranks.rank1_mode` stays off (D-016 not
+  adopted). Ablations:
   `configs/ablations/*.yaml` or `--set key=value` overrides on the base (the comment at the top of each ablation file
   gives the dotted keys; a job file carries them as `overrides`). Record the **config hash** (`EAConfig.hash()`); the
   runner refuses test-set instances unless it equals `frozen-e2`'s.
@@ -55,7 +84,10 @@ description: >
   `make_jobs.job(...)` and `make_jobs.write_jobs(...)`, one `variant` label per arm. Instance paths relative to the repository root, arm, seed,
   budget, config path and overrides; the pool applies the Williams arm order per block from hash(instance, seed,
   20261005) and runs blocks in random order with strata interleaved.
-- D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13`; phase 2 `itx-v1 --tier T1..T5
+- D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
+  before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
+  seeds 0–1 — plus `jobs/itx-r13b.jsonl`, the guard's 16 on the 4 remaining instances, same set `itx-r13`; follow-up
+  `itx-r13f --instances …|all`); phase 2 `itx-v1 --tier T1..T5
   [--cuopt 26.10] --out F` (the v1 tiers; split `ext`, preset `itx1`, labels `<arm>@v1c<tag>`, sets `itx-t<k>` — a
   26.08 run gets `-c2608` in its set and variant, so it never shares a run id with 26.10), `itx-a0`, `itx-m6`,
   `itx-m6a`. A9's configuration is `configs/frozen-v2.yaml` (the C1 freeze, committed in the commit tagged
@@ -103,6 +135,9 @@ description: >
 ## 6. Afterwards
 Close the window (skill `itrea-window`), run the analysis, write the result note (skill `itrea-result-note`) and the
 index row, journal entry (skill `itrea-journal`). For a development test the analysis is the test's report, committed
-before the pool ends (as for D-017 and D-018) — `itrea build-runs`, then `tools/d016_report.py`, `tools/d017_report.py`
-or `itrea backoff-report --stage 0|1` (D-018), all with `OMP_NUM_THREADS=1` — and the result goes into the Development
-log and the decision record's Result section (D-010 §3).
+before the pool ends (as for D-017 and D-018) — `itrea build-runs`, then `tools/d016_report.py`, `tools/d017_report.py`,
+`itrea backoff-report --stage 0|1` (D-018) or `--stage 1y [--harness ext|r13-off]` (D-023), `itrea d022-report
+[--followup]` (D-022 and C1's interim hint and guard), all with `OMP_NUM_THREADS=1` — and the result goes into the
+Development log and the decision record's Result section (D-010 §3). A staged test reports its hint as written (present
+/ no hint / incomplete) and what it gated; an interim reading is labelled interim and decides nothing (skill
+`itrea-result-note`).

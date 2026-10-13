@@ -7,18 +7,19 @@ pool solutions, proven bound, root LP and a stream of good infeasible node-LP po
 population's better incumbents flow into SCIP as new starting points. **HiGHS** is a replication partner. **NVIDIA
 cuOpt** is a control (cuOpt alone, SCIP ‖ cuOpt) and, since 2026-10-07, a one-way source: in the three-way arm **A9
 (SCIP ↔ EA ← cuOpt)** cuOpt streams its incumbents into the EA, which hands SCIP whatever beats SCIP's incumbent —
-cuOpt's vectors unchanged as well as the EA's own improvements. cuOpt never receives solutions mid-solve (its
-`SetSolutionCallback` disables its presolve). The population is organised in three ranks: Rank 0 holds infeasible
-solutions whose objective beats the best feasible one (at most x % of the population), Rank 1 protects the best y % of
-the feasible solutions, and Rank 2 holds the rest. Beside the ranks the EA keeps a frontier of diverse near-optimal
-feasible solutions. The project succeeds two pieces of the author's work: his master's research I-TREA (Orbay 2011,
-M.S. thesis, Middle East Technical University, open access at hdl:11511/20509; journal
-version: Orbay 2011 thesis) — an interactive three-rank evolutionary algorithm for a bi-objective
-facility relocation problem — whose idea of keeping good infeasible solutions it carries over (part I reserved a share
-of the population for them as a floor; part II caps it), and the optopt study
-([`berkorbay/optopt`](https://github.com/berkorbay/optopt)), whose CPU evolutionary partner beside SCIP found no gain
-at 60 s and whose verdict named the changes tested here: a GPU population, longer budgets and instances where the
-solver's own heuristics struggle.
+cuOpt's vectors unchanged as well as the EA's own improvements. cuOpt never receives solutions mid-solve: on cuOpt
+26.08 its `SetSolutionCallback` disables its presolve. cuOpt 26.10 keeps presolve on (NVIDIA/cuopt#2073, fixed by PR
+#2098; checked on a 26.10 nightly on 2026-10-13), so a two-way A9 becomes possible there (issue #35, not started). The
+population is organised in three ranks: Rank 0 holds infeasible solutions whose objective beats the best feasible one
+(at most x % of the population), Rank 1 protects the best y % of the feasible solutions, and Rank 2 holds the rest.
+Beside the ranks the EA keeps a frontier of diverse near-optimal feasible solutions. The project succeeds two pieces
+of the author's work: his master's research I-TREA (Orbay 2011, M.S. thesis, Middle East Technical University, open
+access at hdl:11511/20509; thesis) — an interactive three-rank
+evolutionary algorithm for a bi-objective facility relocation problem — whose idea of keeping good infeasible
+solutions it carries over (part I reserved a share of the population for them as a floor; part II caps it), and the
+optopt study ([`berkorbay/optopt`](https://github.com/berkorbay/optopt)), whose CPU evolutionary partner beside SCIP
+found no gain at 60 s and whose verdict named the changes tested here: a GPU population, longer budgets and instances
+where the solver's own heuristics struggle.
 
 **The claim under test** (the author, 2026-10-06, vault `D-007`): *a GPU-based evolutionary algorithm metaheuristic
 coupled with an exact solver can beat either single solution.* Pre-registered as vault `D-002` v3.1 (binding from the
@@ -43,7 +44,14 @@ on the 17 development and class-probe instances; go / no-go for the final phase)
   geometric mean with shift 0.001): at minimum A9's geometric mean ≤ our own cuOpt-26.10-alone run on the same GB10;
   target mean integral −25 % on the instances hard for cuOpt (our cuOpt-alone integral ≥ 0.1 or no solution) and
   geometric mean −10 %; stretch ≤ 0.0274 (SCIP concurrent 11, published). The reference is our own same-version run
-  because the published rows are cuOpt 26.08 and aggregates only.
+  because the published rows are cuOpt 26.08 and aggregates only. **Since 2026-10-11 the external run follows our own
+  standard ITX-1** (vault `D-021`, accepted by the author): every GPU arm gets A9's footprint F (cuOpt alone on the same
+  5 cores and the GPU; no whole-box run), 600 s, decisions on the 215 instances outside the development set that fit
+  F (each decision also reported without the instances seen in calibration), an ε-floored guard plus solutions found
+  as the minimum, the shift-0.001 geometric mean reported beside; D-019's literal readings are reported beside too.
+  **Staged (vault `D-024`, 2026-10-13):** a first stage on a 20-instance panel plus the 5 instances where cuOpt finds
+  no solution, with a futility-only hint fixed in advance (ratio of means ≤ 0.95); the rest of the decisive set only
+  after a hint; the guard stage runs either way.
 
 None of the parts is new, and no "first" is claimed (`vault/40-literature/Prior art.md`): heuristics and
 branch-and-bound exchanged incumbents both ways in Puchinger, Raidl & Gruber (2005) and Nwana et al. (2005); ReXi runs
@@ -52,7 +60,7 @@ candidates; cuOpt itself runs a GPU population beside its own branch-and-bound; 
 for infeasible solutions. What is studied here is the combination: a GPU population coupled with an external, general
 MIP solver, with a capped, incumbent-relative share of infeasible solutions.
 
-## Status (2026-10-10)
+## Status (2026-10-13)
 **Development. No confirmatory experiment has run;** every number below comes from development runs (small samples,
 two seeds or fewer per instance unless stated) and is descriptive, not a performance claim.
 - **Pre-registration and screening.** `D-002` v3.1 is tagged `prereg-v1` (2026-10-06). Hard-pool screening: stage 1
@@ -60,7 +68,9 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
   pool freeze (`D-010` §5, issue #1).
 - **Development** since 2026-10-06 on a 9-instance set (`D-010`, `datasets/dev_set.csv`, permanently excluded from the
   test set) and 8 class-probe instances (`D-014`, `datasets/classprobe_set.csv`), judged on the coupled arm at 120 s
-  (`D-011`). Every change, result and failure: `vault/30-results/Development log.md`.
+  (`D-011`). Every change, result and failure: `vault/30-results/Development log.md`. Since 2026-10-13 testing is
+  staged (`D-024`): performance runs first, targeted at the instances where a change can act, wider only after a hint
+  whose threshold is fixed before the runs.
 - **Development defaults.** A3 (SCIP ↔ EA): `configs/itrea2-dev-rc-ld.yaml` (hash `f030e23909ad`) — self-adaptive repair
   strategy, the EA's own HiGHS LP, SCIP's LP stream, deep repair under the repair clock, LP decode. A9 and its matched
   control A3x (A3 with A9's EA footprint): `configs/itrea2-dev-rc-3way.yaml` (`1d12ad490dd0`); the runner refuses LP
@@ -81,16 +91,32 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
     (item_placement 0.311 → 0.118, sing44 0.377 → 0.238) — adopted for A3.
   - Rank 1 by cuOpt's clearing rule (`D-016`, 9 instances, seeds 0–3, rail01 seeds 0–1 only; 102 runs): mean d
     −0.033 [−0.122, +0.050] — kept as an option (`ranks.rank1_mode`, off by default), not adopted.
-  - A9 GPU back-off (`D-018`): stage-0 calibration (18 runs) gave PROCEED — duty ½ until the first incumbent, floor ⅛,
-    yield 30 s, patiences 40 / 40 (`configs/itrea2-dev-rc-3way-bo1.yaml`; control `-bo1s.yaml`, the same values in
-    shadow mode). At duty ½ cuOpt's first chromaticindex1024-7 incumbent came at 8.3 s against 65.3 s at full duty
-    (8.1 s alone). Stage 1 (84 runs, two daytime windows) is next.
-- **Tests (2026-10-09):** CPU suite 816 passed; the GPU tests of the new code (pace, back-off, lp_decode, elite,
-  ea_run) 40 passed.
-- **Next:** GitHub milestone *C1 checkpoint (2026-10-23)* — #23 (A9 and its back-off, stage 1), #26 (recombine each
+  - A9 GPU back-off (`D-018`): stage 0 (18 runs) gave PROCEED; **stage 1 (84 runs, 2026-10-11) NOT ADOPTED** — every
+    outcome rule held (chromaticindex1024-7: A9's P 0.545 → 0.091, cuOpt alone 0.083; back-off vs its shadow control
+    9 better / 5 worse, mean d +0.083 [−0.054, +0.232]) but the mechanism failed (M1, M3, M5: the duty ladder stepped
+    the EA down while it still led). Its phase Y alone (yield until cuOpt's first incumbent, then full duty) is the
+    next test (`D-023`, not run yet).
+- **External harness** (`D-020`, `D-021`). GAMS's published MIPfeas archive is on disk and its primal integral is
+  ported exactly (equal to GAMS's own function on all 3,495 of its traces). ITX-1's footprint F passed its thermal soak
+  (steady p95 66–73 °C, maximum 76 °C over four 600-s runs); three instances do not fit F's memory (eilA101-2, nw04,
+  supportcase6) and are excluded in advance. The calibration of cuOpt alone on F against GAMS's published GB10 row is
+  **interim and incomplete** (stopped after 19 of 30 runs so that performance runs come first): at 18 runs the ratio
+  of shifted geometric means is 1.416 [1.087, 1.903] on the call clock — cuOpt on 5 cores about 40 % above GAMS's
+  24-thread whole-box run — with the clock check passing on the 6 of 10 strata-0–1 instances run; it decides nothing
+  until 30 of 30.
+- **In progress (2026-10-13, no results yet):** `D-022` — cuOpt's MIP gaps 0 inside A9, tested on the 3 instances where
+  cuOpt's own 1e-4 stop occurs — and checkpoint C1's interim A9 result against cuOpt alone on the same footprint
+  (hint: ratio of means ≤ 0.95 on 11 weak development instances; guard over all 17), 74 runs.
+- **cuOpt 26.10.** NVIDIA/cuopt#2073 (filed 2026-10-07) is fixed in 26.10 by PR #2098 and checked on a 26.10 nightly in a
+  separate environment: presolve stays on with a `SetSolutionCallback`, injected solutions are accepted exactly,
+  invalid ones rejected; cuOpt reads injected solutions only when its GPU population records a new best. Open: our
+  exact checker and cuOpt disagree on a few incumbents (glass4, mas74 below MIPLIB's proven optimum accepted by ours;
+  cuOpt incumbents on snowy and neos-933966 rejected by ours) — a tolerance mismatch under investigation.
+- **Tests (2026-10-12):** CPU suite 1,009 passed after D-021 phase 2; the runner's GPU tests passed on 2026-10-13.
+- **Next:** GitHub milestone *C1 checkpoint (2026-10-23)* — #23 (A9 and its back-off: D-023 next), #26 (recombine each
   partner incumbent with the elite), #27 (lp_decode: adopted for A3; open for A9 and follow-ups), #29 (MIPfeas
-  harness, calibrated on cuOpt 26.08), #30 (A9 core layout for LP decode); milestone *v1 (end of November 2026)* — #1
-  (pool freeze), #31 (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper). Plan:
+  harness), #30 (A9 core layout for LP decode); milestone *v1 (end of November 2026)* — #1 (pool freeze), #31 (cuOpt
+  26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #35 (A9 two-way on 26.10), #12 (paper). Plan:
   `vault/00-index/Roadmap.md`.
 
 ## How to start
@@ -126,8 +152,9 @@ pytest -q                                 # toy-scale tests (GPU tests skip with
 Versions are pinned in `pyproject.toml` to the ones used for the study: Python 3.12, NumPy 2.4.6, SciPy 1.18.1,
 Numba 0.64.0, HiGHS 1.15.1, PySCIPOpt 6.2.1 / SCIP 10, pandas 3.0.3, PyArrow 23.0.1, redis-py 8.1.0, PyYAML 6.0.3,
 CuPy 14.2.0 (`cupy-cuda13x`), cuOpt 26.08, pytest 9.1.1, Hypothesis 6.168.1. cuOpt 26.10 will get its own environment
-when it is released (issue #31). One entry point, `itrea <command>`, reaches every tool (`itrea --help` lists the
-commands, `itrea <command> --help` their arguments; `src/itrea/cli.py`).
+when it is released (issue #31); a 26.10 nightly sits in a separate venv for the cuopt#2073 check only. One entry
+point, `itrea <command>`, reaches every tool (`itrea --help` lists the commands, `itrea <command> --help` their
+arguments; `src/itrea/cli.py`).
 
 **On the author's machine the environment was built offline** (no network): every wheel came from uv's local cache;
 cuOpt's dependency closure (28 distributions) was hard-linked from the optopt environment following each
@@ -143,13 +170,13 @@ file mailbox on `/dev/shm` offers the same API; the runner and the pool use it b
 | path | what |
 |---|---|
 | `src/itrea/` | the package: `cli` (the `itrea` command), `config`, `problem`, `backend`, `trace`, `paths`; `ea/` (evaluation, population, three-rank survival, elite clearing, operators, feasibility-jump local search on GPU and CPU, continuous decoding and the LP decode worker, repair clock, A9 GPU back-off, equality aggregation (not wired in), frontier, engine, EA process); `exchange/` (file mailbox, Redis); `solvers/` (SCIP, HiGHS, cuOpt processes); `experiments/` (gates, GPU health, Redis container control, environment record, runner, job builder, pool); `analysis/` (exact checker, metrics, run tables, pre-registered statistics, lineage, re-derivation, the back-off report); `benchmarks/` (toy models, hard-pool screening and freeze, reference values) |
-| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`); development files (never confirmatory): `itrea2-adaptive.yaml` (`584ddee83747`), `itrea2-adaptive-lps.yaml` (`a2ad94e9188d`), `itrea2-adaptive-lps-rc.yaml` (the repair clock in shadow mode), `itrea2-dev-rc-3way.yaml` (repair clock active; `1d12ad490dd0`; A9 / A3x), `itrea2-dev-rc-ld.yaml` (+ LP decode; `f030e23909ad`; the A3 default), `itrea2-dev-rc-3way-bo*.yaml` (A9 back-off: `bo0` shadow, `bof50` / `bof25` / `bof12` forced duty, `bo1` active, `bo1s` its shadow control); `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison); `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
+| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`); development files (never confirmatory): `itrea2-adaptive.yaml` (`584ddee83747`), `itrea2-adaptive-lps.yaml` (`a2ad94e9188d`), `itrea2-adaptive-lps-rc.yaml` (the repair clock in shadow mode), `itrea2-dev-rc-3way.yaml` (repair clock active; `1d12ad490dd0`; A9 / A3x), `itrea2-dev-rc-ld.yaml` (+ LP decode; `f030e23909ad`; the A3 default), `itrea2-dev-rc-3way-bo*.yaml` (A9 back-off: `bo0` shadow, `bof50` / `bof25` / `bof12` forced duty, `bo1` active, `bo1s` its shadow control, `boY` phase Y only); `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison); `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
 | `tests/` | correctness tests on toy models and synthetic problems (`-m gpu` needs CuPy, `-m solver` runs a real solver for seconds, `-m integration` launches real processes through the runner) |
-| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`), `probe_lp_decode.py` (the LP decode worker on stored vectors), `cuopt_verify_mipstart.py` (cuOpt MIP start check, GPU), `d016_report.py` / `d017_report.py` (decision reports), development probes |
+| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`), `probe_lp_decode.py` (the LP decode worker on stored vectors), `cuopt_verify_mipstart.py` (cuOpt MIP start check, GPU), `probe_cuopt_setsol.py` (cuopt#2073's check, GPU), `d016_report.py` / `d017_report.py` / `d022_report.py` (decision reports), `derive_mipfeas_strata.py` / `m0_replay.py` (`D-021`'s sets and replay), development probes |
 | `jobs/`, `traces/`, `datasets/` | job files; run outputs (raw traces are not committed, resource records are); derived tables (`dev_set.csv`, `classprobe_set.csv`, the run tables) |
 | `data/` | instances (not in git; symbolic links to the public sets, see `vault/10-design/Datasets.md`) |
 | `paper/` | LaTeX source of the paper (skeleton; no results) |
-| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-019, results, literature, incidents, upstream drafts, reviews, checkpoints — start at `vault/00-index/Home.md` |
+| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-024, results, literature, incidents, upstream drafts, reviews, checkpoints — start at `vault/00-index/Home.md` |
 | `tutorials/` | tutorials (planned) |
 | `.claude/skills/` | repository skills for AI agents (window, journal, result note, new experiment, literature, reproduce) |
 
@@ -199,9 +226,11 @@ pre-registered overhead measurement (vault `D-006`; not run yet — every run so
 The study runs on a shared DGX Spark (unified memory, two local LLM servers, other sessions). The runner enforces the
 rules in vault `D-003`: a box-window lease before any timed run; a run-set memory gate that counts GPU memory
 explicitly (a systemd `MemoryMax` does not charge GPU allocations on this machine), with a 20 GB reserve and a live
-watchdog (A9 needs about 73 GB, so both LLM servers are stopped); one GPU run at a time, with the same GPU memory
-limit for the EA's pool and cuOpt (12 GB, set by cuOpt's measured need); pinned single-threaded processes; a thermal
-gate (`D-008`: GPU arms start below 80 °C, CPU-only arms below 88 °C; pause at 92 °C); the fan governor's rest breaks
+watchdog (A9 needs about 73 GB, 97 GB under the external harness's 24-GB cuOpt limits, so both LLM servers are
+stopped); one GPU run at a time, with the same GPU memory limit for the EA's pool and cuOpt (12 GB, set by cuOpt's
+measured need); pinned single-threaded processes; a thermal gate (`D-008`, `D-021`: GPU arms start below 80 °C,
+CPU-only arms below 86 °C; pause at 92 °C; external runs also need the host's fan governor alive with its clock cap
+off); the fan governor's rest breaks
 and no night windows (`D-009`, `D-019`); GPU-health voiding (stuck-low-clock fault, foreign GPU activity); the LLM
 servers stopped and restored only through `tools/serving-window.sh`; no downloads; toy models only in tests. See
 `AGENTS.md` → "Rules for new experiments".

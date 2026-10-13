@@ -15,6 +15,11 @@ Berk usually does not coordinate the sessions — the lease does.
 
 ## Before
 1. `box-window status` — if another session holds an unexpired lease, **wait or ask it**; never `--force`.
+   **[other project]:** before stopping `ornith-vllm`, ask the [other project] session (cross-session message) — agreed on
+   2026-10-12, when [other project]'s hosted model had run out of [hosted model provider] credit and `ornith-vllm` was its only way to answer
+   on Slack: that day's M4 pool was stopped after 5 of 30 runs and both servers were restored 12:40–12:43 for it. Since
+   2026-10-13 09:32 (Berk's decision) [other project] answers with Claude Haiku 5.5 on the Anthropic API and no longer depends on
+   `ornith-vllm`; ask anyway, as agreed, and write its answer in the journal.
 2. Look at what is running: `systemctl --user is-active ornith-vllm llama-qwen38`, `nvidia-smi` (foreign GPU
    processes), MemAvailable, the ACPI maximum (`gates.acpi_max_c()`); a GPU arm must not start above 80 °C. ITX-1
    windows (D-021 R26) open only if the hottest zone's median over the last 60 s is ≤ 50 °C after 3 min idle with
@@ -43,9 +48,10 @@ Berk usually does not coordinate the sessions — the lease does.
    | M1 smoke | `itx-m1.jsonl` (itx-m1): fhnw-binpack4-48, glass4, radiationm18-12-05 × {A9, A6F, A2F} ext + A6F with the thread variables kept, 120 s | 12 | 97 (A9 ext; A2F 78, A6F 69) | ≈ 0.3 (≤ 0.43) | — (first: `pytest -m gpu` with cold caches, step 5) |
    | M2 soak at F | `itx-m2.jsonl` (itx-m2): comp21-2idx, neos-4763324-toguru × {A9, A6F} ext, 600 s, AB / BA | 4 | 97 | 0.67 | `--pause-c 90`; start the first from fan AUTO |
    | M3 memory probe | `itx-m3.jsonl` (itx-m3): R29's 8 × A6F at cuOpt RMM 40 / host 40; a cap hit is recorded (`void_info.cuopt_memory`), not voided | 8 | **101** | 1.0–1.35 | — |
-   | M4 calibration | `itx-m4.jsonl` (mipfeas): D-020's 30 × A6F ext, 600 s | 30 | 69 | 3.95–5.0 | then `itrea mipfeas-report --arm A6F` |
+   | M4 calibration | `itx-m4.jsonl` (mipfeas): D-020's 30 × A6F ext, 600 s | 30 | 69 | 3.95–5.0 | then `itrea mipfeas-report --arm A6F`; **stopped after 19 of 30 (2026-10-13, performance runs first, D-024 rule 0)** — the pool resumes the rest (completed blocks are skipped); the strata-0–1 runs before v1's stage 1, the others only in otherwise idle daytime hours |
    | M5 A9 preview | `itx-m5.jsonl` (itx-m5): the 15 dev / class-probe instances in the 233 × A9 ext, 600 s | 15 | 97 | ≈ 2.0–2.5 | optional |
-   | R13 + R14 test | `itx-r13.jsonl` (itx-r13): 17 × seeds 0–1 × {A9 ext with R13 + R14 off, A9 ext, A6F ext}, 120 s | 102 | 97 | ≈ 3.2–3.4 | its decision record first |
+   | R13 + R14 test + C1 hint (D-022, narrowed 2026-10-13) | `itx-r13.jsonl` (itx-r13): the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x}, seeds 0–1, 120 s | 58 | 97 | ≈ 1.9 | its decision record first; then `itrea d022-report` |
+   | C1 guard (D-022 second amendment) | `itx-r13b.jsonl` (itx-r13): chromaticindex1024-7, kumeu, glass4, radiationm18-12-05 × {A9@r13x, A6F@r13x} × seeds 0–1, 120 s | 16 | 97 | ≈ 0.5 | after the 58, same set |
 
    Run hours exclude the ~8 s per run of harness overhead and the governor's rests; window hours ≈ run hours / 0.55 +
    0.5 per window (D-021's budget). M4's stop rule: any thermal or cap void, or any run with a steady-state p95 above
@@ -136,6 +142,41 @@ Berk usually does not coordinate the sessions — the lease does.
   same window: kill the chain script first (`kill $(cat logs/chain-<id>.pid)`; otherwise it restores the servers when
   the pool ends), then `touch logs/pool.stop` — the pool opens no new block. Before relaunching, `rm -f logs/pool.stop`:
   the pool only tests that the file exists and nothing removes it, so a new pool would open no block and end `stopped`.
+  Every chain writes its PID file at launch, a replacement chain included (`chain-itx-m4c`, `-r13` and `-r13b` of
+  2026-10-13 have none, which leaves a chain waiting in its `until grep` loop findable only by a process scan).
+- **The stop-file trap.** A chain whose later steps are guarded by `if [ ! -f logs/pool.stop ]` skips them when the
+  file exists and falls through to `serving-window.sh restore`: stopping a pool with the stop file in order to run a
+  different pool next (as on 2026-10-13 15:1x, when the M4 calibration made way for D-022) would restore the servers
+  in the middle of the window. To switch pools, **replace the chain**, not just the pool: the new chain waits for the
+  running pool's end line, removes the stop file itself, then runs the next pool unconditionally
+  (`logs/chain-itx-r13.sh`):
+  ```bash
+  until grep -qE "pool <window-id> (done|stopped|halted)" logs/<old>.log; do sleep 15; done
+  rm -f logs/pool.stop
+  .venv/bin/python -m itrea.experiments.pool jobs/<next>.jsonl --layout pair --deadline HH:MM > logs/<next>.log 2>&1 < /dev/null
+  ```
+- **Replacing a running chain's tail** (2026-10-13 14:5x and 15:2x–15:3x; the running pool keeps running):
+  1. Write the new chain (`logs/chain-<new>.sh`, header comment: which chain it replaces and why): it waits on the
+     running pool's end line in that pool's log (`until grep -qE "pool <window-id> (done|stopped|halted)" …`), then
+     runs the remaining pools and ends with the restore (or states that it does not restore).
+  2. Find the old chain's bash: the running pool's PID is `pid` in `logs/pool-status.json` (also the window id's
+     suffix, and in `/tmp/itrea-runner.lock`); the chain bash that launched it is its parent, `PP=$(ps -o ppid= -p
+     <pool pid> | tr -d ' ')`. Confirm it before killing: `tr '\0' ' ' < /proc/$PP/cmdline` must name
+     `logs/chain-<old>.sh`, and `ps -o user= -p $PP` must be yours. If the old chain is not the pool's parent (a
+     replacement chain still in its wait loop) and has no PID file, scan `/proc/*/cmdline` with a pattern built by
+     concatenation (`PAT="chain-itx""-r13b"`) so it cannot match your own shell, and exclude `$$` — never `pgrep -f` /
+     `pkill -f`.
+  3. `kill $PP` — the bash only. The pool (and its runs) continue: it is reparented to `systemd --user` (on 10-13
+     pool 335372's parent became PID 2843, `systemd --user`). Never signal the pool or a run scope.
+  4. To end the running pool early as well (switching pools), `touch logs/pool.stop` only now, after the old bash is
+     gone; the new chain removes it when the pool's end line appears.
+  5. Launch the new chain detached (`setsid nohup … & echo $! > logs/chain-<new>.pid`); check its `.out` and the
+     journal entry name both chains. The lease, the restore timer and the hold lines must cover the new chain's end
+     (extend them as below if not).
+- **An idle box is used** (Berk 2026-10-13: "If the box is idle make the most of it"). Inside a daytime lease, chain the
+  queued pools back to back — performance runs first (D-024), then calibration or CPU-only checks (M6) that fill the
+  remaining hours — rather than ending a window with lease time left; never into the night rest (00:00–07:00): on
+  10-13 the lease, the restore timer and the hold lines were moved to 23:45 for M6 and no further.
 - **Extending the window** (as on 2026-10-09 14:11 and 16:12): re-claim with the same `--who` and the new `--until`,
   then move the restore timer and the hold lines with it:
   ```bash

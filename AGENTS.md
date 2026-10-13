@@ -5,24 +5,53 @@ Orbay (berk.orbay@tideseed.com). Repository: `Tideseed/i-trea-ii` (private while
 to the repository root; the code is the Python package `itrea` under `src/`. `CLAUDE.md` points here: this file holds
 every rule for agents working in the repository.
 
-**Status (2026-10-11): development phase; no confirmatory run yet.** The pre-registration D-002 v3.1 is binding since
+**Status (2026-10-13): development phase; no confirmatory run yet.** The pre-registration D-002 v3.1 is binding since
 the tag `prereg-v1` (2026-10-06). The SCIP screening's stage 1 is complete (324 candidates, seed 900); stage 2 is
 deferred (D-010 §5), so the hard pool is not frozen (#1). The algorithm is developed openly (D-010) at 120 s on
 17 instances — the development set (9, D-010, since 2026-10-06, `datasets/dev_set.csv`) and the class probe (8, D-014,
 since 2026-10-07, `datasets/classprobe_set.csv`), both permanently excluded from the test set; every development
 result is descriptive and lives in `vault/30-results/Development log.md`. Development defaults: **A3** (SCIP ↔ EA) =
 `configs/itrea2-dev-rc-ld.yaml` (lp_decode adopted, D-017); **A9** (SCIP ↔ EA ← cuOpt, D-015) and its matched control A3x =
-`configs/itrea2-dev-rc-3way.yaml`, with the GPU back-off (D-018) **not adopted** after stage 1 (2026-10-11: outcome rules held, mechanism M1/M3/M5 failed; next candidate phase Y only). Built and
-not adopted: Rank 1 by cuOpt's clearing rule (D-016). A9 pilot (seed 0, 7 instances, descriptive): vs SCIP alone 7
-better / 0 worse, mean d +0.68 [+0.42, +0.90]; vs cuOpt alone 3 / 4, −0.07 [−0.42, +0.25]. Tests on 2026-10-09: CPU
-suite 816 passed, the GPU tests of the new code 40 passed. **v1 target (D-019, Berk 2026-10-10):** checkpoint C1 on
-Fri 2026-10-23 (development closes on cuOpt 26.08), v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30)
-on cuOpt 26.10, daytime windows only; targets in the next-but-one section. Newest checkpoint:
-`vault/90-checkpoints/2026-10-11-1825.md` (D-018 stage 1 not adopted; D-021 our own external standard, F accepted). Every
-hypothesis and target below is pre-registered or planned, not a finding. Do not write, in any file, that I-TREA II
-"beats", "improves on" or "matches" anything until the corresponding experiment note in `vault/30-results/` says so
-with its numbers. (History: on 2026-10-06 01:4x the status read "built and tested on toy models; no commit, no tag, no
-experiment, no results" — 413 passed, 2 skipped.)
+`configs/itrea2-dev-rc-3way.yaml`. Built and not adopted: Rank 1 by cuOpt's clearing rule (D-016) and A9's GPU
+back-off (D-018 stage 1, 2026-10-11: every outcome rule held, the mechanism failed on M1 / M3 / M5; an analysis bug —
+`_band` read the seed spread of the old control `A9@bo0` — was fixed before the verdict). A9 pilot (seed 0, 7
+instances, descriptive): vs SCIP alone 7 better / 0 worse, mean d +0.68 [+0.42, +0.90]; vs cuOpt alone 3 / 4, −0.07
+[−0.42, +0.25].
+**External harness.** D-020 (GAMS's MIPfeas archive, downloaded on Berk's yes; GAMS's primal integral ported exactly —
+`gams_integral` equals GAMS's own function on all 3,495 of its traces) is narrowed by **D-021, our own standard ITX-1**,
+whose [Berk] items Berk accepted on 2026-10-11 (section below). Its footprint F is accepted on M2's soak (steady p95
+66–73 °C, maximum 76 °C over 4 runs of 600 s); M3 fixed the "does not fit F" list (eilA101-2, nw04, supportcase6;
+decision set 215); phase 1 and phase 2 are merged (phase 2: 6f0339d, 2026-10-12; 1,009 CPU tests passed on main after
+the merge; on 10-13 the runner's GPU tests passed — 4 passed, 1 skipped — and a cold-cache EA test). The M4
+calibration (A6F on D-020's 30 instances, 600 s) is **INTERIM and INCOMPLETE**: stopped by the performance-first rule
+after 19 of 30 runs; the interim report at 18 runs gives R = 1.416 [1.087, 1.903] on the call clock (2.118 on the
+launch clock) — cuOpt on F's 5 cores has a shifted geometric mean about 40 % above GAMS's 24-thread whole-box run on
+the same instances — and its late-clock check passed on the 6 of 10 strata-0–1 instances run (median −0.119 s). The
+remaining strata-0–1 runs finish before v1's stage 1; the footprint reading waits for 30 of 30. Nothing in M4 decides.
+**Staged testing (D-024, Berk 2026-10-13).** Performance runs first; targeted runs where a change can act, wider only
+after a hint whose threshold is fixed before the runs (futility-only: a hint gates widening, never declares success).
+Berk accepted v1's staging: stage 1 = the 20-instance panel plus the 5 H_cu-unseen instances where cuOpt finds no
+solution, × {A9, A6F}, hint = ratio of means ≤ 0.95; the guard-only stage runs whatever the hint says; A0 only on the
+81 instances a decision reads. **D-022** (R13 + R14 for A9) was narrowed and amended twice before any run was read:
+R13 is judged on the 3 instances where cuOpt's own 1e-4 "optimal" stop occurs (fhnw-binpack4-48, neos-3004026-krka,
+neos-960392) by validity, mechanism and a one-sided floor / band no-harm rule; C1's interim hint = ratio of means of
+P(120) A9@r13x / A6F@r13x ≤ 0.95 on the fixed 11 weak development instances, and its guard = mean d ≥ −0.05 over all
+17 — 74 runs (`jobs/itx-r13.jsonl` 58 + `jobs/itx-r13b.jsonl` 16, then D-021's M6) are running in window W-1013;
+**no result of them exists yet.** **D-023** (the back-off's phase Y only) follows D-022's verdict; it is still to be
+amended (D-024: 54 runs on 9 instances, was 84) before any `backoff2` run. **cuOpt 26.10:** NVIDIA/cuopt#2073 is
+fixed by PR #2098 (merged 2026-10-12, in 26.10; Berk confirmed 10-13) and verified on the nightly `26.10.0a294` in
+`~/venvs/cuopt-2610n` (presolve stays on with a SET callback; injected solutions accepted and exact; invalid offers
+rejected); limitation: cuOpt polls SET callbacks only when its GPU population records a new best. A9 two-way through
+it is #35 (not started). **Open:**
+our exact checker accepted incumbents below MIPLIB's proven optimum on glass4 (cuOpt rejects that point) and mas74,
+and rejected cuOpt incumbents on snowy (1) and neos-933966 (3) — a tolerance mismatch to investigate. **v1 target
+(D-019, Berk 2026-10-10):** checkpoint C1 on Fri 2026-10-23 (development closes on cuOpt 26.08), v1 at the end of
+November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10, daytime windows only; targets in the next-but-one
+section. Newest checkpoint: `vault/90-checkpoints/2026-10-13-1600.md`. Every hypothesis and target below is
+pre-registered or planned, not a finding. Do not write, in any file, that I-TREA II "beats", "improves on" or
+"matches" anything until the corresponding experiment note in `vault/30-results/` says so with its numbers. (History:
+on 2026-10-06 01:4x the status read "built and tested on toy models; no commit, no tag, no experiment, no results" —
+413 passed, 2 skipped.)
 
 ## Setting
 - Machine: NVIDIA DGX Spark — GB10 (10 × Cortex-X925 @ 3.9 GHz = cores 5–9, 15–19; 10 × Cortex-A725 @ 2.8 GHz = cores
@@ -33,9 +62,14 @@ experiment, no results" — 413 passed, 2 skipped.)
   user-solution round-trip test; also the EA's own LP and the lp_decode worker), NVIDIA cuOpt 26.08
   (`cuopt-cu13==26.8.*`). cuOpt is no longer only a control: alone it is arm A6, and since D-015 (2026-10-07) it is
   the third process of arm **A9** (SCIP ↔ EA ← cuOpt), where it streams its incumbents and bound to the EA on its own
-  channels and the EA passes them on to SCIP. cuOpt never receives a solution mid-run — its `SetSolutionCallback`
-  disables its presolve (feature request NVIDIA/cuopt#2073, filed 2026-10-07); a MIP start at launch is used with
-  presolve on (verified on glass4 2026-10-07, ~10 s overhead per restart), but no arm uses it yet. **v1 runs on cuOpt
+  channels and the EA passes them on to SCIP. cuOpt never receives a solution mid-run: on the installed 26.08 its
+  `SetSolutionCallback` disables its presolve (feature request NVIDIA/cuopt#2073, filed 2026-10-07). **Fixed in 26.10**
+  by PR #2098 (merged 2026-10-12; Berk confirmed 2026-10-13) and verified on the nightly `26.10.0a294` in the separate
+  venv `~/venvs/cuopt-2610n` (`tools/probe_cuopt_setsol.py`): presolve stays on, injected solutions in original order
+  are accepted within 1–6 ms and echoed exactly, infeasible offers are rejected; cuOpt polls SET callbacks only when
+  its GPU population records a new best (crna: 11 calls, all at 0.70–0.71 s; sing44: first call at 28.3 s). A9 stays
+  one-way until a two-way arm has its own record and test (#35). A MIP start at launch is used with presolve on
+  (verified on glass4 2026-10-07, ~10 s overhead per restart), but no arm uses it yet. **v1 runs on cuOpt
   26.10** once it is released (separate venv, API check, A6 re-baselined on the 17 instances; #31); if 26.10 is not out
   by Fri 2026-11-06, the v1 runs proceed on 26.08 and 26.10 follows as an addendum (D-019). Numba 0.64.0 (the CPU
   feasibility-jump reference); redis-py 8.1.0 for the exchange platform; pandas 3.0.3 / PyArrow 23.0.1 for the derived
@@ -134,7 +168,8 @@ only).
 ## Map
 Status: **core** = written before the design critique of 2026-10-05 and revised after it; **built** = written by build
 agents from 2026-10-06 on (the first build 00:0x–01:2x; development modules through 2026-10-09) and covered by the
-test suite (CPU 816 passed; the GPU tests of back-off, lp_decode, elite and EA run 40 passed; 2026-10-09). Caveat:
+test suite (CPU 816 passed and the GPU tests of back-off, lp_decode, elite and EA run 40 passed on 2026-10-09;
+CPU 1,009 passed on 2026-10-12 after D-021 phase 2). Caveat:
 `ea/population.py`, `ea/evaluate.py`, `ea/frontier.py`, `exchange/redis_mailbox.py`, `trace.py` and `problem.py` have
 no test file of their own — they are exercised through the engine, EA-process and runner tests (default settings);
 `ea/ranks.py` has `tests/test_ranks.py` and `tests/test_elite.py`, the file mailbox `tests/test_review_mailbox.py`.
@@ -197,7 +232,7 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria (M1–M5, outcome, fallbacks) applied to the run table and run directories, with a verdict (`itrea backoff-report --stage 0\|1`); the sanity rule gates on the measured duty only and reports the lane-steps ratio (D-018's second stated deviation; `--steps-gate` = the rule as first written); stage-1 control `A9@bo1s` — stage 0 read 2026-10-09; stage 1 read 2026-10-11 (`--failed keep`); `--stage 1y [--harness]` applies D-023's mechanism rules to set `backoff2` | built |
 | `tools/d022_report.py` | D-022's rules on the run table (`itrea d022-report [--followup]`): the second amendment's rule on the 3 instances where R13 can act (validity incl. each arm's harness, the mechanism, a one-sided floor / band no-harm leg; no mean), and C1's interim hint (ratio of means ≤ 0.95 on the fixed 11) and guard (mean d ≥ −0.05 over the 17) vs A6F, plus SCIP alone in D-013 terms | built |
 | `src/itrea/cli.py` | the `itrea` entry point: one table maps every command to its module | built |
-| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b`; `tests/test_configs.py` keeps it equal to the code). **Current development defaults** (D-010; never a confirmatory configuration): **A3** — `itrea2-dev-rc-ld.yaml` (`itrea2-dev-rc-3way` + `repair.continuous: lp_decode`, hash `f030e23909ad`, D-017); **A9 / A3x** — `itrea2-dev-rc-3way.yaml` (repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair; hash `1d12ad490dd0`; the runner adds `exchange.from_cuopt` for A9 and refuses lp_decode there); **D-018 stage 1** — `itrea2-dev-rc-3way-bo1.yaml` (back-off active with the stage-0 values: D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40; run hash `f67354be775d`) against `-bo1s.yaml` (the same values in shadow mode = the control; run hash `62bf82b236f6`). History: `-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms: shadow, forced duty ½ / ¼ / ⅛), `itrea2-adaptive.yaml`, `-adaptive-lps.yaml`, `-adaptive-lps-rc.yaml` (earlier development steps, D-010–D-012), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml` (D-002's E3) | core |
+| `configs/` | `itrea2-default.yaml` (all defaults, generated from `EAConfig()`; hash `9ac4a93bf93b`; `tests/test_configs.py` keeps it equal to the code). **Current development defaults** (D-010; never a confirmatory configuration): **A3** — `itrea2-dev-rc-ld.yaml` (`itrea2-dev-rc-3way` + `repair.continuous: lp_decode`, hash `f030e23909ad`, D-017); **A9 / A3x** — `itrea2-dev-rc-3way.yaml` (repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair; hash `1d12ad490dd0`; the runner adds `exchange.from_cuopt` for A9 and refuses lp_decode there); **D-018 stage 1** — `itrea2-dev-rc-3way-bo1.yaml` (back-off active with the stage-0 values: D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40; run hash `f67354be775d`) against `-bo1s.yaml` (the same values in shadow mode = the control; run hash `62bf82b236f6`); **D-023** — `itrea2-dev-rc-3way-boY.yaml` (phase Y only: bo1's values, active, patiences 100000 so the ladder never steps down; hash `5c8b535fb245`) against `-bo1s.yaml`, not run yet. History: `-3way-bo0/-bof50/-bof25/-bof12.yaml` (D-018 stage-0 arms: shadow, forced duty ½ / ¼ / ⅛), `itrea2-adaptive.yaml`, `-adaptive-lps.yaml`, `-adaptive-lps-rc.yaml` (earlier development steps, D-010–D-012), `itrea1-faithful.yaml` (a record of part I's choices, not a planned comparison), `ablations/*.yaml` (D-002's E3) | core |
 | `tools/serving-window.sh` | stop / restore the two local LLM servers for a window | core |
 | `tools/derive_mipfeas_strata.py` | D-021's sets → `datasets/mipfeas_strata.csv` (counts beside D-021's, sha256; `--check` re-derives) | built |
 | `tools/m0_replay.py` | D-021 M0: R12 replayed offline on recorded runs and GAMS's 3,495 traces, hours saved, A9's shape-only memory plan over the 233 | built |
@@ -206,6 +241,7 @@ Check a non-default branch before relying on it (`vault/80-reviews/2026-10-05 de
 | `tools/d017_report.py` | D-017's analysis: A3@ld1 vs A3@rc1e (M0–M4 and the outcome rules) | built |
 | `tools/probe_lp_decode.py` | probes the LP decode worker on stored vectors (CPU, read-only; D-017's gates before a window) | built |
 | `tools/cuopt_verify_mipstart.py` | cuOpt 26.08 MIP-start and stopping check on glass4 (GPU: only inside a window; run 2026-10-07) | built |
+| `tools/probe_cuopt_setsol.py`, `tools/probe_cuopt_setsol_report.py` | cuopt#2073's check: `SetSolutionCallback` with presolve (modes none / noop / inject / bad / raw) under any interpreter with cuOpt (the 26.08 venv or `~/venvs/cuopt-2610n`), and its report (GPU: only inside a lease; run 2026-10-13 on the 26.10 nightly, 31 solves) | built |
 | `tools/agg_probe.py`, `tools/agg_improve_probe.py` | CPU probes of `ea/aggregate.py` (feasibility and improvement payoff; 2026-10-06, negative on radiationm) | built |
 | `tools/lps_smoke.py` | hand-launched smoke run of the LP stream (SCIP + the NumPy EA through a file mailbox) | built |
 | `tools/screening-night.sh` | the screening chain: stage 1 → `build_runs` → stage 2 under one deadline (D-002 v3.1 §1.2) | built |

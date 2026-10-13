@@ -19,8 +19,25 @@ with times, arms × instances × seeds and the verdict; pool id, commit, runs co
 the test's decision record with the verdict by its own rules (e.g. *adopted*, *not adopted*, *inconclusive*,
 *proceed*) and any stated deviation from the letter of a rule. The numbers come from the test's report, which applies
 the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_report.py`, `itrea backoff-report --stage
-0|1`; commit it before the pool ends, as for D-017 and D-018), run single-threaded after `itrea build-runs`.
+0|1|1y`, `itrea d022-report [--followup]`, `itrea mipfeas-report --arm A6F`; commit it before the pool ends, as for
+D-017, D-018 and D-022), run single-threaded after `itrea build-runs`.
 Development results are descriptive; they are never quoted as confirmatory.
+
+**Interim readings** (a report run on part of a run set, e.g. D-021's M4 calibration at 18 of 30 on 2026-10-13: R =
+1.416 [1.087, 1.903], late-clock check on 6 of the 10 strata-0–1 instances) carry **INTERIM** and **INCOMPLETE (n of
+N)** in the title, the verdict line and wherever they are quoted, and **never decide**: no adoption, no PASS / FAIL, no
+"inside / outside the band", no change of plan rests on them. Say which runs are missing and when they run; the
+verdict comes from the complete set by the record's own rule. An interim look that a record registers in advance (a
+staged test's hint) is reported as that look, not as an interim reading of the final rule.
+
+**Staged results (D-024).** A stage-1 note reports the hint exactly as it was written before the runs (threshold,
+fixed instance set, how failures and skipped blocks count), its outcome — *hint present*, *no hint* or *incomplete* —
+and what it gated (which stage runs next; v1's guard-only stage runs either way). A hint is futility-only: never
+write a hint as a result ("A9 is better"), only as the gate it is. A note on a later stage reports the decisive
+reading over all instances, the stage-1 instances included, and beside it the **stage-2-only figure** as the selection
+check: conditional on a continuation the pooled estimate is slightly optimistic (by 1.2–2.5 points of the ratio in
+D-024's simulation; "better shown" ≈ 5 % instead of ≈ 3 % under no effect) — state that bias in the Caveats. For v1,
+every decisive aggregate is also given without R33's exposed instances (`itrea itx-report` prints both).
 
 ## Template
 ```markdown
@@ -65,3 +82,6 @@ Derived tables in `datasets/…` (committed), the analysis module that wrote the
 - If a result changes after a correction, add a dated correction block at the top; never overwrite the old numbers
   silently (optopt's PDI correction is the model).
 - Exploratory comparisons are labelled exploratory in the note, the index and anywhere they are quoted.
+- Interim and staged readings keep their labels (INTERIM / INCOMPLETE (n of N); hint present / no hint / incomplete)
+  in the index row and anywhere they are quoted, including messages to Berk; a note is never written for runs that
+  have not been read by their record's report.
