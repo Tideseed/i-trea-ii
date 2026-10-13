@@ -71,9 +71,9 @@ Checked per run (run.json and cuOpt's summary): A6F's cuOpt on cores 1–3, 5, 6
 with 4 threads (SCIP on 5); A9's cuOpt on 1–3 with 3 threads; both MIP gaps 0 in every cuOpt solve; OMP / OPENBLAS /
 MKL unset except in A6F@m1env; RMM 24 GB, host 24 GB; named scopes `itrea-run-…`; busy SM medians 2,392–2,405 MHz
 (GPU health ok); in-run ACPI maximum ≤ 78.5 °C; no compile on the clock (CuPy cache and project CUDA cache); no void
-check fired. Two items of D-021's M1 list could not run on the phase-1 code: a `ref_reached` stop (R12 was built in
-phase 2; its GPU test `test_ref_stop` passed on 10-13) and an RMM allocation error classified as a harness void (covered
-by the runner's fake-process tests, not by a GPU run).
+check fired. Two items of D-021's M1 list are not in the M1 record: a `ref_reached` stop (R12 was built only in
+phase 2; its GPU test `test_ref_stop` passed on 10-13) and an RMM allocation error classified as a harness void (D-021 lists it as a
+fake-process test; the journal's M1 entry does not record it).
 
 Primal integral P(120) as recorded (Berthold, call clock). **A smoke record, not a comparison** — one seed, three
 instances, arms with different core counts:
@@ -274,7 +274,7 @@ Both directions of a tolerance mismatch between our checker and the solvers turn
 - Analysis: `src/itrea/analysis/mipfeas.py` (`itrea mipfeas-report --arm A6F`: the late-clock check, R, D-021's
   reading); `src/itrea/analysis/check_solutions.py` (the checker, `TOL = 1e-6`); the sets in
   `datasets/mipfeas_strata.csv` (`tools/derive_mipfeas_strata.py`). The run table of these runs is not committed
-  (`datasets/runs.parquet` on main predates them).
+  (`datasets/runs.parquet` in the main checkout, untracked, predates them).
 - Records: D-021 § "M1 and M2 results", § "M3 result", § "Phase 2 built, M0 run, the sets fixed"; [[D-024 Targeted first, wider only on a hint — staged testing for development and v1]]
   rule 0; [[D-020 MIPfeas harness — GAMS's clock and integral, paired calibration of cuOpt 26.08]] (the sample, the
   integral, the clock); journal 2026-10-11 ("15:12–15:35", "15:35–18:17"), 2026-10-12 ("12:05", "12:3x–12:44"),
