@@ -583,3 +583,101 @@ def test_r1_r2_cli_default_paths_and_set(tmp_path):
     assert mj.main(["r2-ld", "--base", "r13x", "--nice", "10", "--out", str(out2)]) == 2
     assert mj.main(["r2-ld", "--base", "r13x", "--set", "r2-ld-2", "--out", str(out2)]) == 0
     assert {json.loads(x)["set"] for x in out2.read_text().splitlines()} == {"r2-ld-2"}
+
+
+# ------------------------------------------------------------------------------------- C1 diagnosis R3 (r3-diag)
+def test_r3_diag_jobs():
+    """R3 (C1 diagnosis note §5, D-027 as amended 2026-10-14: only what a rule reads): comp21, toguru, doon x {A6@r3,
+    A2@r3} + toguru, doon x A6F@r3 + chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3} (rule 4, the 18:3x amendment),
+    seeds 0-1, 120 s, ext on every arm, split dev, set r3-diag, one block per instance x seed: 22 runs in 8 blocks,
+    every run id distinct, the run hashes of the 16 earlier jobs unchanged."""
+    from itrea.experiments import pair
+    jobs = mj.r3_diag()
+    assert len(jobs) == 22
+    assert Counter(pair.arm_label(j) for j in jobs) == {"A6@r3": 8, "A6F@r3": 6, "A2@r3": 8}
+    chrom = [j for j in jobs if j["name"] == "chromaticindex1024-7"]
+    assert sorted((pair.arm_label(j), j["seed"]) for j in chrom) == sorted(
+        (a, s) for a in ("A6@r3", "A6F@r3", "A2@r3") for s in (0, 1))
+    assert {j["instance"] for j in chrom} == {"data/miplib/inst/chromaticindex1024-7.mps.gz"}
+    assert {j["set"] for j in jobs} == {"r3-diag"} and {j["split"] for j in jobs} == {"dev"}
+    assert {j["budget"] for j in jobs} == {120.0} and {j["seed"] for j in jobs} == {0, 1}
+    assert all(j["harness"] == "ext" and j["config"] is None and j["overrides"] == {} for j in jobs)
+    blocks = {b.id: sorted(r.label for r in b.runs) for b in make_blocks(jobs)}
+    assert len(blocks) == 8
+    for n in mj.R3_INSTANCES:
+        want = sorted(["A6@r3"] + (["A6F@r3"] if n in mj.R3_A6F_INSTANCES else [])
+                      + (["A2@r3"] if n in mj.R3_A2_INSTANCES else []))
+        assert blocks[f"{n}__s0__r3-diag"] == blocks[f"{n}__s1__r3-diag"] == want, n
+    ids = [pair.run_id_for(j) for j in jobs]
+    assert len(set(ids)) == 22
+    assert {i.rsplit("__", 1)[1] for i in ids} == {"e54170304dad", "82a371305f88", "9c3031af075f"}   # A6, A6F, A2
+
+
+def test_r3_diag_file_is_the_writers_output(tmp_path):
+    """jobs/r3-diag.jsonl is exactly what `make-jobs r3-diag` writes (the instance tables only; no instance read)."""
+    out = tmp_path / "r3.jsonl"
+    assert mj.main(["r3-diag", "--out", str(out)]) == 0
+    assert out.read_bytes() == (paths.ROOT / mj.R3_OUT).read_bytes()
+
+
+def test_r3_a6f_is_the_r13x_job_under_another_variant():
+    """A6F@r3 re-runs A6F@r13x like for like: each job equals the A6F@r13x line of the committed jobs/itx-r13.jsonl
+    (the file that ran on 2026-10-13) or, for chromaticindex1024-7, of jobs/itx-r13b.jsonl (the C1 guard, the same set
+    itx-r13) on every field but set, block, stratum and variant, so its run hash is the same
+    (82a371305f88), while its run id and its directory (traces/raw/r3-diag/) differ — the pool's resume never skips
+    an R3 run for an itx-r13 run, and the run table never needs a `#<set>` copy. No R3 run id is the id of any job of
+    another committed job file."""
+    from itrea.experiments import pair
+    r13 = {(j["name"], j["seed"]): j for f in ("itx-r13.jsonl", "itx-r13b.jsonl")
+           for j in map(json.loads, (paths.ROOT / "jobs" / f).read_text().splitlines())
+           if pair.arm_label(j) == "A6F@r13x"}
+    differ = {"set", "block", "stratum", "variant"}
+    r3 = [j for j in mj.r3_diag() if j["arm"] == "A6F"]
+    assert len(r3) == 6
+    for j in r3:
+        old = r13[(j["name"], j["seed"])]
+        assert {k: v for k, v in j.items() if k not in differ} == {k: v for k, v in old.items() if k not in differ}
+        assert pair.run_hash(j) == pair.run_hash(old) == "82a371305f88"
+        assert pair.run_id_for(j) != pair.run_id_for(old)
+        assert pair.run_dir_for(j).parent == pair.PairOptions().traces_dir / "raw" / "r3-diag"
+    mine = {pair.run_id_for(j) for j in mj.r3_diag()}
+    for f in sorted((paths.ROOT / "jobs").glob("*.jsonl")):
+        if f.name == "r3-diag.jsonl":
+            continue
+        for line in f.read_text().splitlines():
+            j = json.loads(line)
+            try:
+                rid = pair.run_id_for(j)
+            except Exception:           # noqa: BLE001 — a job whose config is gone cannot share an id with R3 anyway
+                continue
+            assert rid not in mine, (f.name, rid)
+
+
+def test_r3_diag_layout_and_memory_under_ext(tmp_path):
+    """The runner lays R3's arms out as the note says, on the GPU lane g0 (F = X925 5-6 + A725 1-3): A6@r3 = cuOpt
+    alone on A725 1-3 with 3 threads; A2@r3 = SCIP on X925 5 + that cuOpt (nothing on X925 6); A6F@r3 = cuOpt on all of
+    F with 5 threads — every cuOpt with gaps 0, no thread variables, RMM 24 / host 24 GB. D-003's gate: A6 69, A2 78,
+    A6F 69 GB (file mailbox); the pool's pair layout runs every R3 job on g0 and nowhere else."""
+    from itrea.experiments import pair, pool
+    o = pair.PairOptions(traces_dir=tmp_path, use_systemd=True, pin=True)
+    want = {"A6": {"cuopt": ([1, 2, 3], "3")}, "A6F": {"cuopt": ([1, 2, 3, 5, 6], "5")},
+            "A2": {"solver": ([5], None), "cuopt": ([1, 2, 3], "3")}}
+    need = {}
+    for j in mj.r3_diag():
+        cfg, _ = pair.effective_config(j, o)
+        procs = {p.role: p for p in pair.plan(j, o, tmp_path / pair.run_id_for(j, o), "S", cfg)}
+        assert {r: p.cores for r, p in procs.items()} == {r: c for r, (c, _) in want[j["arm"]].items()}, j
+        assert 6 not in {c for p in procs.values() for c in p.cores} or j["arm"] == "A6F"
+        c = procs["cuopt"]
+        assert c.argv[c.argv.index("--cpu-threads") + 1] == want[j["arm"]]["cuopt"][1]
+        assert "--mip-gap-zero" in c.argv and c.env_unset == pair.THREAD_VARS and c.mem_gb == c.gpu_gb == 24.0
+        assert "--send" not in c.argv                                     # no EA: cuOpt posts nothing
+        need[j["arm"]] = pair.job_budget(j, o).need_gb
+    assert need == dict(A6=69.0, A6F=69.0, A2=78.0)
+    p = pool.Pool(mj.r3_diag(), pool.PoolOptions(layout="pair", governor=False, logs_dir=tmp_path / "logs",
+                                                 pair_opts=pair.PairOptions(traces_dir=tmp_path)))
+    p.lanes, p.blocks = p._lanes(), make_blocks(mj.r3_diag())
+    assert all([lane.name for lane in p.lanes if p._accepts(lane, r)] == ["g0"] for b in p.blocks for r in b.runs)
+    lines = p.memory_arm_lines()
+    assert len(lines) == 3 and all(" on g0 (harness \"ext\"): " in x for x in lines)
+    assert any(x.startswith("memory per run: A2@r3 ") and x.endswith("= 78.0 GB") for x in lines)
