@@ -91,8 +91,9 @@ description: >
   budget, config path and overrides; the pool applies the Williams arm order per block from hash(instance, seed,
   20261005) and runs blocks in random order with strata interleaved.
 - The C1 diagnosis's R3 (`vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` §5; a diagnostic with
-  reading rules fixed in the note, no hint): `itrea make-jobs r3-diag` → `jobs/r3-diag.jsonl` (set `r3-diag`, 16 runs
-  as amended 2026-10-14 — only what a rule reads: A6@r3 / A2@r3 on comp21, toguru, doon + A6F@r3 on toguru, doon, ext,
+  reading rules fixed in the note, no hint): `itrea make-jobs r3-diag` → `jobs/r3-diag.jsonl` (set `r3-diag`, 22 runs
+  as amended 2026-10-14 — only what a rule reads: A6@r3 / A2@r3 on comp21, toguru, doon, chromaticindex + A6F@r3 on toguru,
+  doon, chromaticindex (rule 4, 18:3x), ext,
   120 s, seeds 0–1; A6F@r3 is A6F@r13x's job under its own variant, so its run ids are new); its record is D-027; read with `itrea d027-report`.
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
   before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
