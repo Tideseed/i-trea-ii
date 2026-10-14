@@ -18,7 +18,7 @@ the only place the mapping lives.
                                backoff2 | mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021
                                phase 1) | itx-v1 --tier T1..T5 | itx-a0 [--select all|d024|stage1] | itx-m6 | itx-m6a
                                (D-021 phase 2; itx-a0 --select d024 = D-024 (f)'s 81, the v1 stage-1 25 first) |
-                               r3-diag (C1 diagnosis R3, 30 runs)
+                               r3-diag (C1 diagnosis R3, 16 runs)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)

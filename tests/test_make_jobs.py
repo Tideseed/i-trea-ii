@@ -435,22 +435,24 @@ def test_itx_a0_81_file_is_the_writers_output(tmp_path):
 
 # ------------------------------------------------------------------------------------- C1 diagnosis R3 (r3-diag)
 def test_r3_diag_jobs():
-    """R3 (C1 diagnosis note §5): the six x {A6@r3, A6F@r3} + comp21, toguru, doon x A2@r3, seeds 0-1, 120 s, ext on
-    every arm, split dev, set r3-diag, one block per instance x seed: 30 runs in 12 blocks, every run id distinct."""
+    """R3 (C1 diagnosis note §5, D-027 as amended 2026-10-14: only what a rule reads): comp21, toguru, doon x {A6@r3,
+    A2@r3} + toguru, doon x A6F@r3, seeds 0-1, 120 s, ext on every arm, split dev, set r3-diag, one block per instance x
+    seed: 16 runs in 6 blocks, every run id distinct."""
     from itrea.experiments import pair
     jobs = mj.r3_diag()
-    assert len(jobs) == 30
-    assert Counter(pair.arm_label(j) for j in jobs) == {"A6@r3": 12, "A6F@r3": 12, "A2@r3": 6}
+    assert len(jobs) == 16
+    assert Counter(pair.arm_label(j) for j in jobs) == {"A6@r3": 6, "A6F@r3": 4, "A2@r3": 6}
     assert {j["set"] for j in jobs} == {"r3-diag"} and {j["split"] for j in jobs} == {"dev"}
     assert {j["budget"] for j in jobs} == {120.0} and {j["seed"] for j in jobs} == {0, 1}
     assert all(j["harness"] == "ext" and j["config"] is None and j["overrides"] == {} for j in jobs)
     blocks = {b.id: sorted(r.label for r in b.runs) for b in make_blocks(jobs)}
-    assert len(blocks) == 12
+    assert len(blocks) == 6
     for n in mj.R3_INSTANCES:
-        want = sorted(["A6@r3", "A6F@r3"] + (["A2@r3"] if n in mj.R3_A2_INSTANCES else []))
+        want = sorted(["A6@r3"] + (["A6F@r3"] if n in mj.R3_A6F_INSTANCES else [])
+                      + (["A2@r3"] if n in mj.R3_A2_INSTANCES else []))
         assert blocks[f"{n}__s0__r3-diag"] == blocks[f"{n}__s1__r3-diag"] == want, n
     ids = [pair.run_id_for(j) for j in jobs]
-    assert len(set(ids)) == 30
+    assert len(set(ids)) == 16
     assert {i.rsplit("__", 1)[1] for i in ids} == {"e54170304dad", "82a371305f88", "9c3031af075f"}   # A6, A6F, A2
 
 
@@ -472,7 +474,7 @@ def test_r3_a6f_is_the_r13x_job_under_another_variant():
                                                     .splitlines()) if pair.arm_label(j) == "A6F@r13x"}
     differ = {"set", "block", "stratum", "variant"}
     r3 = [j for j in mj.r3_diag() if j["arm"] == "A6F"]
-    assert len(r3) == 12
+    assert len(r3) == 4
     for j in r3:
         old = r13[(j["name"], j["seed"])]
         assert {k: v for k, v in j.items() if k not in differ} == {k: v for k, v in old.items() if k not in differ}

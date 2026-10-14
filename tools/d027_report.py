@@ -11,16 +11,16 @@ default thread counts):
                                                             [--failed both|exclude|keep] [--json out]
     itrea d027-report …                       (the same, through the entry point)
 
-Runs (`make-jobs r3-diag` -> jobs/r3-diag.jsonl, set r3-diag, 120 s, seeds 0–1, 30 runs): R3_INSTANCES (comp21-2idx,
-neos-4763324-toguru, neos-2746589-doon, sing44, item_placement_9903, ca__Scenario400_reserves_1) x {A6@r3, A6F@r3} and
-R3_A2_INSTANCES (comp21-2idx, toguru, doon) x A2@r3; instances and labels come from `make_jobs`, so the report and the
-job file cannot drift apart. Reads `datasets/runs.parquet` — `pt` (P(120) on the call clock), `cuopt_pt` (P(120) of
+Runs (`make-jobs r3-diag` -> jobs/r3-diag.jsonl, set r3-diag, 120 s, seeds 0–1, 16 runs — only what a rule reads,
+D-027's amendment of 2026-10-14 before any run, D-024 rule 4): R3_INSTANCES (comp21-2idx, neos-4763324-toguru,
+neos-2746589-doon) x A6@r3, R3_A6F_INSTANCES (toguru, doon) x A6F@r3 and R3_A2_INSTANCES (comp21-2idx, toguru, doon) x
+A2@r3; instances and labels come from `make_jobs`, so the report and the job file cannot drift apart. Reads `datasets/runs.parquet` — `pt` (P(120) on the call clock), `cuopt_pt` (P(120) of
 cuOpt's own checked incumbents), `cuopt_best_obj` (the objective of cuOpt's own last checked incumbent at 120 s),
 `sense`, `status`, `harness`, `cuda_compiled_on_clock`, `run_dir` — and each run's `run.json` (`processes[*].role /
 cores / cmd`, `config.harness`, `compiled_on_clock_cuda`).
 
 Validity (D-027: must hold before any rule is read; otherwise INVALID, and the report names the leg):
-  (a) complete: the 30 runs present and completed, each with P(120) (a void is moved aside by the pool and its rerun is
+  (a) complete: the 16 runs present and completed, each with P(120) (a void is moved aside by the pool and its rerun is
       the run read; a block skipped after its void leaves runs missing);
   (b) the harness: every run's resolved harness (run.json `config.harness`, else the run table's `harness`) equals
       `pair.resolve_harness("ext")`;
@@ -31,28 +31,31 @@ Validity (D-027: must hold before any rule is read; otherwise INVALID, and the r
 Failed runs (`--failed`): `exclude` is the letter — a failed run is not completed, so (a) fails and the reading is
 INVALID; `keep` reads a failed run as D-002 §6 keeps a crash (truncated at the crash, as build-runs scores it), a
 stated deviation from (a) that the report names; `both` (default) prints both readings when the set holds a failed run
-among the 30, else one.
+among the 16, else one.
 
 Quantities (D-027): P = P(120) on the call clock; in A6@ext and A6F@ext the arm's P is cuOpt's (`pt`); in A2@ext "P of
 cuOpt" is `cuopt_pt`, not the portfolio's; a seed spread is |P_s0 − P_s1| in raw P.
 
 Reading rules (D-027, fixed before the runs):
   1. Thread effect on instance i is present iff P̄(A6@ext) − P̄(A6F@ext) > max(0.05, the larger seed spread of either
-     arm), on all six (it replaces the note's §2 indicative footprint / slowdown split). Present on toguru or doon → the
-     layout question (a cuOpt thread on X925 6) goes to Berk with these numbers; otherwise the layout line is closed for
-     v1. On comp21, sing44, item_placement and ca the reading is reported and sends nothing to Berk by itself.
+     arm), on toguru and doon (the amendment runs A6F only there). Present on toguru or doon → the layout question (a
+     cuOpt thread on X925 6) goes to Berk with these numbers; otherwise the layout line is closed for v1.
   2. comp21's part 2, from cuOpt's final objective in A2@ext: >= 146 on both seeds → SCIP beside cuOpt is the cause (no
-     question for Berk; the MPS question is not raised); <= 133 on both seeds → the EA's CUDA context remains, and the
-     MPS question (a host change, Berk's) goes to Berk; anything else (mixed, or between 133 and 146) → inconclusive at
-     n = 2. Precondition: A6@ext's own cuOpt reaches <= 133 on both seeds; >= 146 on both seeds → the stall is the
-     3-thread footprint under ext, rule 2 does not apply (reported with rule 1's comp21 row; quoted beside the layout
-     question if rule 1 sends it); anything else → the precondition is not met, rule 2 is not read, comp21's part 2
+     question for Berk; the MPS question is not raised); <= 133 on both seeds → the EA's presence remains (D-027's
+     clarification of 2026-10-14: its CUDA context, residual GPU work, the send callback, host CPU and memory traffic on
+     core 6, SCIP's inputs from the EA — A2 sends nothing), and the MPS question (a host change, Berk's) goes to Berk
+     with that wording, MPS being one candidate, not an attribution; anything else (mixed, or between 133 and 146) →
+     inconclusive at n = 2. 146 is the lower of the two ext reference runs inside A9 (A9@r13x 149 / 146), so the rule
+     leans towards the "<= 133" and "inconclusive" outcomes (stated in the clarification). Precondition: A6@ext's own
+     cuOpt reaches <= 133 on both seeds; >= 146 on both seeds → the stall is the 3-thread footprint under ext, rule 2
+     does not apply (quoted beside the layout question if rule 1 sends it); anything else → the precondition is not
+     met, rule 2 is not read, comp21's part 2
      stays inconclusive at n = 2.
   3. SCIP's presence on toguru and doon: present iff P̄_cuOpt(A2@ext) − P̄(A6@ext) > max(0.05, the larger seed spread of
      either arm). Present → recorded as a cause of cuOpt's slowdown on that instance; absent → ruled out there at n = 2.
      Either way it names no lever and asks Berk nothing.
-Reported beside, read by no rule: A6F@r3 against A6F@r13x of 10-13 (set itx-r13, the same job and run hash) on the six —
-a day-to-day replicate of cuOpt alone on F. What goes to Berk: only rule 1 present on toguru or doon (the layout
+Reported beside, read by no rule: A6F@r3 against A6F@r13x of 10-13 (set itx-r13, the same job and run hash) on toguru
+and doon — a day-to-day replicate of cuOpt alone on F. What goes to Berk: only rule 1 present on toguru or doon (the layout
 exception) and rule 2's "<= 133 on both seeds" with its precondition met (CUDA MPS); every other outcome asks nothing.
 
 Readings this report adds where D-027 is silent (written with the code, 2026-10-14, before any run): rules 1 and 3 are
@@ -76,13 +79,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from itrea.experiments.make_jobs import R3_A2_INSTANCES, R3_BUDGET, R3_INSTANCES, R3_SEEDS, R3_SET, R3_VARIANT
+from itrea.experiments.make_jobs import (R3_A2_INSTANCES, R3_A6F_INSTANCES, R3_BUDGET, R3_INSTANCES, R3_SEEDS,
+                                         R3_SET, R3_VARIANT)
 from itrea.paths import DATASETS, ROOT
 
 A6, A6F, A2 = (f"{a}@{R3_VARIANT}" for a in ("A6", "A6F", "A2"))
 ARMS = (A6, A6F, A2)
 SET, SEEDS, BUDGET = R3_SET, tuple(R3_SEEDS), float(R3_BUDGET)
-INSTANCES, A2_INSTANCES = tuple(R3_INSTANCES), tuple(R3_A2_INSTANCES)
+INSTANCES, A6F_INSTANCES, A2_INSTANCES = tuple(R3_INSTANCES), tuple(R3_A6F_INSTANCES), tuple(R3_A2_INSTANCES)
 REPLICATE_SET, REPLICATE_ARM = "itx-r13", "A6F@r13x"       # reported beside A6F@r3, read by no rule
 BAND_MIN = 0.05
 LAYOUT_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon")     # rule 1's consequence
@@ -98,10 +102,10 @@ REUSE_SEP = "#"
 
 
 def expected_keys() -> list[tuple[str, str, int]]:
-    """(instance, label, seed) of the 30 runs the rules read."""
+    """(instance, label, seed) of the 16 runs the rules read."""
     out = []
     for n in INSTANCES:
-        for arm in (A6, A6F) + ((A2,) if n in A2_INSTANCES else ()):
+        for arm in (A6,) + ((A6F,) if n in A6F_INSTANCES else ()) + ((A2,) if n in A2_INSTANCES else ()):
             out += [(n, arm, s) for s in SEEDS]
     return out
 
@@ -222,7 +226,7 @@ def run_problems(row: dict, root: Path, ext: dict | None = None) -> dict[str, li
 
 
 def validity(cells: dict, missing: list, no_p: list, kept_failed: list, failed=()) -> dict:
-    """D-027's validity over the 30 runs: {leg: [problems]} and the verdict VALID / INVALID. `failed`: the missing keys
+    """D-027's validity over the 16 runs: {leg: [problems]} and the verdict VALID / INVALID. `failed`: the missing keys
     whose run failed (excluded by the letter)."""
     legs: dict[str, list[str]] = {k: [] for k in LEGS}
     legs["complete"] = [f"{'failed (not completed)' if k in failed else 'missing'} {k[0]} {k[1]} s{k[2]}"
@@ -233,7 +237,7 @@ def validity(cells: dict, missing: list, no_p: list, kept_failed: list, failed=(
     bad = [k for k in LEGS if legs[k]]
     return dict(verdict="INVALID" if bad else "VALID", failing=bad, legs=legs,
                 deviation=[f"{i} {a} s{s} failed and is read as D-002 §6 keeps a crash (a stated deviation from leg "
-                           f"(a): 30 of 30 completed)" for i, a, s in kept_failed])
+                           f"(a): 16 of 16 completed)" for i, a, s in kept_failed])
 
 
 # ----------------------------------------------------------------------------------------------- the rules
@@ -250,7 +254,7 @@ def banded(a: list[float], b: list[float]) -> dict:
 
 
 def rule1(cells: dict) -> dict:
-    per = {n: banded(_two(cells, n, A6, "pt"), _two(cells, n, A6F, "pt")) for n in INSTANCES}
+    per = {n: banded(_two(cells, n, A6, "pt"), _two(cells, n, A6F, "pt")) for n in A6F_INSTANCES}
     hit = [n for n in LAYOUT_INSTANCES if per[n]["present"]]
     if hit:
         return dict(per=per, consequence="QUESTION", text=f"thread effect present on {', '.join(hit)}: the layout "
@@ -274,8 +278,8 @@ def _band_of(v: list[float]) -> str:
 
 
 def rule2(cells: dict) -> dict:
-    a6, a6f = _objs(cells, A6), _objs(cells, A6F)
-    out = dict(a6=a6, a2=None, a6f=a6f)
+    a6 = _objs(cells, A6)
+    out = dict(a6=a6, a2=None)
     senses = {(a, s): cells[(COMP21, a, s)]["row"].get("sense") for a in (A6, A2) for s in SEEDS}
     wrong = {k: v for k, v in senses.items() if not _fin(v) or int(v) != 1}
     if wrong:
@@ -284,9 +288,8 @@ def rule2(cells: dict) -> dict:
     pre = _band_of(a6)
     if pre == "stall":
         return dict(out, status="FOOTPRINT", text="A6@r3's own cuOpt ends >= 146 on both seeds: the stall is the "
-                                                  "3-thread footprint under ext; rule 2 does not apply (reported with "
-                                                  "rule 1's comp21 row; quoted beside the layout question if rule 1 "
-                                                  "sends it)")
+                                                  "3-thread footprint under ext; rule 2 does not apply (quoted beside "
+                                                  "the layout question if rule 1 sends it)")
     if pre == "mixed":
         return dict(out, status="PRECONDITION NOT MET", text="A6@r3's own cuOpt did not reach <= 133 on both seeds "
                                                              "(nor end >= 146 on both): rule 2 is not read; comp21's "
@@ -298,9 +301,11 @@ def rule2(cells: dict) -> dict:
         return dict(out, status="SCIP", text="cuOpt in A2@r3 >= 146 on both seeds: SCIP beside cuOpt is the cause (no "
                                              "question for Berk; the MPS question is not raised)")
     if v == "alone":
-        return dict(out, status="EA CONTEXT", text="cuOpt in A2@r3 <= 133 on both seeds: the EA's CUDA context "
-                                                   "remains, and the MPS question (a host change, Berk's) goes to Berk "
-                                                   "with these numbers")
+        return dict(out, status="EA PRESENCE", text="cuOpt in A2@r3 <= 133 on both seeds: the EA's presence remains "
+                                                    "(its CUDA context, residual GPU work, the send callback, host CPU "
+                                                    "and memory traffic on core 6, SCIP's inputs from the EA); the MPS "
+                                                    "question (a host change, Berk's) goes to Berk with these numbers, "
+                                                    "MPS being one candidate, not an attribution")
     return dict(out, status="INCONCLUSIVE", text="cuOpt in A2@r3 neither >= 146 nor <= 133 on both seeds: "
                                                  "inconclusive at n = 2")
 
@@ -321,17 +326,18 @@ def to_berk(r1: dict, r2: dict) -> list[str]:
     if r1["consequence"] == "QUESTION":
         out.append("the layout question (a cuOpt thread on X925 6): " + r1["text"].split(":")[0]
                    + ("; with rule 2's footprint reading on comp21" if r2["status"] == "FOOTPRINT" else ""))
-    if r2["status"] == "EA CONTEXT":
+    if r2["status"] == "EA PRESENCE":
         out.append("the MPS question (a host change): cuOpt in A2@r3 <= 133 on both seeds on comp21")
     return out
 
 
 def replicate(runs: pd.DataFrame, cells: dict) -> dict:
-    """A6F@r3 against A6F@r13x of 10-13 on the six (reported beside, read by no rule): {instance: P per seed}."""
+    """A6F@r3 against A6F@r13x of 10-13 on toguru and doon (reported beside, read by no rule): {instance: P per
+    seed}."""
     old, _ = select(runs, REPLICATE_SET, False, (REPLICATE_ARM,))
     by = {(r["instance"], int(r["seed"])): r.get("pt") for r in old.to_dict("records")}
     out = {}
-    for n in INSTANCES:
+    for n in A6F_INSTANCES:
         now = [cells[(n, A6F, s)]["row"].get("pt") if (n, A6F, s) in cells else None for s in SEEDS]
         out[n] = dict(r3=now, r13x=[by.get((n, s)) for s in SEEDS])
     return out
@@ -387,7 +393,7 @@ def render(rep: dict) -> str:
     L = [f"D-027 report (C1 diagnosis R3), set {rep['set']}: rules fixed in D-027 before any run; interim, n = 2 seeds "
          f"per cell; a diagnostic — no hint, no adoption"]
     if rep["failed_runs"]:
-        L.append(f"failed runs among the 30: {', '.join(rep['failed_runs'])}")
+        L.append(f"failed runs among the 16: {', '.join(rep['failed_runs'])}")
     if rep["other_rows"]:
         L.append(f"rows of the set no rule reads: {', '.join(rep['other_rows'])}")
     for rd in rep["readings"]:
@@ -418,12 +424,12 @@ def render(rep: dict) -> str:
                 word = "PRESENT" if x["present"] else ("absent (A6@r3 lower)" if x["diff"] < -x["band"] else "absent")
                 L.append(f"  {n}: A6 {_f(x['a'][0])} / {_f(x['a'][1])} (mean {_f(x['mean_a'])}), A6F {_f(x['b'][0])} "
                          f"/ {_f(x['b'][1])} (mean {_f(x['mean_b'])}); diff {x['diff']:+.3f}, band {x['band']:.3f} "
-                         f"-> {word}" + ("" if n in LAYOUT_INSTANCES else " (reported; sends nothing by itself)"))
+                         f"-> {word}")
             L.append(f"  -> {r1['consequence']}: {r1['text']}")
             r2 = rd["rule2"]
             L.append(f"Rule 2 (comp21's part 2; cuOpt's final objective; >= {STALL_OBJ:g} / <= {ALONE_OBJ:g} on both "
                      f"seeds):")
-            L.append(f"  A6@r3 {_obj(r2['a6'])}; A2@r3 {_obj(r2['a2'])}; A6F@r3 (reported) {_obj(r2['a6f'])}")
+            L.append(f"  A6@r3 {_obj(r2['a6'])}; A2@r3 {_obj(r2['a2'])}")
             L.append(f"  -> {r2['status']}: {r2['text']}")
             L.append("Rule 3 (SCIP's presence: P̄_cuOpt(A2@r3) − P̄(A6@r3) > max(0.05, the larger raw seed spread)):")
             for n, x in rd["rule3"]["per"].items():

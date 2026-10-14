@@ -1,6 +1,6 @@
 """`tools/d027_report.py` (D-027: the same-day diagnostic of cuOpt's thread count and SCIP's presence, R3 of the C1
 diagnosis note) on synthetic run tables and run directories — no solver, no GPU. Validity as one gate before any rule
-(the 30 runs complete with P(120), the ext harness, the layout read from run.json — threads, cores, X925 6 idle, no EA
+(the 16 runs complete with P(120), the ext harness, the layout read from run.json — threads, cores, X925 6 idle, no EA
 — and no compile on the clock; INVALID names the leg); failed runs under both readings (`exclude` = INVALID by the
 letter, `keep` = read with a stated deviation). Rule 1's band (max(0.05, the larger raw seed spread), strict,
 one-sided) and its consequence on toguru / doon; rule 2's precondition (A6@r3's cuOpt <= 133 on both seeds; >= 146 on
@@ -62,7 +62,7 @@ OBJ_DEF = {R.A6: (120.0, 125.0), R.A6F: (117.0, 133.0), R.A2: (150.0, 160.0)}
 
 
 def world(root: Path, *, p=None, cpt=None, obj=None, drop=(), extra=(), per=None) -> pd.DataFrame:
-    """The 30 runs (R.expected_keys) with P(120) from `p[(inst, arm)]` (else P_DEF), cuOpt's P from `cpt` (else = P
+    """The 16 runs (R.expected_keys) with P(120) from `p[(inst, arm)]` (else P_DEF), cuOpt's P from `cpt` (else = P
     for A6 / A6F and 0.5 for A2), comp21's cuOpt objective from `obj[arm]` (else OBJ_DEF; None = no incumbent);
     `drop` = keys left out, `per[key]` = make() keyword overrides (`pt` included), `extra` = more rows."""
     p, cpt, obj, per = p or {}, cpt or {}, obj or {}, per or {}
@@ -87,7 +87,7 @@ def one(root, runs, **kw) -> dict:
 
 
 def test_constants_follow_the_job_writer_and_the_runner(tmp_path):
-    """The report reads exactly the writer's 30 keys, and its layout table is what the runner plans for those jobs
+    """The report reads exactly the writer's 16 keys, and its layout table is what the runner plans for those jobs
     (no process on X925 6 in A6 / A2)."""
     jobs = mj.r3_diag()
     assert sorted(R.expected_keys()) == sorted((j["name"], pair.arm_label(j), j["seed"]) for j in jobs)
@@ -104,47 +104,46 @@ def test_constants_follow_the_job_writer_and_the_runner(tmp_path):
 
 def test_complete_defaults_valid_closed_scip(tmp_path):
     rd = one(tmp_path, world(tmp_path))
-    assert (rd["n_present"], rd["n_expected"]) == (30, 30)
+    assert (rd["n_present"], rd["n_expected"]) == (16, 16)
     assert rd["validity"]["verdict"] == "VALID" and rd["validity"]["failing"] == []
     assert not any(x["present"] for x in rd["rule1"]["per"].values()) and rd["rule1"]["consequence"] == "CLOSED"
     assert rd["rule2"]["status"] == "SCIP" and rd["rule2"]["a2"] == [150.0, 160.0]
     assert not any(x["present"] for x in rd["rule3"]["per"].values())
     assert "ruled out on" in rd["rule3"]["per"][TOGURU]["text"] and rd["to_berk"] == []
     txt = R.render(R.report(world(tmp_path / "b"), tmp_path / "b"))
-    assert "VALIDITY VALID: 30 of 30 runs present" in txt and "-> CLOSED" in txt and "-> SCIP: " in txt
+    assert "VALIDITY VALID: 16 of 16 runs present" in txt and "-> CLOSED" in txt and "-> SCIP: " in txt
     assert "To Berk: nothing" in txt
 
 
 def test_rule1_band_one_sided_and_question(tmp_path):
     p = {(TOGURU, R.A6): (0.70, 0.70), (TOGURU, R.A6F): (0.60, 0.62),       # diff 0.09 > band 0.05: present
-         (SING, R.A6): (0.60, 0.80), (SING, R.A6F): (0.50, 0.52),           # diff 0.19 < band 0.20 (A6's spread)
-         (COMP21, R.A6): (0.75, 0.25), (COMP21, R.A6F): (0.0, 0.0),         # diff 0.5 == band 0.5: strict, absent
-         (DOON, R.A6): (0.30, 0.30), (DOON, R.A6F): (0.60, 0.60)}           # reverse: absent, never present
+         (DOON, R.A6): (0.60, 0.80), (DOON, R.A6F): (0.50, 0.52)}           # diff 0.19 < band 0.20 (A6's spread)
     rd = one(tmp_path, world(tmp_path, p=p))
     per = rd["rule1"]["per"]
+    assert set(per) == {TOGURU, DOON}                                      # A6F runs only there (the amendment)
     assert per[TOGURU]["present"] and per[TOGURU]["diff"] == pytest.approx(0.09) and per[TOGURU]["band"] == 0.05
-    assert not per[SING]["present"] and per[SING]["band"] == pytest.approx(0.20)
-    assert not per[COMP21]["present"] and per[COMP21]["diff"] == per[COMP21]["band"] == 0.5
-    assert not per[DOON]["present"] and per[DOON]["diff"] == pytest.approx(-0.30)
+    assert not per[DOON]["present"] and per[DOON]["band"] == pytest.approx(0.20)
     assert rd["rule1"]["consequence"] == "QUESTION" and TOGURU in rd["rule1"]["text"]
     assert len(rd["to_berk"]) == 1 and rd["to_berk"][0].startswith("the layout question")
     txt = R.render(R.report(world(tmp_path / "b", p=p), tmp_path / "b"))
-    assert "absent (A6@r3 lower)" in txt and "-> PRESENT" in txt and "-> QUESTION" in txt
-    assert "(reported; sends nothing by itself)" in txt
+    assert "-> PRESENT" in txt and "-> QUESTION" in txt
 
 
-def test_rule1_present_off_toguru_and_doon_still_closes(tmp_path):
-    """Present on sing44 only: reported, but the layout line closes (the rule names toguru and doon)."""
-    rd = one(tmp_path, world(tmp_path, p={(SING, R.A6): (0.8, 0.8), (SING, R.A6F): (0.5, 0.5)}))
-    assert rd["rule1"]["per"][SING]["present"] and rd["rule1"]["consequence"] == "CLOSED" and rd["to_berk"] == []
+@pytest.mark.parametrize("a6, a6f, present, word", [
+    ((0.75, 0.25), (0.0, 0.0), False, "-> absent"),                         # diff 0.5 == band 0.5: strict
+    ((0.30, 0.30), (0.60, 0.60), False, "absent (A6@r3 lower)")])            # reverse: never present
+def test_rule1_is_strict_and_one_sided(tmp_path, a6, a6f, present, word):
+    rd = one(tmp_path, world(tmp_path, p={(DOON, R.A6): a6, (DOON, R.A6F): a6f}))
+    assert rd["rule1"]["per"][DOON]["present"] is present and rd["rule1"]["consequence"] == "CLOSED"
+    assert word in R.render(R.report(world(tmp_path / "b", p={(DOON, R.A6): a6, (DOON, R.A6F): a6f}), tmp_path / "b"))
 
 
 @pytest.mark.parametrize("a6, a2, status, words", [
     ((120.0, 125.0), (150.0, 160.0), "SCIP", "SCIP beside cuOpt is the cause"),
     ((133.0, 133.0), (146.0, 146.0), "SCIP", "SCIP beside cuOpt"),                     # both thresholds inclusive
     ((120.0, 125.0), (None, 150.0), "SCIP", "SCIP beside cuOpt"),                      # no incumbent = +inf
-    ((120.0, 125.0), (120.0, 130.0), "EA CONTEXT", "MPS question"),
-    ((120.0, 125.0), (133.0, 133.0), "EA CONTEXT", "EA's CUDA context"),
+    ((120.0, 125.0), (120.0, 130.0), "EA PRESENCE", "MPS question"),
+    ((120.0, 125.0), (133.0, 133.0), "EA PRESENCE", "the EA's presence remains"),
     ((120.0, 125.0), (140.0, 140.0), "INCONCLUSIVE", "inconclusive at n = 2"),          # between
     ((120.0, 125.0), (130.0, 150.0), "INCONCLUSIVE", "inconclusive at n = 2"),          # mixed
     ((150.0, 160.0), (120.0, 120.0), "FOOTPRINT", "3-thread footprint under ext"),      # the precondition's stall
@@ -156,10 +155,10 @@ def test_rule2_precondition_and_outcomes(tmp_path, a6, a2, status, words):
     rd = one(tmp_path, world(tmp_path, obj={R.A6: a6, R.A2: a2}))
     assert rd["rule2"]["status"] == status and words in rd["rule2"]["text"]
     assert rd["rule2"]["a6"] == [math.inf if x is None else x for x in a6]
-    read_a2 = status in ("SCIP", "EA CONTEXT", "INCONCLUSIVE")
+    read_a2 = status in ("SCIP", "EA PRESENCE", "INCONCLUSIVE")
     assert rd["rule2"]["a2"] == ([math.inf if x is None else x for x in a2] if read_a2 else None)
-    assert rd["rule2"]["a6f"] == [117.0, 133.0]                        # reported beside, never read
-    assert (rd["to_berk"] != []) == (status == "EA CONTEXT")
+    assert "a6f" not in rd["rule2"]                                   # A6F is not run on comp21 (the amendment)
+    assert (rd["to_berk"] != []) == (status == "EA PRESENCE")
 
 
 def test_rule2_sense_and_the_footprint_beside_the_layout_question(tmp_path):
@@ -201,7 +200,7 @@ def test_rule3_reads_cuopts_own_p_in_a2(tmp_path):
     ((TOGURU, R.A6, 1), dict(harness=None), "harness", "harness None"),
     ((TOGURU, R.A6, 1), dict(compiled=True), "compile", "compiled on the clock"),
     ((TOGURU, R.A6, 1), dict(run_json=False), "layout", "no run.json"),
-    ((SING, R.A6F, 0), dict(pt=math.nan), "complete", "no P(120)"),
+    ((DOON, R.A6F, 0), dict(pt=math.nan), "complete", "no P(120)"),
 ])
 def test_validity_is_one_gate_and_names_the_leg(tmp_path, key, kw, leg, why):
     """Any run off the note's layout, off the ext harness, compiled on the clock or without P(120) makes the whole
@@ -219,7 +218,7 @@ def test_a_missing_run_is_invalid(tmp_path):
     rd = one(tmp_path, world(tmp_path, drop={(TOGURU, R.A6, 1)}))
     assert rd["validity"]["verdict"] == "INVALID"
     assert rd["validity"]["legs"]["complete"] == [f"missing {TOGURU} A6@r3 s1"]
-    assert rd["n_present"] == 29 and rd["rule1"] is None
+    assert rd["n_present"] == 15 and rd["rule1"] is None
 
 
 def test_harness_from_the_table_when_run_json_has_none(tmp_path):
@@ -268,13 +267,13 @@ def test_replicate_beside_and_selection(tmp_path):
     assert rd["validity"]["verdict"] == "VALID" and rd["rule1"]["per"][TOGURU]["a"] == [0.5, 0.5]
     assert [d["run_id"] for d in rd["duplicates"]] == [f"{TOGURU}__A6@r3__s0__120s__x#other"]
     assert rd["replicate"][TOGURU] == dict(r3=[0.5, 0.5], r13x=[0.539, 0.559])
-    assert rd["replicate"][SING] == dict(r3=[0.5, 0.5], r13x=[None, None])
+    assert rd["replicate"][DOON] == dict(r3=[0.5, 0.5], r13x=[None, None]) and set(rd["replicate"]) == {TOGURU, DOON}
     others = R.report(runs, tmp_path)["other_rows"]
     assert len(others) == 3 and "voided" in others and "r13x-0" not in others     # the #other copy: a duplicate
     assert "r13x 0.539 / 0.559" in R.render(R.report(runs, tmp_path))
-    again = world(tmp_path / "b", per={(SING, R.A6, 0): dict(attempt=0)},
-                  extra=[make(tmp_path / "b", SING, R.A6, 0, 0.9, attempt=1, run_id="second")])
-    assert one(tmp_path / "b", again)["rule1"]["per"][SING]["a"] == [0.9, 0.5]
+    again = world(tmp_path / "b", per={(DOON, R.A6, 0): dict(attempt=0)},
+                  extra=[make(tmp_path / "b", DOON, R.A6, 0, 0.9, attempt=1, run_id="second")])
+    assert one(tmp_path / "b", again)["rule1"]["per"][DOON]["a"] == [0.9, 0.5]
 
 
 def test_main_prints_and_writes_json(tmp_path, capsys):
@@ -288,6 +287,6 @@ def test_main_prints_and_writes_json(tmp_path, capsys):
     js = json.loads((tmp_path / "d027.json").read_text())
     (rd,) = js["readings"]
     assert rd["validity"]["verdict"] == "VALID" and rd["rule1"]["consequence"] == "QUESTION"
-    assert rd["rule2"]["status"] == "SCIP" and rd["rule2"]["a2"] == ["inf", 147.0] and len(rd["runs"]) == 30
+    assert rd["rule2"]["status"] == "SCIP" and rd["rule2"]["a2"] == ["inf", 147.0] and len(rd["runs"]) == 16
     assert rd["runs"][f"{DOON} A6@r3 s0"]["pt"] == 1.0 and len(rd["to_berk"]) == 1
     assert R.main(["--runs", str(tmp_path / "nothing.parquet")]) == 2
