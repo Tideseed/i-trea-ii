@@ -1,6 +1,7 @@
-"""R1 of the C1 diagnosis (vault `30-results/2026-10-14 C1 diagnosis and improvement candidates.md`): the EA host waits
-on the GPU by blocking sync (`host.cuda_sched`, `itrea.ea.cuda_sched`), its fallbacks (a) renice after the LP worker's
-spawn (`host.nice_after_lp_spawn`) and (b) yield, and the instrumentation recorded in every run (the LP worker's own
+"""R1 of the C1 diagnosis (vault `30-results/2026-10-14 C1 diagnosis and improvement candidates.md`, D-025): the EA host
+waits on the GPU by blocking sync (`host.cuda_sched`, `itrea.ea.cuda_sched`), its fallbacks (a) `bnice` — renice +10
+relative to the LP worker right after its spawn (`host.nice_after_lp_spawn`), no context flag — and (b) `ysync` —
+yield, the read-back of the flags under CUDA's default ("auto"), and the instrumentation recorded in every run (the LP worker's own
 clock and CPU in the `lp` event, the EA's on-clock CPU, the FJ launch count).
 
 CPU tests only touch a FAKE driver (no libcuda call, no CuPy device): the configuration, its hash rule and the variant
@@ -39,9 +40,9 @@ BSYNC = {"host.cuda_sched": "blocking_sync"}
 
 # the variant files of R1 (and R2, test_lp_decode_gate.py) and their pinned hashes: EA configuration hash, and the
 # run hash of an A9 job under the ext harness (exchange.from_cuopt added by the runner; glass4, 120 s)
-R1_FILES = {"bsync": ("305c8902d763", "330a10a77556"), "bsyncn": ("223d58011e27", "c8fee6a389f6"),
-            "byield": ("f81d6b6209f0", "a08221cca653"), "boY-bsync": ("29e61aa41619", "b760e770cb34"),
-            "boY-bsyncn": ("5e74022a7fad", "cdb6572035d8"), "boY-byield": ("666865eac174", "22137f009005")}
+R1_FILES = {"bsync": ("305c8902d763", "330a10a77556"), "bnice": ("96a299330981", "d266e4aaecbe"),
+            "ysync": ("f81d6b6209f0", "a08221cca653"), "boY-bsync": ("29e61aa41619", "b760e770cb34"),
+            "boY-bnice": ("5b1c4779c74b", "b4f4af8376dd"), "boY-ysync": ("666865eac174", "22137f009005")}
 
 
 def _cfg(name: str) -> EAConfig:
@@ -108,14 +109,15 @@ def test_unknown_host_key_is_refused():
 
 @pytest.mark.parametrize("name", sorted(R1_FILES))
 def test_r1_variant_files_are_their_base_plus_one_change(name):
-    """bsync / bsyncn / byield on the A9 development default, and the same three on D-023's boY (the treatment when
-    the control is A9@boY): each file is its base verbatim plus the one change, and its hashes are pinned."""
+    """bsync / bnice / ysync on the A9 development default, and the same three on D-023's boY (the treatment when the
+    control is A9@boY): each file is its base verbatim plus the one change — bnice is the renice WITHOUT the context
+    flag (D-025's fallback (a)) — and its hashes are pinned."""
     from itrea.experiments import pair
     base = "boY" if name.startswith("boY-") else ""
     v = name.removeprefix("boY-")
     want = {"bsync": {"host.cuda_sched": "blocking_sync"},
-            "bsyncn": {"host.cuda_sched": "blocking_sync", "host.nice_after_lp_spawn": 10},
-            "byield": {"host.cuda_sched": "yield"}}[v]
+            "bnice": {"host.nice_after_lp_spawn": 10},
+            "ysync": {"host.cuda_sched": "yield"}}[v]
     cfg = _cfg(name)
     assert _diff(_cfg(base), cfg) == want
     assert cfg.name == f"itrea2-dev-rc-3way-{name}"
@@ -179,10 +181,32 @@ def test_apply_yield_and_auto():
     api = FakeAPI()
     assert CS.apply("yield", api=api)["flags_set"] == CS.CU_CTX_SCHED_YIELD
     quiet = FakeAPI()
-    rec = CS.apply("auto", api=quiet)                           # the default calls nothing
-    assert quiet.calls == [] and rec["state"] == "default" and CS.verify(rec) is rec
+    rec = CS.apply("auto", api=quiet)                           # the default sets nothing before the context exists
+    assert quiet.calls == [] and rec["state"] == "default"
     with pytest.raises(ValueError, match="cuda_sched"):
         CS.apply("spin", api=FakeAPI())
+
+
+def test_auto_reads_the_active_flags_back_and_never_raises():
+    """D-025's control: under "auto" `verify` (after the context exists) only READS the primary context's flags —
+    no set call — records them (`sched_active`, state "read") and the state at the end; a flag that is not auto or an
+    inactive context is recorded, never raised (the report reads it as a validity leg); a driver that cannot be read
+    is recorded as `read_error`."""
+    api = FakeAPI(flags=0x10, active=True)
+    rec = CS.verify(CS.apply("auto", api=api), api=api)
+    assert [c[0] for c in api.calls] == ["init", "device_get", "get_state"]
+    assert rec["state"] == "read" and rec["sched_active"] == "auto" and rec["flags_active"] == 0x10
+    assert rec["active"] is True and rec["device"] == 7
+    assert CS.state_at_end(rec) == dict(flags_at_end=0x10, active_at_end=True, sched_at_end="auto")
+    assert "_api" not in CS.public(rec) and json.dumps(CS.public(rec))
+    odd = CS.verify(CS.apply("auto"), api=FakeAPI(flags=CS.CU_CTX_SCHED_SPIN, active=False))
+    assert odd["state"] == "read" and odd["sched_active"] == "spin" and odd["active"] is False
+
+    class Broken(FakeAPI):
+        def init(self):
+            raise CS.CudaSchedError("cuInit(0) returned CUresult 100")
+    bad = CS.verify(CS.apply("auto"), api=Broken())
+    assert bad["state"] == "read_error" and "100" in bad["read_error"] and CS.state_at_end(bad) == {}
 
 
 def test_apply_refuses_an_active_context_and_a_flag_that_does_not_hold():
@@ -321,8 +345,10 @@ def test_phase_events_are_blocking_under_blocking_sync(monkeypatch, mode, block)
 
 
 def test_renice_threads_logic(monkeypatch, tmp_path):
-    """renice_threads on fake thread ids (os.getpriority / os.setpriority patched; this process is never reniced):
-    every thread below the value is set, one at or above it is kept, a thread gone meanwhile is skipped."""
+    """renice_threads on fake thread ids (os.getpriority / os.setpriority patched; this process is never reniced): the
+    target is the main thread's nice + the value (relative to the LP worker it just spawned), every thread below it is
+    set, one at or above it is kept, a thread gone meanwhile is skipped; at a high starting nice the cap at 19 shows as
+    a gap below the value."""
     for tid in ("11", "12", "13", "14"):
         (tmp_path / tid).mkdir()
     (tmp_path / "x").mkdir()                                    # not a thread id
@@ -340,12 +366,17 @@ def test_renice_threads_logic(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "setpriority", setp)
     rec = renice_threads(10, task_dir=tmp_path)
     assert nice == {os.getpid(): 0, 11: 10, 12: 10, 13: 15}     # 14 ended before it was read; 13 kept at 15
-    assert rec == dict(value=10, threads=4, set=2, kept=1, before=0, after=0)
+    assert rec == dict(value=10, threads=4, set=2, kept=1, before=0, target=10, gap=10, after=0)
+    nice.update({os.getpid(): 12, 11: 12, 12: 12, 13: 12})
+    rec = renice_threads(10, task_dir=tmp_path)                 # 12 + 10 > 19: the cap
+    assert nice == {os.getpid(): 12, 11: 19, 12: 19, 13: 19}
+    assert rec["target"] == 19 and rec["gap"] == 7 and rec["set"] == 3
 
 
 def test_renice_threads_sets_every_thread_and_never_lowers():
-    """In a subprocess (never this process): two extra threads, renice to base + 3, every thread reads it; then from
-    base + 5 a renice to base + 3 keeps base + 5. Skipped when the test process runs above nice 14."""
+    """In a subprocess (never this process): two extra threads, a renice by +3 sets every thread to base + 3; after
+    os.nice(2) on the main thread (base + 5) a renice by +3 targets base + 8 and sets every other thread. Skipped when
+    the test process runs above nice 11."""
     code = r"""
 import json, os, threading, time
 from itrea.ea.engine import renice_threads
@@ -353,23 +384,24 @@ ev = threading.Event()
 ts = [threading.Thread(target=ev.wait) for _ in range(2)]
 [t.start() for t in ts]
 b = os.getpriority(os.PRIO_PROCESS, 0)
-rec = renice_threads(b + 3)
+rec = renice_threads(3)
 nices = sorted({os.getpriority(os.PRIO_PROCESS, int(t)) for t in os.listdir('/proc/self/task')})
 os.nice(2)
-rec2 = renice_threads(b + 3)
+rec2 = renice_threads(3)
+nices2 = sorted({os.getpriority(os.PRIO_PROCESS, int(t)) for t in os.listdir('/proc/self/task')})
 ev.set(); [t.join() for t in ts]
-print(json.dumps(dict(rec=rec, nices=nices, rec2=rec2)))
+print(json.dumps(dict(rec=rec, nices=nices, rec2=rec2, nices2=nices2)))
 """
-    if os.getpriority(os.PRIO_PROCESS, 0) > 14:
-        pytest.skip("the test process runs above nice 14: no room to renice a child upward")
+    if os.getpriority(os.PRIO_PROCESS, 0) > 11:
+        pytest.skip("the test process runs above nice 11: no room to renice a child upward by 8")
     out = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=120,
                          env=dict(os.environ, PYTHONPATH=str(ROOT / "src"), CUDA_VISIBLE_DEVICES=""))
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout)
     b = r["rec"]["before"]
     assert r["rec"]["threads"] >= 3 and r["rec"]["set"] == r["rec"]["threads"] and r["rec"]["after"] == b + 3
-    assert r["nices"] == [b + 3]
-    assert r["rec2"]["set"] == 0 and r["rec2"]["after"] == b + 5
+    assert r["nices"] == [b + 3] and r["rec"]["gap"] == 3
+    assert r["rec2"]["before"] == b + 5 and r["rec2"]["target"] == b + 8 and r["nices2"] == [b + 8]
 
 
 def test_lp_worker_stamps_become_lp_event_fields():
@@ -403,31 +435,32 @@ def test_lp_worker_sends_its_own_clock_and_cpu(tmp_path):
 
 
 @pytest.mark.solver
-def test_bsyncn_ea_run_renices_after_the_spawn_and_records_everything(tmp_path):
-    """The EA process (NumPy backend, so no driver call; the flag is inert and recorded so) with the bsyncn variant on
-    a toy file: the LP worker is spawned at nice 0, then every thread of the host takes nice 10 (`host` event,
-    summary `host_renice`); the `lp` event carries the worker's own clock; the summary has the on-clock CPU, the FJ
-    launch count and the decoded state of the flag."""
+def test_bnice_ea_run_renices_after_the_spawn_and_records_everything(tmp_path):
+    """The EA process (NumPy backend, so no driver call) with the bnice variant (D-025's fallback (a): no context flag)
+    on a toy file: the LP worker is spawned at the session's nice n, then every thread of the host takes n + 10 (capped
+    at 19; `host` event, summary `host_renice` with `gap`); the `lp` event carries the worker's own clock; the summary
+    has the on-clock CPU, the FJ launch count and no `cuda_sched` record (mode auto on NumPy)."""
     from itrea.trace import read_events
     path = toy.write_mps(toy.mixed(), tmp_path / "mixed.mps")
     rd = tmp_path / "run"
     pr = subprocess.run([PY, "-m", "itrea.ea.run", "--instance", str(path), "--seed", "0", "--budget", "4",
                          "--run-dir", str(rd), "--no-barrier", "--backend", "numpy",
-                         "--config", str(CONFIGS / "itrea2-dev-rc-3way-bsyncn.yaml"),
+                         "--config", str(CONFIGS / "itrea2-dev-rc-3way-bnice.yaml"),
                          "--set", "population.size=48", "--set", "population.offspring_per_gen=48"],
                         capture_output=True, timeout=300,
                         env=dict(os.environ, PYTHONPATH=str(ROOT / "src"), CUDA_VISIBLE_DEVICES="",
                                  OMP_NUM_THREADS="1"))
     assert pr.returncode == 0, (pr.stdout + pr.stderr).decode(errors="replace")[-3000:]
     s = json.loads((rd / "ea.summary.json").read_text())
-    assert s["startup"]["cuda_sched"]["state"] == "inert: numpy backend"
+    assert "cuda_sched" not in s["startup"] and "cuda_sched" not in s
     assert s["startup"]["host_nice_after_lp_spawn"] == 10
     hr = s["host_renice"]
     assert hr["value"] == 10 and hr["t"] >= 0 and hr["threads"] >= 1
-    if hr["before"] < 10:                                       # (under `nice -n 19` the renice keeps 19: kept)
-        assert hr["after"] == 10 and hr["set"] >= 1
+    assert hr["target"] == min(19, hr["before"] + 10) and hr["gap"] == hr["target"] - hr["before"]
+    if hr["before"] < 19:                                       # (under `nice -n 19` nothing can be set: kept)
+        assert hr["after"] == hr["target"] and hr["set"] >= 1
     else:
-        assert hr["after"] == hr["before"] and hr["set"] == 0
+        assert hr["after"] == hr["before"] and hr["set"] == 0 and hr["gap"] == 0
     ev = list(read_events(rd / "ea.events.jsonl"))
     assert [e["what"] for e in ev if e["kind"] == "host"] == ["renice"]
     lp = [e for e in ev if e["kind"] == "lp" and e.get("state") == "done"]
@@ -439,6 +472,16 @@ def test_bsyncn_ea_run_renices_after_the_spawn_and_records_everything(tmp_path):
     assert c["wall_s"] > 0 and c["self_s"] > 0 and c["children_s"] > 0       # the LP worker was reaped
     assert set(c) == {"wall_s", "self_s", "main_thread_s", "children_s", "self_per_wall_s", "main_thread_per_wall_s"}
     assert s["ls_launches"] == 0                                # the CPU feasibility jump reports no launches
+    assert s["concat_parts_max"] >= 0 and s["phase_events_block"] is False
+
+
+def test_bsync_check_refuses_a_renice_without_its_competitor():
+    """`--renice` acts after the stand-in's spawn (D-025's fallback (a)): without phase B the tool refuses before it
+    touches a device."""
+    pr = subprocess.run([PY, str(ROOT / "tools" / "bsync_check.py"), "--mode", "auto", "--renice", "10",
+                         "--no-competitor"], capture_output=True, text=True, timeout=120,
+                        env=dict(os.environ, PYTHONPATH=str(ROOT / "src"), CUDA_VISIBLE_DEVICES=""))
+    assert pr.returncode == 2 and "competitor" in pr.stderr
 
 
 def test_every_run_records_the_cpu_clock_and_launches():
@@ -448,6 +491,7 @@ def test_every_run_records_the_cpu_clock_and_launches():
     eng.step()
     out = eng.finish()
     assert out["cpu_clock"]["self_s"] >= 0 and "ls_launches" in out and out["phase_events_block"] is False
+    assert out["concat_parts_max"] >= 0
     assert "host_renice" not in out
 
 
@@ -516,55 +560,80 @@ def test_a9_layout_harness_runs_on_numpy(tmp_path):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("variant, sched", [("bsync", "blocking_sync"), ("bsyncn", "blocking_sync"),
-                                            ("byield", "yield")])
+@pytest.mark.parametrize("variant, sched", [("", "auto"), ("bsync", "blocking_sync"), ("bnice", "auto"),
+                                            ("ysync", "yield")])
 def test_cupy_cold_cache_r1_variant_in_the_a9_layout(tmp_path, variant, sched):
-    """GPU check 1 + 3 (before R1's first timed run): with an EMPTY CuPy cache, the variant's run in A9's layout
-    compiles nothing after t0 — and the run reached the new code: the flag was set on the real driver and verified
-    on the active primary context (cuDevicePrimaryCtxGetState) and still holds at the end, the timing events were
-    blocking under blocking_sync, the GPU feasibility jump ran launches under it, cuOpt's row was read (from_cuopt),
-    and the LP worker reported with its own clock (bsyncn: after the renice)."""
+    """D-025's GPU checks 1 + 3 (before R1's first timed run): with an EMPTY CuPy cache, the variant's run in A9's
+    layout compiles nothing after t0 — and the run reached the new code: the flag was set on the real driver and
+    verified on the active primary context (cuDevicePrimaryCtxGetState) and still holds at the end — and with the
+    DEFAULT file (the control) and bnice the flags read back are CUDA's default ("auto", state "read") — the timing
+    events were blocking under blocking_sync only, the GPU feasibility jump ran launches, cuOpt's row was read
+    (from_cuopt), and the LP worker reported with its own clock (bnice: spawned before the +10 renice). The mechanism
+    figures (EA self-CPU per wall-second, the LP worker's CPU share) are printed, not asserted: the bsync_check test
+    asserts the mechanism; one 15-s toy run cannot."""
     if not _gpu_ok():
         pytest.skip("no CuPy device")
-    s, ev, _ = a9_layout_run(tmp_path, CONFIGS / f"itrea2-dev-rc-3way-{variant}.yaml", name=variant)
+    cfg = CONFIGS / (f"itrea2-dev-rc-3way-{variant}.yaml" if variant else "itrea2-dev-rc-3way.yaml")
+    s, ev, _ = a9_layout_run(tmp_path, cfg, name=variant or "default")
     want = CS.MODES[sched]
     st = s["startup"]["cuda_sched"]
-    assert st["state"] == "verified" and st["active_before"] is False and st["active"] is True, st
+    if sched == "auto":
+        assert st["state"] == "read" and st["active"] is True and st["sched_active"] == "auto", st
+    else:
+        assert st["state"] == "verified" and st["active_before"] is False and st["active"] is True, st
     assert st["flags_active"] & CS.CU_CTX_SCHED_MASK == want and st["sched_active"] == sched
     end = s["cuda_sched"]
     assert end["sched_at_end"] == sched and end["active_at_end"] is True
+    print(f"\n[{variant or 'default'}] self_per_wall_s {s['cpu_clock']['self_per_wall_s']} lp worker_cpu_share "
+          f"{s['lp'].get('worker_cpu_share')} worker_done_t {s['lp'].get('worker_done_t')} generations "
+          f"{s['generations']} ls_launches {s['ls_launches']} concat_parts_max {s['concat_parts_max']}")
     assert s["phase_events_block"] is (sched == "blocking_sync")
     assert s["generations"] >= 2 and s["ls_launches"] >= 1 and s["exchange_from_cuopt"] is True
     assert s["cuopt_inject_msgs"] >= 1
     assert s["lp"]["state"] == "done" and s["lp"]["worker_done_t"] >= 0, s["lp"]
-    if variant == "bsyncn":                                      # run the GPU checks without `nice`: then set >= 1
+    if variant == "bnice":                                       # run the GPU checks without `nice`: gap 10
         hr = s["host_renice"]
-        assert hr["value"] == 10 and (hr["set"] >= 1 and hr["after"] == 10 if hr["before"] < 10 else hr["set"] == 0)
+        assert hr["value"] == 10 and hr["gap"] == 10 and hr["set"] >= 1 and hr["after"] == hr["before"] + 10, hr
         assert s["lp"]["worker_nice"] == hr["before"]               # the worker was spawned before the renice
+    else:
+        assert "host_renice" not in s
     assert s["compiled_on_clock"] is False and s["cupy_cache"]["new_after_t0"] == [], s["cupy_cache"]
 
 
-def _bsync_check(tmp_path, mode: str, seconds: float = 6.0) -> dict:
-    out = tmp_path / f"{mode}.json"
+def _bsync_check(tmp_path, mode: str, seconds: float = 12.0, renice: int = 0) -> dict:
+    out = tmp_path / f"{mode}-n{renice}.json"
     pr = subprocess.run([PY, str(ROOT / "tools" / "bsync_check.py"), "--mode", mode, "--seconds", str(seconds),
-                         "--core", str(_one_core()), "--out", str(out)],
-                        env=dict(os.environ, PYTHONPATH=str(ROOT / "src")), capture_output=True, timeout=600)
+                         "--renice", str(renice), "--core", str(_one_core()), "--out", str(out)],
+                        env=dict(os.environ, PYTHONPATH=str(ROOT / "src")), capture_output=True, timeout=900)
     assert pr.returncode == 0, (pr.stdout + pr.stderr).decode(errors="replace")[-3000:]
     return json.loads(out.read_text())
 
 
 @pytest.mark.gpu
 def test_bsync_check_tool_host_cpu_falls_and_the_core_is_given_back(tmp_path):
-    """GPU check 2 (R1's mechanism, the reading stated before the run): a launch loop of ~50-ms kernels synced as the
-    EA syncs, on one core. Mode auto: the host spins (self-CPU per wall second > 0.8 alone) and a busy process on the
-    same core gets < 0.7 of it. Blocking sync: the host's self-CPU per wall second < 0.3 alone and the busy process
-    gets > 0.8 of the core. Both runs must have waited on the GPU (kernel >= 20 ms, >= 40 launches per phase)."""
+    """D-025's GPU check 2 (R1's mechanism, the reading fixed before the runs): a launch loop of ~50-ms kernels synced
+    as the EA syncs, on one core, >= 10 s of GPU work per phase. Mode auto (the default path, printed beside): the host
+    spins (self-CPU per wall second > 0.8 alone) and a busy stand-in for the LP worker on the same core gets < 0.7 of
+    it. Blocking sync: the host's self-CPU per wall second <= 0.25 alone (D-025) and the stand-in gets > 0.8 of the
+    core. Fallback (b) yield and fallback (a) renice (mode auto, the host reniced +10 after the stand-in's spawn): the
+    stand-in gets >= 0.8 of the core (D-025's stand-in check). Every run must have waited on the GPU (kernel >= 20 ms,
+    >= 40 launches per phase alone, >= 20 beside)."""
     if not _gpu_ok():
         pytest.skip("no CuPy device")
+    if os.getpriority(os.PRIO_PROCESS, 0) > 0:
+        pytest.skip("run the GPU checks without `nice`: the renice check needs the host at nice 0 + 10")
     auto, bs = _bsync_check(tmp_path, "auto"), _bsync_check(tmp_path, "blocking_sync")
-    for r in (auto, bs):
+    yi, rn = _bsync_check(tmp_path, "yield"), _bsync_check(tmp_path, "auto", renice=10)
+    for r in (auto, bs, yi, rn):
         assert r["kernel_ms"] >= 20.0 and r["alone"]["launches"] >= 40 and r["beside"]["launches"] >= 20, r
+        assert r["alone"]["gpu_s"] >= 10.0 and r["seconds"] >= 10.0, r
+        print(f"\n[{r['mode']} renice {r['renice'].get('value', 0) if r.get('renice') else 0}] host_self_per_wall "
+              f"{r['host_self_per_wall']} competitor_share {r['competitor_share']} host_self_per_wall_b "
+              f"{r['host_self_per_wall_b']}")
     assert bs["cuda_sched"]["sched_active"] == "blocking_sync" and bs["phase_events_block"] is True
-    assert auto["cuda_sched"]["state"] == "default"
+    assert auto["cuda_sched"]["state"] == "read" and auto["cuda_sched"]["sched_active"] == "auto"
+    assert yi["cuda_sched"]["sched_active"] == "yield" and yi["phase_events_block"] is False
     assert auto["host_self_per_wall"] > 0.8 and auto["competitor_share"] < 0.7, auto
-    assert bs["host_self_per_wall"] < 0.3 and bs["competitor_share"] > 0.8, bs
+    assert bs["host_self_per_wall"] <= 0.25 and bs["competitor_share"] > 0.8, bs
+    assert yi["competitor_share"] >= 0.8, yi
+    assert rn["renice"]["gap"] == 10 and rn["competitor_share"] >= 0.8, rn

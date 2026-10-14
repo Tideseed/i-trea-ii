@@ -1,13 +1,13 @@
-# I-TREA II -- R2 of the C1 diagnosis (vault 30-results/2026-10-14 C1 diagnosis and improvement candidates.md),
-# variant `ld0`: R2's pre-written fallback if R1 is not adopted: the LP decode inside A9, still gated after the EA's
-# HiGHS LP worker (`repair.lp_decode_gate: lp_worker`), at nice 0 beside the spinning host (`repair.lp_decode_nice:
-# 0`); no blocking sync.
+# I-TREA II -- R2 of the C1 diagnosis (vault 30-results/2026-10-14 C1 diagnosis and improvement candidates.md), variant
+# `ld0`: R2's pre-written fallback if R1 is not adopted: the LP decode inside A9, still gated after the EA's HiGHS LP
+# worker (`repair.lp_decode_gate: lp_worker`), at nice 0 beside the spinning host (`repair.lp_decode_nice: 0`); no
+# blocking sync.
 #
 # Base = configs/itrea2-dev-rc-3way.yaml verbatim (the A9 development default, 1d12ad490dd0), plus the decode; the
 # runner accepts lp_decode in A9 only with this gate (pair.py), and the warm-up compiles the >8-part concatenate a
-# decoded batch can bring. `exchange.from_cuopt` is added by the runner for A9. The test (`itrea make-jobs r2-ld
-# --base r13x`) runs it against A9@r13x. Development only (D-010); it becomes a default only by a decision on a
-# verdict.
+# decoded batch can bring. `exchange.from_cuopt` is added by the runner for A9. The test (`itrea make-jobs r2-ld --base
+# r13x`, set `r2-ld`, D-026) runs it as A9@r2ld against A9@r13x's configuration re-run as A9@r2ctl. Development only
+# (D-010); it becomes a default only by a decision on a verdict.
 name: itrea2-dev-rc-3way-ld0
 strategy:
   enabled: true

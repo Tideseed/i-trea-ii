@@ -9,18 +9,21 @@ half the core. Blocking sync (CU_CTX_SCHED_BLOCKING_SYNC) makes the host thread 
 is done; yield (CU_CTX_SCHED_YIELD) keeps polling but yields the time slice at each poll.
 
 How. CuPy 14.2 has no `setDeviceFlags`, so the flag goes through the driver API (`libcuda.so.1`, loaded only when a
-non-default mode is asked for — never at import, so the CPU tests never touch a driver): cuInit(0), cuDeviceGet,
+non-default mode is asked for, or after CuPy's context exists for the read-only "auto" record — never at import, so
+the CPU tests never touch a driver): cuInit(0), cuDeviceGet,
 cuDevicePrimaryCtxGetState (refused if the primary context is already active: then something retained it first and the
 flag would not be the one the run waits with), cuDevicePrimaryCtxSetFlags (the `_v2` entry point when exported, as in
 driver 580), cuDevicePrimaryCtxGetState again (the flags must read back). `Engine.prepare` does this before the
 backend exists (before CuPy is asked for anything, the warm-up and t0); once `cp.zeros(1)` has created the context it
 checks again that the primary context is active with the requested scheduling flag (`verify`) and raises otherwise —
-a run that would be labelled blocking sync but waited by spinning must not happen. The record goes into the start-up
-record and the summary (`cuda_sched`); `finish` reads the state once more (`flags_at_end`).
+a run that would be labelled blocking sync but waited by spinning must not happen. Under "auto" the same place only
+READS the active context's flags (`read_state`: the driver is loaded then, after CuPy loaded it; read-only, never
+raises), so a control run records the flag the driver reports. The record goes into the start-up record and the summary
+(`cuda_sched`); `finish` reads the state once more (`flags_at_end`).
 
-    rec = apply("blocking_sync")              # before CuPy creates the context
+    rec = apply("blocking_sync")              # before CuPy creates the context ("auto": calls nothing)
     ...                                       # cp.zeros(1)
-    rec = verify(rec)                         # active, flags & CU_CTX_SCHED_MASK == the request
+    rec = verify(rec)                         # active, flags & CU_CTX_SCHED_MASK == the request ("auto": read only)
     api = DriverAPI.load()                    # the real driver (or a fake with the same five methods, in tests)
 
 `DriverAPI` is the only place that calls the driver; tests pass a fake object with the same methods (`init`,
@@ -141,13 +144,34 @@ def apply(mode: str, ordinal: int = 0, api=None) -> dict:
     return rec
 
 
+def read_state(rec: dict, api=None) -> dict:
+    """Mode "auto", after the context exists: READ the primary context's flags (cuInit, cuDeviceGet,
+    cuDevicePrimaryCtxGetState — read-only, nothing is set), so a run at CUDA's default records the flag the driver
+    reports (D-025: the control's flag state is read back, not inferred from the configuration). libcuda.so.1 is
+    loaded here, after CuPy has loaded it, never at import. Never raises: a failure is recorded as `read_error` (the
+    report then reads the leg as unverified). Returns the record with `flags_active` / `active` / `sched_active` and
+    state "read"."""
+    try:
+        api = api if api is not None else (rec.get("_api") or DriverAPI.load())
+        api.init()
+        dev = api.device_get(rec.get("ordinal", 0))
+        flags, active = api.primary_ctx_get_state(dev)
+    except Exception as e:  # noqa: BLE001 — a record, not a check
+        rec.update(state="read_error", read_error=f"{type(e).__name__}: {e}"[:300])
+        return rec
+    rec.update(api=getattr(api, "name", type(api).__name__), device=dev, flags_active=flags, active=active,
+               sched_active=sched_name(flags), state="read")
+    rec["_api"] = api
+    return rec
+
+
 def verify(rec: dict, api=None) -> dict:
     """After the context exists (`cp.zeros(1)`): the primary context must be active with the requested scheduling
     flag. Returns the record with `flags_active` / `active` / `sched_active`; raises CudaSchedError otherwise. A record
-    of mode "auto" reads the state only if an API object is given (nothing is loaded for the default)."""
+    of mode "auto" is only read (`read_state`; never raises): CUDA's default is not a request this module made."""
     api = api if api is not None else rec.get("_api")
-    if rec.get("requested", CU_CTX_SCHED_AUTO) == CU_CTX_SCHED_AUTO and api is None:
-        return rec
+    if rec.get("requested", CU_CTX_SCHED_AUTO) == CU_CTX_SCHED_AUTO:
+        return read_state(rec, api)
     flags, active = api.primary_ctx_get_state(rec["device"])
     rec.update(flags_active=flags, active=active, sched_active=sched_name(flags))
     if not active:

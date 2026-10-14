@@ -113,8 +113,9 @@ def test_r2_variant_files_are_their_base_plus_the_decode(name):
 
 # ============================================================================================ the runner
 def test_runner_refuses_lp_decode_in_the_single_core_arms_unless_gated(tmp_path):
-    """The refusal of D-017 stands for A9 / A3x with an ungated decoder and is lifted only with the gate (R2); A3 is
-    unchanged (f030e23909ad)."""
+    """The refusal of D-017 stands for A9 / A3x with an ungated decoder and is lifted only with the gate AND the EA's
+    own LP worker (`seeding.lp_source: highs_async`; without it the gate opens at t0 and gates nothing) — R2, D-026;
+    A3 is unchanged (f030e23909ad)."""
     from itrea.experiments import pair
     inst = toy.write_mps(toy.mixed(), tmp_path / "mixed.mps")
     o = pair.PairOptions(traces_dir=tmp_path / "traces", mailbox_root=tmp_path / "mb", gpu_health=False,
@@ -128,6 +129,8 @@ def test_runner_refuses_lp_decode_in_the_single_core_arms_unless_gated(tmp_path)
             pair.job_budget(job(arm, **{"repair.continuous": "lp_decode"}), o)
         with pytest.raises(pair.RunError, match="lp_decode"):
             pair.job_budget(job(arm, config="configs/itrea2-dev-rc-ld.yaml"), o)
+        with pytest.raises(pair.RunError, match="highs_async"):
+            pair.job_budget(job(arm, **GATE, **{"seeding.lp_source": "solver"}), o)
         pair.job_budget(job(arm, **GATE), o)
         pair.job_budget(job(arm, config="configs/itrea2-dev-rc-3way-bsync-ld.yaml"), o)
     assert pair.run_hash(job("A3", **{"repair.continuous": "lp_decode"}), o) == "f030e23909ad"
@@ -268,7 +271,7 @@ def test_warmup_overrides_keep_the_gated_and_reniced_configs_valid(files, tmp_pa
     switch the renice and the gate off with them, so a variant file never fails its own warm-up."""
     path, prob = files
     knap = load(toy.write_mps(toy.knapsack(12), tmp_path / "knap12.mps"))     # no continuous column: lp_decode inert
-    for name in ("bsyncn", "bsync-ld", "ld0", "boY-bsync-ld0"):
+    for name in ("bnice", "bsync-ld", "ld0", "boY-bsync-ld0"):
         cfg = _cfg(name).with_overrides(dict(SMALL, backend="numpy"))
         assert Engine(prob, cfg, seed=0).prepare()["warmup"]["many"]["generations"] >= 1
         st = Engine(knap, cfg, seed=0).prepare()
@@ -473,6 +476,7 @@ def test_cupy_cold_cache_r2_variant_in_the_a9_layout(tmp_path, variant, nice):
     assert s["startup"]["warmup"]["concat_many_parts"] == 9
     assert s["lp"]["state"] == "done" and ld["gate"] == "open" and ld["gate_why"] == "lp_done", (s["lp"], ld)
     assert ld["ready_t"] is not None and ld["ready_t"] >= ld["gate_t"] >= 0
+    assert ld["gate_t"] >= s["lp"]["worker_done_t"] >= 0, (ld["gate_t"], s["lp"])   # D-026 check 2, on the stamps
     assert ld["ready"]["cpus"] == [_one_core()]
     assert ld["ready"]["nice"] == min(19, os.getpriority(os.PRIO_PROCESS, 0) + nice)
     assert s["lpd_entered"] >= 1 and ld["state"] != "failed", ld
@@ -482,4 +486,8 @@ def test_cupy_cold_cache_r2_variant_in_the_a9_layout(tmp_path, variant, nice):
     assert s["exchange_from_cuopt"] is True and s["cuopt_inject_msgs"] >= 1
     if variant.startswith("bsync"):
         assert s["cuda_sched"]["sched_at_end"] == "blocking_sync"
+    # D-026 check 1 is met by this run (decoded copies entered, nothing compiled after t0) together with the concat
+    # probe above (the > 8-part kernels are warm by construction): a toy run need not reach 9 parts, so it is printed
+    print(f"\n[{variant}] concat_parts_max {s['concat_parts_max']} gate lag {ld['gate_t'] - s['lp']['worker_done_t']:.3f} s"
+          f" ready_t {ld['ready_t']} lpd_entered {s['lpd_entered']}")
     assert s["compiled_on_clock"] is False and s["cupy_cache"]["new_after_t0"] == [], s["cupy_cache"]

@@ -32,6 +32,12 @@ the only place the mapping lives.
                                G's noise = no sleep in phase Y, "still beats A6F" binds — its 23:3x clarification)
     itrea mipfeas-report …     MIPfeas calibration against GAMS's GB10 cuOpt row: A6F (D-021 M4) or A6m (D-020)
     itrea d022-report …        D-022 (A9 under the ext harness, R13 + R14; C1's interim result; tools/d022_report.py)
+    itrea d025-report …        D-025 (the C1 diagnosis's R1: the EA's blocking sync, sets r1-bsync / r1-bnice /
+                               r1-ysync): validity incl. the flag state, no-harm, hint, verdict, fallback triggers
+                               (tools/d025_report.py; jobs: itrea make-jobs r1-bsync --control r13x|boY [--variant])
+    itrea d026-report …        D-026 (the C1 diagnosis's R2: lp_decode inside A9 after the LP worker, set r2-ld):
+                               validity, mechanism, no-harm, hint, verdict (tools/d026_report.py; jobs: itrea make-jobs
+                               r2-ld --base … [--nice 10|0 | --ea-cpu X])
     (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off [--instances amended|stage1|a,b], from
      D-022's outcome — the A9 arms' harness; by default the 11 of D-023's amendment of 2026-10-13 (66 runs);
      D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
@@ -71,6 +77,10 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
                        "(phase Y only, on the 11 of its 2026-10-13 amendment), rules applied, verdict"),
     "mipfeas-report": ("itrea.analysis.mipfeas", (), "MIPfeas calibration vs GAMS's cuOpt GB10 row: --arm A6F "
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
+    "d025-report": ("path:tools/d025_report.py", (), "D-025 (C1 diagnosis R1): the EA's blocking sync on set r1-bsync "
+                    "(or a fallback set) — validity incl. the flag state, no-harm, hint, verdict, fallback triggers"),
+    "d026-report": ("path:tools/d026_report.py", (), "D-026 (C1 diagnosis R2): lp_decode inside A9 after the LP worker "
+                    "on set r2-ld — validity, mechanism, no-harm, hint, verdict"),
     "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "
                     "outcome rule, C1's interim A9 result"),
     "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),

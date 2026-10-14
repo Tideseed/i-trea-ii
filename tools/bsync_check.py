@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """R1's mechanism check before any timed run (GPU: only inside a window with the lease held): does the EA host stop
 burning its core while it waits on the GPU under `host.cuda_sched`, and does a CPU-bound process on the same core get
-that core back? (vault `30-results/2026-10-14 C1 diagnosis and improvement candidates.md`, R1, "Before the window" 2).
+that core back? (vault `30-results/2026-10-14 C1 diagnosis and improvement candidates.md`, R1, "Before the window" 2;
+D-025 "Before the first timed run", check 2, whose thresholds the GPU test applies).
 
 A synthetic launch loop that waits the way the EA does — one kernel of `--launch-ms` per launch (a single thread that
 spins on `clock64()`), then the feasibility jump's sync `int(cp.count_nonzero(...))`, the engine's per-generation
@@ -11,22 +12,28 @@ this process's affinity):
   A. alone: the host's CPU seconds per wall second (RUSAGE_SELF and the main thread's RUSAGE_THREAD) — about 1 when
      the host spins (mode auto), well below 1 under blocking sync;
   B. beside a competitor: a spawned process pinned to the same core runs a pure-Python loop (the LP worker's
-     stand-in, nice 0) for the same seconds and reports its own CPU per wall second — about 0.5 when the host spins
-     (the core is shared), close to 1 under blocking sync.
+     stand-in, at the host's nice) for the same seconds and reports its own CPU per wall second — about 0.5 when the
+     host spins (the core is shared), close to 1 under blocking sync. With `--renice N` (D-025's fallback (a), `bnice`)
+     every thread of the host takes nice +N relative to the stand-in right after the stand-in's spawn, exactly as the
+     engine does after the LP worker's spawn (`engine.renice_threads`), so phase B measures the stand-in's share
+     beside a spinning host at the lower priority. The renice is one-way: run it as its own process.
 The flag goes through `itrea.ea.cuda_sched` exactly as `Engine.prepare` sets it (before CuPy creates the context),
 and is verified with cuDevicePrimaryCtxGetState once the context exists. One mode per process (the flag must be set
 before the context exists): run the tool once per mode.
 
-    python tools/bsync_check.py --mode auto --seconds 6 --out /tmp/bsync/auto.json
-    python tools/bsync_check.py --mode blocking_sync --seconds 6 --out /tmp/bsync/bsync.json
-    python tools/bsync_check.py --mode yield --seconds 6 --out /tmp/bsync/yield.json
+    python tools/bsync_check.py --mode auto --seconds 12 --out /tmp/bsync/auto.json
+    python tools/bsync_check.py --mode blocking_sync --seconds 12 --out /tmp/bsync/bsync.json
+    python tools/bsync_check.py --mode yield --seconds 12 --out /tmp/bsync/yield.json
+    python tools/bsync_check.py --mode auto --renice 10 --seconds 12 --out /tmp/bsync/bnice.json
 
-Prints one JSON object (and writes it to `--out`): the mode, the driver record, the kernel's measured milliseconds,
-launches per phase, `host_self_per_wall` / `host_thread_per_wall` (phase A), `competitor_share` and
-`host_self_per_wall_b` (phase B). `tests/test_cuda_sched.py::test_bsync_check_tool_*` (marker gpu) runs it for auto and
-blocking_sync and applies the pre-stated reading: under blocking_sync phase A's host self-CPU per wall second < 0.3 and
-phase B's competitor share > 0.8; under auto > 0.8 and < 0.7 (the spin is measured, so the test cannot pass on a host
-that never waited).
+Prints one JSON object (and writes it to `--out`): the mode, the driver record (under auto the flags read back), the
+kernel's measured milliseconds, launches and GPU seconds per phase, `host_self_per_wall` / `host_thread_per_wall` (phase
+A), `competitor_share` and `host_self_per_wall_b` (phase B), `renice` (the renice record, empty without `--renice`).
+`tests/test_cuda_sched.py::test_bsync_check_tool_*` (marker gpu) runs it for auto, blocking_sync, yield and auto with
+`--renice 10`, at 12 s per phase (>= 10 s of GPU work, D-025), and applies D-025's reading: under blocking_sync phase
+A's host self-CPU per wall second <= 0.25 and phase B's competitor share > 0.8; under yield and under the renice the
+competitor share >= 0.8; under auto > 0.8 and < 0.7, printed beside (the spin is measured, so the test cannot pass on a
+host that never waited).
 """
 from __future__ import annotations
 
@@ -98,7 +105,8 @@ def _loop(cp, kern, cycles, out, phases, bk, seconds: float, per_gen: int) -> di
                 host_thread_s=round(_cpu(resource.RUSAGE_THREAD) - t0, 4), gpu_s=round(gpu_s, 4))
 
 
-def run(mode: str, seconds: float, launch_ms: float, core: int, per_gen: int, competitor: bool = True) -> dict:
+def run(mode: str, seconds: float, launch_ms: float, core: int, per_gen: int, competitor: bool = True,
+        renice: int = 0) -> dict:
     os.sched_setaffinity(0, {core})
     rec = cuda_sched.apply(mode)                         # before CuPy is asked for anything
     from itrea.backend import get_backend
@@ -118,7 +126,7 @@ def run(mode: str, seconds: float, launch_ms: float, core: int, per_gen: int, co
         kern((1,), (1,), (cycles, out))
     kernel_ms = round(1000.0 * phases.take()["probe"], 3)
     a = _loop(cp, kern, cycles, out, phases, bk, seconds, per_gen)
-    res = dict(mode=mode, core=core, seconds=seconds, launch_ms=launch_ms, per_gen=per_gen, clock_khz=khz,
+    res = dict(mode=mode, core=core, seconds=seconds, launch_ms=launch_ms, per_gen=per_gen, clock_khz=khz, renice={},
                kernel_ms=kernel_ms, phase_events_block=phases.block, cuda_sched=cuda_sched.public(rec), alone=a,
                host_self_per_wall=round(a["host_self_s"] / a["wall_s"], 4),
                host_thread_per_wall=round(a["host_thread_s"] / a["wall_s"], 4))
@@ -128,6 +136,9 @@ def run(mode: str, seconds: float, launch_ms: float, core: int, per_gen: int, co
         proc = ctx.Process(target=_competitor, args=(core, seconds, send), daemon=True)
         proc.start()
         send.close()
+        if renice:                                       # D-025 (a): the host below the stand-in it just spawned
+            from itrea.ea.engine import renice_threads
+            res["renice"] = renice_threads(renice)
         time.sleep(0.5)                                  # the competitor's interpreter start-up, before the loop
         b = _loop(cp, kern, cycles, out, phases, bk, seconds, per_gen)
         comp = recv.recv()
@@ -141,15 +152,19 @@ def run(mode: str, seconds: float, launch_ms: float, core: int, per_gen: int, co
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--mode", required=True, choices=tuple(cuda_sched.MODES))
-    ap.add_argument("--seconds", type=float, default=6.0, help="wall seconds per phase")
+    ap.add_argument("--seconds", type=float, default=12.0, help="wall seconds per phase (D-025: >= 10 s of GPU work)")
     ap.add_argument("--launch-ms", type=float, default=50.0, help="kernel milliseconds per launch (the FJ's ~50 ms)")
     ap.add_argument("--per-gen", type=int, default=8, help="launches between two reads of the timing events")
     ap.add_argument("--core", type=int, default=None, help="default: the first core of this process's affinity")
     ap.add_argument("--no-competitor", action="store_true", help="phase A only")
+    ap.add_argument("--renice", type=int, default=0,
+                    help="D-025 (a): after the competitor's spawn every host thread takes nice +N relative to it")
     ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args(argv)
     core = a.core if a.core is not None else min(os.sched_getaffinity(0))
-    res = run(a.mode, a.seconds, a.launch_ms, core, a.per_gen, competitor=not a.no_competitor)
+    if a.renice and a.no_competitor:
+        ap.error("--renice acts after the competitor's spawn: it needs phase B")
+    res = run(a.mode, a.seconds, a.launch_ms, core, a.per_gen, competitor=not a.no_competitor, renice=a.renice)
     txt = json.dumps(res, indent=1, sort_keys=True)
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)

@@ -46,8 +46,9 @@ EA's one core in arm A9; the runner refuses lp_decode in A9 / A3x unless this ga
 `host` (`HostCfg`, R1 of the 2026-10-14 C1 diagnosis) is the EA host process itself: how its CUDA context waits on the
 GPU (`cuda_sched`: "auto" = CUDA's default, which spins while there are fewer contexts than cores; "blocking_sync" or
 "yield", set on the primary context through the driver API before anything retains it, `ea.cuda_sched`) and an
-optional nice value the host takes after it spawned the LP worker (`nice_after_lp_spawn`). The whole section is left
-out of the hash while every field is at its default, so every recorded hash stands.
+optional nice increment the host takes after it spawned the LP worker (`nice_after_lp_spawn`, relative to the nice the
+worker inherited). The whole section is left out of the hash while every field is at its default, so every recorded
+hash stands.
 """
 from __future__ import annotations
 
@@ -360,19 +361,21 @@ class HostCfg:
     the EA host and the HiGHS LP worker it spawns share one X925 core, and the host busy-waits on the GPU — CUDA's
     default scheduling spins while there are fewer contexts than cores — so it keeps that core about 100 % busy while
     99 % of its wall time is GPU repair, and the LP worker gets about half the core.
-    `cuda_sched` sets how the EA's primary CUDA context waits: "auto" (CUDA's default; nothing is called) |
-    "blocking_sync" (CU_CTX_SCHED_BLOCKING_SYNC: the host thread sleeps on a semaphore until the GPU is done; the
+    `cuda_sched` sets how the EA's primary CUDA context waits: "auto" (CUDA's default; nothing is set, the active
+    flags are read back after the context exists) | "blocking_sync" (CU_CTX_SCHED_BLOCKING_SYNC: the host thread sleeps on a semaphore until the GPU is done; the
     engine's per-generation timing events are then created with the blocking flag too, since a default-flag event wait
     may spin whatever the context says) | "yield" (CU_CTX_SCHED_YIELD: the host spins but yields its time slice). It is
     set through the driver API (`ea.cuda_sched`: cuInit, cuDeviceGet, cuDevicePrimaryCtxSetFlags) before anything
     retains the context, before the warm-up and t0, and checked with cuDevicePrimaryCtxGetState once the context
     exists; inert on the NumPy backend. `nice_after_lp_spawn` (0 = unchanged): right after the EA spawned the LP worker
-    at t0 (`seeding.lp_source: highs_async`), every thread of the EA host takes this nice value (os.setpriority; never
-    lowered), so on a shared core the LP worker (nice 0) wins the CPU while it runs; the host keeps it to the end (an
-    unprivileged process cannot raise its priority again). The section is left out of the configuration hash while
-    every field is at its default (`EAConfig.hash`)."""
+    at t0 (`seeding.lp_source: highs_async`), every thread of the EA host takes nice `n + nice_after_lp_spawn`, n = the
+    nice the worker was spawned at (capped at 19; os.setpriority; never lowered; `ea.engine.renice_threads`), so on a
+    shared core the LP worker wins the CPU while it runs (+10: CFS weights 110 : 1024); the host keeps it to the end
+    (an unprivileged process cannot raise its priority again). It is D-025's fallback (a) `bnice`, WITHOUT a context
+    flag. The section is left out of the configuration hash while every field is at its default (`EAConfig.hash`)."""
     cuda_sched: str = "auto"           # "auto" | "blocking_sync" | "yield"
-    nice_after_lp_spawn: int = 0       # 0 = unchanged | 1..19: the EA host's nice value after the LP worker's spawn
+    nice_after_lp_spawn: int = 0       # 0 = unchanged | 1..19: the EA host's nice INCREMENT over the LP worker's,
+                                       # taken right after the worker's spawn (capped at 19)
 
 
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.

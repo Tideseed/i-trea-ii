@@ -271,17 +271,22 @@ records marked "every run").
   - `host.cuda_sched` "blocking_sync" / "yield": `prepare` sets the primary CUDA context's scheduling flag through the
     driver API (`ea.cuda_sched.apply`) BEFORE the backend exists — only when it creates the CuPy backend itself (an
     engine handed a backend, e.g. the warm-up's, sets nothing) — and checks it on the active context right after
-    `cp.zeros(1)` (`verify`; a mismatch raises: a run is never labelled blocking sync while it spins). Start-up record
+    `cp.zeros(1)` (`verify`; a mismatch raises: a run is never labelled blocking sync while it spins). Under "auto"
+    (every other GPU run) the same place only READS the active context's flags (`cuda_sched.read_state`, read-only,
+    never raises), so a control run records the flag the driver reports, not only the configured mode. Start-up record
     `cuda_sched` (on NumPy: "inert"); the summary's `cuda_sched` adds the state read at the end. Under blocking_sync the
     per-generation timing events (`_Phases`) are created with cudaEventBlockingSync (summary `phase_events_block`).
   - `host.nice_after_lp_spawn` N > 0: right after the LP worker's spawn in `begin`, every thread of the host takes nice
-    N (`renice_threads`, never lowered); a `host` event "renice" and the summary's `host_renice`. The warm-up never
-    renices (its overrides switch it off, as they switch the LP worker off).
+    `before + N` (capped at 19; `before` = the nice the worker inherited; `renice_threads`, never lowered); a `host`
+    event "renice" and the summary's `host_renice` (`target`, `gap`). The warm-up never renices (its overrides switch
+    it off, as they switch the LP worker off).
   - every run: the LP worker's own clock and CPU in the `lp` event and `lp` summary block (`worker_entry_t`,
     `worker_done_t` in seconds since t0, `worker_wall_s`, `worker_cpu_s`, `worker_cpu_share`, `worker_cpu_total_s`,
     `worker_nice`;
     `wall_seconds` stays the EA's poll time), the summary's `cpu_clock` (the process's, the main thread's and the reaped
-    children's CPU seconds from t0, `self_per_wall_s`) and the counter `ls_launches` (GPU feasibility-jump launches).
+    children's CPU seconds from t0, `self_per_wall_s`), the counter `ls_launches` (GPU feasibility-jump launches) and
+    `concat_parts_max` (the most parts one candidate set's `Population.concat` joined; > 8 is the shape the warm-up's
+    many-part concatenate exists for).
   - every GPU run: the warm-up's many-part concatenate (`_warm_concat`, start-up `warmup.concat_many_parts`): CuPy
     14.2 changes kernels for more than 8 parts, which a candidate set with a decoded batch can reach in A9.
 
@@ -706,27 +711,32 @@ def _cpu_s(who: int) -> float:
 
 
 def renice_threads(value: int, task_dir: str | os.PathLike = "/proc/self/task") -> dict:
-    """Every thread of this process to nice `value` (`host.nice_after_lp_spawn`, R1's fallback (a)). Linux keeps the
-    nice value per thread, so each thread id under /proc/self/task is set with os.setpriority(PRIO_PROCESS, tid);
-    never lowered (an unprivileged process could not raise its priority again): a thread already at `value` or above
-    is left as it is. Returns the record {value, threads, set, kept, before (the main thread's)}; a failed set raises
-    OSError (the run must not be labelled with a renice that did not happen)."""
+    """Every thread of this process to nice `before + value` (`host.nice_after_lp_spawn`, R1's fallback (a) of D-025:
+    "+10 relative to the LP worker"), `before` = the main thread's nice now — the value the LP worker it just spawned
+    inherited — capped at 19 (Linux's lowest priority). Linux keeps the nice value per thread, so each thread id under
+    /proc/self/task is set with os.setpriority(PRIO_PROCESS, tid); never lowered (an unprivileged process could not
+    raise its priority again): a thread already at the target or above is left as it is. Returns the record {value,
+    threads, set, kept, before (the main thread's), target, gap (= target - before: `value` unless the cap at 19
+    bit), after}; a failed set raises OSError (the run must not be labelled with a renice that did not happen). A gap
+    below `value` is recorded, not refused (it happens only when the host already runs above nice 9; the pool starts
+    the EA at the session's nice): D-025's report reads `gap` as a validity leg."""
     tids = sorted(int(t) for t in os.listdir(task_dir) if t.isdigit())
     me = os.getpid()
     before = os.getpriority(os.PRIO_PROCESS, me)
+    target = min(19, before + int(value))
     n_set = n_kept = 0
     for tid in tids:
         try:
             cur = os.getpriority(os.PRIO_PROCESS, tid)
         except ProcessLookupError:                       # a thread that ended meanwhile
             continue
-        if cur >= value:
+        if cur >= target:
             n_kept += 1
             continue
-        os.setpriority(os.PRIO_PROCESS, tid, int(value))
+        os.setpriority(os.PRIO_PROCESS, tid, int(target))
         n_set += 1
-    return dict(value=int(value), threads=len(tids), set=n_set, kept=n_kept, before=before,
-                after=os.getpriority(os.PRIO_PROCESS, me))
+    return dict(value=int(value), threads=len(tids), set=n_set, kept=n_kept, before=before, target=target,
+                gap=target - before, after=os.getpriority(os.PRIO_PROCESS, me))
 
 
 # ------------------------------------------------------------------------------------------------------ engine
@@ -802,7 +812,7 @@ class Engine:
             want = int(cfg.gpu_mem_gb * 1024 ** 3)
             cp.zeros(1)                                          # create the context now (start-up, not the clock)
             if self.cuda_rec is not None:                        # it must hold on the context CuPy now uses
-                cuda_sched.verify(self.cuda_rec)
+                cuda_sched.verify(self.cuda_rec)                 # ("auto": the active flags are only read back)
             props = cp.cuda.runtime.getDeviceProperties(cp.cuda.Device().id)
             rec["device"] = props["name"].decode() if isinstance(props["name"], bytes) else str(props["name"])
             rec["pool_limit_bytes"] = int(pool.get_limit())
@@ -1256,6 +1266,9 @@ class Engine:
             "verdicts_seen", "oom_retries", "stagnation_events", "immigrants_admitted", "immigrants_dropped",
             "lp_immigrants", "ls_moves", "ls_calls", "duplicates", "n_incumbents", "demoted", "incumbents_reverted",
             "rejected_copies", "aborted_generations")}
+        # instrumentation of the 2026-10-14 C1 diagnosis (R1 / R2; fields only): GPU feasibility-jump launches, and the
+        # most parts one candidate set's concatenate joined (`_with_pending`; CuPy 14.2 changes kernels above 8)
+        self.c.update(ls_launches=0, concat_parts_max=0)
         # D-011 LP stream: the solver's node LP points, ranked (V of the nearest rounding, key) — Berk's order
         self.lps = cfg.lp_stream if (self.from_solver and cfg.lp_stream.enabled) else None
         self.lps_pool: list[dict] = []
@@ -1589,7 +1602,7 @@ class Engine:
                 self._oom("local_search", e)
         self.c["ls_moves"] += int(st.get("moves", 0))
         self.c["ls_calls"] += 1
-        self.c["ls_launches"] = self.c.get("ls_launches", 0) + int(st.get("launches", 0) or 0)
+        self.c["ls_launches"] += int(st.get("launches", 0) or 0)
         if self.bo is not None:
             self._bo_ls_steps += int(st.get("steps", 0))
             self._bo_max_launch = max(self._bo_max_launch, float(st.get("max_launch_s", 0.0) or 0.0))
@@ -1877,6 +1890,8 @@ class Engine:
             metas.append(dict(rank_pa=np.full(k, -1, np.int8), rank_pb=np.full(k, -1, np.int8),
                               t_first=np.full(k, b.t)))
         self.pending = []
+        n_parts = sum(1 for q in parts if q is not None and q.size > 0)    # what Population.concat joins (R2's > 8)
+        self.c["concat_parts_max"] = max(self.c["concat_parts_max"], n_parts)
         cand = Population.concat(self.bk, parts)
         meta = {key: np.concatenate([m[key] for m in metas]) for key in meta}
         return cand, meta

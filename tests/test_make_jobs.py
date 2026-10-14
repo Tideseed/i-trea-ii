@@ -434,17 +434,45 @@ def test_itx_a0_81_file_is_the_writers_output(tmp_path):
 
 
 # ================================================================== R1 / R2 of the C1 diagnosis (2026-10-14)
+_PLACE = ("set", "stratum", "block", "variant", "position")
+
+
 def _without_place(j: dict) -> dict:
-    return {k: v for k, v in j.items() if k not in ("set", "stratum", "block")}
+    return {k: v for k, v in j.items() if k not in _PLACE}
+
+
+def _committed_ids(skip=()) -> set[str]:
+    """Every run id of every committed job file (a job whose configuration is gone is left out)."""
+    from itrea.experiments import pair
+    out = set()
+    for f in sorted((paths.ROOT / "jobs").glob("*.jsonl")):
+        if f.name in skip:
+            continue
+        for line in f.read_text().splitlines():
+            try:
+                out.add(pair.run_id_for(json.loads(line)))
+            except Exception:           # noqa: BLE001
+                continue
+    return out
+
+
+def _positions_alternate(jobs: list[dict], control: str) -> None:
+    """D-025 / D-026 (position clarification): every block carries explicit positions, the control first at even
+    seeds and the treatment first at odd ones; the pool keeps them."""
+    for b in make_blocks(jobs):
+        order = [r.label for r in sorted(b.runs, key=lambda r: r.job["position"])]
+        assert sorted(r.job["position"] for r in b.runs) == [0, 1], b.id
+        assert (order[0] == f"A9@{control}") == (b.seed % 2 == 0), (b.id, order)
 
 
 @pytest.mark.parametrize("control", ["r13x", "boY"])
-@pytest.mark.parametrize("variant", ["bsync", "bsyncn", "byield"])
+@pytest.mark.parametrize("variant", ["bsync", "bnice", "ysync"])
 def test_r1_bsync_jobs(control, variant):
-    """R1's targeted test: 5 instances x seeds 0-1 x {treatment, control}, 120 s, ext, one block per instance x seed
-    (20 runs). The control is EXACTLY the existing job of the same-day development default — D-022's A9@r13x or
-    D-023's A9@boY — minus its set / stratum / block, with the same run id (a same-window re-run); the treatment is
-    that control's configuration plus the variant, every configuration file present."""
+    """D-025's test: 5 instances x seeds 0-1 x {treatment, control}, 120 s, ext, one block per instance x seed (20 runs,
+    set r1-<variant>). The control is the same-day development default's existing job — D-022's A9@r13x or D-023's
+    A9@boY — re-run under this set's own label A9@r1ctl (A9@r1ctl-<variant> for a fallback set): every field but set /
+    stratum / block / label / position equal, the same run HASH, a new run id; the treatment is that control's
+    configuration plus the variant. No run id of the set is an id of any committed job file."""
     from itrea.experiments import pair
     jobs = mj.r1_bsync(control, variant)
     assert len(jobs) == 20 and len(make_blocks(jobs)) == 10
@@ -453,58 +481,74 @@ def test_r1_bsync_jobs(control, variant):
     assert {j["harness"] for j in jobs} == {"ext"} and {j["arm"] for j in jobs} == {"A9"}
     assert {j["set"] for j in jobs} == {f"r1-{variant}"} and {j["split"] for j in jobs} == {"dev"}
     t_label = ("boY-" if control == "boY" else "") + variant
-    c_label = control
+    c_label = "r1ctl" if variant == "bsync" else f"r1ctl-{variant}"
     assert Counter(j["variant"] for j in jobs) == {t_label: 10, c_label: 10}
     assert all((paths.ROOT / j["config"]).is_file() for j in jobs)
+    _positions_alternate(jobs, c_label)
     ctl = [j for j in jobs if j["variant"] == c_label]
     if control == "r13x":
         old = {(j["name"], j["seed"]): j for j in mj.itx_r13() if j.get("variant") == "r13x" and j["arm"] == "A9"}
+        want_hash = "28e5a5e9c725"
     else:
         old = {(j["name"], j["seed"]): j for j in mj.backoff2(harness="ext", instances=list(mj.R1_INSTANCES))
                if j.get("variant") == "boY"}
+        want_hash = "86b1e527db68"
     for j in ctl:
         o = old[(j["name"], j["seed"])]
         assert _without_place(j) == _without_place(o)
-        assert pair.run_id_for(j) == pair.run_id_for(o)
+        assert pair.run_hash(j) == pair.run_hash(o) == want_hash
+        assert pair.run_id_for(j) != pair.run_id_for(o)
     trt = [j for j in jobs if j["variant"] == t_label]
     assert {j["config"] for j in trt} == {f"configs/itrea2-dev-rc-3way-{t_label}.yaml"}
-    ids = [pair.run_id_for(j) for j in jobs]
-    assert len(set(ids)) == 20 and not set(ids[i] for i, j in enumerate(jobs) if j in trt) & \
-        {pair.run_id_for(o) for o in old.values()}
+    ids = {pair.run_id_for(j) for j in jobs}
+    assert len(ids) == 20 and not ids & _committed_ids()
+
+
+def test_r1_fallback_controls_do_not_repeat_r1_bsync_ids():
+    from itrea.experiments import pair
+    ids = {v: {pair.run_id_for(j) for j in mj.r1_bsync("r13x", v)} for v in mj.R1_VARIANTS}
+    assert not ids["bsync"] & ids["bnice"] and not ids["bsync"] & ids["ysync"] and not ids["bnice"] & ids["ysync"]
 
 
 def test_r1_bsync_refuses_unknown_controls_and_variants():
     with pytest.raises(mj.JobError, match="control"):
         mj.r1_bsync("bo1s")
     with pytest.raises(mj.JobError, match="variant"):
-        mj.r1_bsync("r13x", "bspin")
+        mj.r1_bsync("r13x", "bsyncn")
 
 
-@pytest.mark.parametrize("base, nice, t_label, c_label", [
-    ("bsync", None, "bsync-ld", "bsync"), ("bsync", 0, "bsync-ld0", "bsync"),
+@pytest.mark.parametrize("base, nice, t_stem, c_stem", [
+    ("bsync", 10, "bsync-ld", "bsync"), ("bsync", 0, "bsync-ld0", "bsync"),
     ("boY-bsync", 10, "boY-bsync-ld", "boY-bsync"), ("boY-bsync", 0, "boY-bsync-ld0", "boY-bsync"),
-    ("r13x", None, "ld0", "r13x"), ("boY", 0, "boY-ld0", "boY")])
-def test_r2_ld_jobs(base, nice, t_label, c_label):
-    """R2's test: {treatment, control} x item_placement_9903 and sing44 at seeds 0-3 + ca, glass4, kumeu at seeds 0-1
-    (28 runs, 14 blocks), 120 s, ext, set r2-ld. With R1 adopted the control is A9@bsync (R1's treatment job, same run
-    id) and the treatment bsync-ld at nice 10 (default) or 0; without it the fallback ld0 at nice 0 against the
-    development default's exact job."""
+    ("r13x", None, "ld0", ""), ("boY", 0, "boY-ld0", "boY")])
+def test_r2_ld_jobs(base, nice, t_stem, c_stem):
+    """D-026's test: {A9@r2ld, A9@r2ctl} x item_placement_9903 and sing44 at seeds 0-3 + ca, glass4, kumeu at seeds 0-1
+    (28 runs, 14 blocks), 120 s, ext, set r2-ld. The control runs the base's configuration file (with R1 adopted:
+    R1's treatment, the same run hash as A9@bsync / A9@boY-bsync), the treatment the base + the gated decode at the
+    stated nice; every run id new."""
     from itrea.experiments import pair
     jobs = mj.r2_ld(base, nice)
     assert len(jobs) == 28 and len(make_blocks(jobs)) == 14 and {j["set"] for j in jobs} == {"r2-ld"}
     seeds = {n: sorted({j["seed"] for j in jobs if j["name"] == n}) for n in {j["name"] for j in jobs}}
     assert seeds == {"item_placement_9903": [0, 1, 2, 3], "sing44": [0, 1, 2, 3], "ca__Scenario400_reserves_1": [0, 1],
                      "glass4": [0, 1], "neos-3656078-kumeu": [0, 1]}
-    assert Counter(j["variant"] for j in jobs) == {t_label: 14, c_label: 14}
+    assert Counter(j["variant"] for j in jobs) == {"r2ld": 14, "r2ctl": 14}
     assert {j["harness"] for j in jobs} == {"ext"} and {j["budget"] for j in jobs} == {120.0}
+    cfg = lambda s: f"configs/itrea2-dev-rc-3way{'-' + s if s else ''}.yaml"    # noqa: E731
+    assert {j["config"] for j in jobs if j["variant"] == "r2ld"} == {cfg(t_stem)}
+    assert {j["config"] for j in jobs if j["variant"] == "r2ctl"} == {cfg(c_stem)}
     assert all((paths.ROOT / j["config"]).is_file() for j in jobs)
+    _positions_alternate(jobs, "r2ctl")
     for j in jobs:
         pair.job_budget(j)                                        # the runner plans both arms (gated lp_decode)
-    if base in ("bsync", "boY-bsync"):                            # the control = R1's treatment job, re-run
+    if base in ("bsync", "boY-bsync"):                            # the control = R1's treatment configuration
         r1 = {(j["name"], j["seed"]): j for j in mj.r1_bsync("boY" if base.startswith("boY") else "r13x")
-              if j["variant"] == c_label}
-        for j in (j for j in jobs if j["variant"] == c_label and (j["name"], j["seed"]) in r1):
-            assert pair.run_id_for(j) == pair.run_id_for(r1[(j["name"], j["seed"])])
+              if j["variant"] == base}
+        for j in (j for j in jobs if j["variant"] == "r2ctl" and (j["name"], j["seed"]) in r1):
+            o = r1[(j["name"], j["seed"])]
+            assert pair.run_hash(j) == pair.run_hash(o) and pair.run_id_for(j) != pair.run_id_for(o)
+    ids = {pair.run_id_for(j) for j in jobs}
+    assert len(ids) == 28 and not ids & _committed_ids()
 
 
 def test_r2_nice_rule_and_refusals():
@@ -515,29 +559,27 @@ def test_r2_nice_rule_and_refusals():
         mj.r2_ld("r13x", 10)                                      # the fallback runs the decoder at nice 0
     with pytest.raises(mj.JobError, match="--nice"):
         mj.r2_ld("bsync", 5)
+    with pytest.raises(mj.JobError, match="required"):
+        mj.r2_ld("bsync")                                         # no default before D-025's measurement
     with pytest.raises(mj.JobError, match="--base"):
-        mj.r2_ld("bsyncn")
+        mj.r2_ld("bnice")                                         # a fallback base: its -ld files come after D-025
 
 
-def test_r1_r2_cli_and_default_paths(tmp_path):
+def test_r1_r2_cli_default_paths_and_set(tmp_path):
     out = tmp_path / "r1.jsonl"
-    assert mj.main(["r1-bsync", "--control", "boY", "--variant", "byield", "--out", str(out)]) == 0
+    assert mj.main(["r1-bsync", "--control", "boY", "--variant", "ysync", "--out", str(out)]) == 0
     jobs = [json.loads(x) for x in out.read_text().splitlines()]
-    assert len(jobs) == 20 and {j["variant"] for j in jobs} == {"boY-byield", "boY"}
-    assert mj.r1_out("r13x", "bsync") == "jobs/r1-bsync.jsonl"
-    assert mj.r1_out("boY", "bsyncn") == "jobs/r1-bsyncn-boY.jsonl"
+    assert len(jobs) == 20 and {j["variant"] for j in jobs} == {"boY-ysync", "r1ctl-ysync"}
+    assert {j["set"] for j in jobs} == {"r1-ysync"}
+    assert mj.r1_out("bsync") == "jobs/r1-bsync.jsonl" and mj.R2_OUT == "jobs/r2-ld.jsonl"
+    assert mj.main(["r1-bsync", "--control", "r13x", "--set", "r1-bsync-2", "--out", str(out)]) == 0
+    jobs = [json.loads(x) for x in out.read_text().splitlines()]
+    assert {j["set"] for j in jobs} == {"r1-bsync-2"} and all(j["block"].endswith("__r1-bsync-2") for j in jobs)
     out2 = tmp_path / "r2.jsonl"
     assert mj.main(["r2-ld", "--base", "bsync", "--ea-cpu", "0.7", "--out", str(out2)]) == 0
-    assert {json.loads(x)["variant"] for x in out2.read_text().splitlines()} == {"bsync-ld0", "bsync"}
-    assert mj.r2_out("bsync", None) == "jobs/r2-bsync-ld.jsonl" and mj.r2_out("r13x", None) == "jobs/r2-ld0.jsonl"
+    assert {json.loads(x)["config"] for x in out2.read_text().splitlines()} == {
+        "configs/itrea2-dev-rc-3way-bsync-ld0.yaml", "configs/itrea2-dev-rc-3way-bsync.yaml"}
+    assert mj.main(["r2-ld", "--base", "bsync", "--out", str(out2)]) == 2          # neither --nice nor --ea-cpu
     assert mj.main(["r2-ld", "--base", "r13x", "--nice", "10", "--out", str(out2)]) == 2
-
-
-@pytest.mark.parametrize("argv, path", [(["r1-bsync", "--control", "r13x"], "jobs/r1-bsync.jsonl"),
-                                        (["r2-ld", "--base", "bsync"], "jobs/r2-bsync-ld.jsonl")])
-def test_r1_r2_sample_job_files_are_the_writers_output(tmp_path, argv, path):
-    """jobs/r1-bsync.jsonl (control A9@r13x) and jobs/r2-bsync-ld.jsonl (R1 adopted, nice 10) are exactly the writers'
-    output — samples: the file actually run is written after D-023's (R1) or R1's (R2) verdict."""
-    out = tmp_path / "x.jsonl"
-    assert mj.main(argv + ["--out", str(out)]) == 0
-    assert out.read_bytes() == (paths.ROOT / path).read_bytes()
+    assert mj.main(["r2-ld", "--base", "r13x", "--set", "r2-ld-2", "--out", str(out2)]) == 0
+    assert {json.loads(x)["set"] for x in out2.read_text().splitlines()} == {"r2-ld-2"}
