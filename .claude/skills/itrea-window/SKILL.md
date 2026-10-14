@@ -90,6 +90,13 @@ Berk usually does not coordinate the sessions — the lease does.
    inside the window) and stops both units. Log: `~/.local/state/itrea/serving-window.log`. A transient timer does not
    survive a reboot; the host's experiment-guard (07:00, 12:00) is the backstop, not the plan. Always set
    `ITREA_HOLD_UNTIL`: the script's default is the next 07:45 (a night-window default).
+   **A chain scheduled for later (a transient `systemd-run --user --on-calendar` timer) must be proven at scheduling
+   time, not at its start** (2026-10-14: the 07:05 chain's claim `--until 20:15` was refused — `box-window` refuses a
+   lease longer than 12 h, "not a window; split it" — and the chain exited at 08:00 with nobody told; 7.5 h of box
+   lost): (a) keep each lease ≤ 12 h (split a long day: the chain claims the second lease itself after the first
+   pool); (b) give the chain's service `-p OnFailure=agent-failure-alert@%n.service` and make every early exit
+   `exit 1`, so a refused claim alerts in [ops channel]; (c) at the chain's start time, check `logs/chain-*.out` within
+   15 min — a waiting session does that, not the chain.
    Development windows have also stopped both servers since 2026-10-07. The D-010 variant — `ITREA_UNITS=llama-qwen38`
    (the llama.cpp server only; §7) with the pool's `--allow-serving` (its 08:2x addendum) — is for development runs
    that fit beside the vLLM server `ornith-vllm`, never for confirmatory or screening runs.
