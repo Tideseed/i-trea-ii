@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import resource
 import time
 import traceback
 
@@ -288,8 +289,18 @@ def lp_relaxation(source: str | os.PathLike | Problem, time_limit: float = 60.0,
     return x, info
 
 
+def _cpu_self_s() -> float:
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return float(ru.ru_utime + ru.ru_stime)
+
+
 def _lp_worker_main(conn, path: str, time_limit: float, cpus: list[int] | None, names: list[str] | None) -> None:
-    """Entry point of the spawned worker: pin, solve, send (x, info) once, exit."""
+    """Entry point of the spawned worker: pin, solve, send (x, info) once, exit. The worker stamps its own clock
+    (`time.monotonic()`, system-wide) and CPU seconds (RUSAGE_SELF: the spawned interpreter's start-up included) when
+    it enters here (`t_entry`, `cpu_entry_s`) and just before it sends (`t_done`, `cpu_done_s`), so the EA records
+    when the LP was really finished and how much of a core it had, apart from when the EA polled it (R1)."""
+    t_entry, cpu_entry = time.monotonic(), _cpu_self_s()
+    stamps = dict(t_entry=t_entry, cpu_entry_s=cpu_entry, nice=os.getpriority(os.PRIO_PROCESS, 0))
     try:
         if cpus:
             os.sched_setaffinity(0, cpus)
@@ -297,10 +308,12 @@ def _lp_worker_main(conn, path: str, time_limit: float, cpus: list[int] | None, 
         info["pid"] = os.getpid()
         info["cpus"] = sorted(os.sched_getaffinity(0))
         info["omp_num_threads"] = os.environ.get("OMP_NUM_THREADS")
+        info.update(stamps, cpu_done_s=_cpu_self_s(), t_done=time.monotonic())
         conn.send((x, info))
     except BaseException as e:  # noqa: BLE001 — anything the solve raises goes back to the EA as a failure
         try:
-            conn.send((None, dict(state="failed", error=repr(e), traceback=traceback.format_exc())))
+            conn.send((None, dict(state="failed", error=repr(e), traceback=traceback.format_exc(), **stamps,
+                                  cpu_done_s=_cpu_self_s(), t_done=time.monotonic())))
         except Exception:
             pass
     finally:
@@ -321,7 +334,9 @@ class LPWorker:
     daemon process: it dies with the EA. Its memory is charged to the EA's systemd scope (same cgroup).
     poll() states: "not_started", "running", "done" (x is the canonical-order LP point), "no_solution" (time limit or
     infeasible LP without a feasible point), "failed" (exception or the process died; `error`, `exitcode`),
-    "stopped" (stop() before a result). Once a final state is reached poll() keeps returning it."""
+    "stopped" (stop() before a result). Once a final state is reached poll() keeps returning it. A result the worker
+    sent carries its own stamps (`t_entry`, `t_done`: time.monotonic(), system-wide; `cpu_entry_s`, `cpu_done_s`:
+    RUSAGE_SELF; `nice`), so the EA records when the LP was finished apart from `wall_seconds` (when it was read)."""
 
     def __init__(self, instance: str | os.PathLike, time_limit: float = 60.0, cpus: list[int] | None = None,
                  names: list[str] | None = None):

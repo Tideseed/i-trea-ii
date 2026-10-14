@@ -168,7 +168,14 @@ counter, no event, no extra random number; the start-up record says `lp_decode.s
     (`_WarmupDecoder`), forced to batches of three rows and of one row: the start-up record's `lp_decode_warmed` is the
     largest decoded batch (rows) that entered a candidate set in that pass (3 in "many", 1 in "one"),
     `lp_decode_warmed_batches` their number.
-  - begin (t0): the `LPDecoder` worker process starts beside the LP worker; `lpd_*` counters.
+  - begin (t0): the `LPDecoder` worker process starts beside the LP worker; `lpd_*` counters. With
+    `repair.lp_decode_gate: lp_worker` (R2 of the 2026-10-14 C1 diagnosis: the decode inside A9, on the EA's one core)
+    it is made at t0 but STARTED only when `_poll_lp_worker` reads a final state of the EA's HiGHS LP worker (done, no
+    solution, failed, stopped; at t0 when there is no LP worker): `_lpd_gate_open`, an `lp_decode` event "gate_open"
+    with `why` and `gate_t`; until then its state is "not_started", nothing is offered and every pick site counts
+    `lpd_gated`; the summary's `lp_decode` block carries `gate` (none / waiting / open), `gate_t`, `gate_why` — a gate
+    still "waiting" at the end means the decoder never ran. The worker is niced by `repair.lp_decode_nice` over the
+    host (start-up record and summary: `nice`).
   - the pick site, every generation between the survival and `_after_survival`, over the whole candidate set: poll
     the worker; if it is not idle count `lpd_busy`; if this poll read a reply that kept copies, offer nothing in this
     generation (`lpd_skip_pending`, below); else select one batch from the survival's host arrays (after the
@@ -259,6 +266,25 @@ is empty:
   more at `finish`. Forced mode: the fixed duty from t0 (stage-0 calibration). Ticks during a pause may still do small device
   work (an injected row's copy, an LP-stream point's evaluation).
 
+EA host (`host`, `HostCfg`, R1 of the 2026-10-14 C1 diagnosis; at its defaults nothing below happens except the
+records marked "every run").
+  - `host.cuda_sched` "blocking_sync" / "yield": `prepare` sets the primary CUDA context's scheduling flag through the
+    driver API (`ea.cuda_sched.apply`) BEFORE the backend exists — only when it creates the CuPy backend itself (an
+    engine handed a backend, e.g. the warm-up's, sets nothing) — and checks it on the active context right after
+    `cp.zeros(1)` (`verify`; a mismatch raises: a run is never labelled blocking sync while it spins). Start-up record
+    `cuda_sched` (on NumPy: "inert"); the summary's `cuda_sched` adds the state read at the end. Under blocking_sync the
+    per-generation timing events (`_Phases`) are created with cudaEventBlockingSync (summary `phase_events_block`).
+  - `host.nice_after_lp_spawn` N > 0: right after the LP worker's spawn in `begin`, every thread of the host takes nice
+    N (`renice_threads`, never lowered); a `host` event "renice" and the summary's `host_renice`. The warm-up never
+    renices (its overrides switch it off, as they switch the LP worker off).
+  - every run: the LP worker's own clock and CPU in the `lp` event and `lp` summary block (`worker_entry_t`,
+    `worker_done_t` in seconds since t0, `worker_wall_s`, `worker_cpu_s`, `worker_cpu_share`, `worker_cpu_total_s`,
+    `worker_nice`;
+    `wall_seconds` stays the EA's poll time), the summary's `cpu_clock` (the process's, the main thread's and the reaped
+    children's CPU seconds from t0, `self_per_wall_s`) and the counter `ls_launches` (GPU feasibility-jump launches).
+  - every GPU run: the warm-up's many-part concatenate (`_warm_concat`, start-up `warmup.concat_many_parts`): CuPy
+    14.2 changes kernels for more than 8 parts, which a candidate set with a decoded batch can reach in A9.
+
 Immigrants (shortfall fill and stagnation) are repaired like children (frontier rows are not: they are feasible
 archive members), evaluated, de-duplicated against the population and admitted with the survival's rules: an
 infeasible immigrant better than the incumbent takes a Rank 0 slot only while the quota floor(x·P) has room (and not
@@ -286,6 +312,7 @@ import dataclasses
 import json
 import math
 import os
+import resource
 import struct
 import time
 from dataclasses import dataclass
@@ -296,6 +323,7 @@ import scipy.sparse as sps
 
 from itrea.backend import Backend, get_backend
 from itrea.config import EAConfig
+from itrea.ea import cuda_sched
 from itrea.ea.continuous import SingletonDecoder
 from itrea.ea.crossover import crossover
 from itrea.ea.evaluate import DeviceProblem, evaluate, to_device
@@ -319,6 +347,7 @@ from itrea.solvers.common import ORIGIN_EA_ECHO, POST_CUOPT, SOURCE_CODES, band_
 from itrea.trace import save_incumbents
 
 HEADROOM = 0.9                 # share of gpu_mem_gb the memory plan may fill (pool fragmentation, library workspaces)
+CONCAT_WARM_PARTS = 9          # the warm-up's many-part concatenate: CuPy 14.2 changes kernels above 8 parts (R2)
 FRONTIER_OFFER = 2             # frontier.update gets at most FRONTIER_OFFER * max_size candidates besides the incumbent
 MAX_DEMOTIONS = 8              # float64 re-check failures handled per incumbent search before giving up
 STOP_POLL_S = 0.25             # inside a generation, the mailbox's stop flag is read at most this often (a Redis call)
@@ -550,23 +579,29 @@ class _NullTrace:
 
 
 class _Phases:
-    """Per-phase seconds: CUDA events on the GPU (read once per generation), perf_counter on the CPU."""
+    """Per-phase seconds: CUDA events on the GPU (read once per generation), perf_counter on the CPU. `block`: the
+    events are created with cudaEventBlockingSync (`host.cuda_sched: blocking_sync`, R1), so `collect`'s wait on the
+    last one sleeps instead of spinning; off, they are created exactly as before."""
 
-    def __init__(self, bk: Backend):
+    def __init__(self, bk: Backend, block: bool = False):
         self.gpu = bk.is_gpu
+        self.block = bool(block)
         self.acc: dict[str, float] = {}
         self._pending: list = []
+
+    def _event(self):
+        import cupy as cp
+        return cp.cuda.Event(block=True) if self.block else cp.cuda.Event()
 
     @contextlib.contextmanager
     def __call__(self, name: str):
         if self.gpu:
-            import cupy as cp
-            s = cp.cuda.Event()
+            s = self._event()
             s.record()
             try:
                 yield
             finally:
-                e = cp.cuda.Event()
+                e = self._event()
                 e.record()
                 self._pending.append((name, s, e))
         else:
@@ -642,7 +677,7 @@ def _lp_decoder_for(eng: "Engine") -> lpdec.LPDecoder:
     rp, prob = eng.cfg.repair, eng.prob
     return lpdec.LPDecoder(resolve(str(prob.path)), lpdec.model_digest(prob.names, prob.isint), eng.lpd_int_dtype,
                            rp.lp_decode_per_gen, rp.lp_time_limit, rp.lp_decode_cold_limit, eng.cfg.ranks.feas_tol,
-                           eng.deadline)
+                           eng.deadline, nice=rp.lp_decode_nice)
 
 
 def _is_solver_find(bits: int) -> bool:
@@ -663,6 +698,35 @@ def _mem_available_gb() -> float | None:
 
 def _is_oom(e: BaseException) -> bool:
     return type(e).__name__ == "OutOfMemoryError" or isinstance(e, MemoryError) and "Out of memory" in str(e)
+
+
+def _cpu_s(who: int) -> float:
+    ru = resource.getrusage(who)
+    return float(ru.ru_utime + ru.ru_stime)
+
+
+def renice_threads(value: int, task_dir: str | os.PathLike = "/proc/self/task") -> dict:
+    """Every thread of this process to nice `value` (`host.nice_after_lp_spawn`, R1's fallback (a)). Linux keeps the
+    nice value per thread, so each thread id under /proc/self/task is set with os.setpriority(PRIO_PROCESS, tid);
+    never lowered (an unprivileged process could not raise its priority again): a thread already at `value` or above
+    is left as it is. Returns the record {value, threads, set, kept, before (the main thread's)}; a failed set raises
+    OSError (the run must not be labelled with a renice that did not happen)."""
+    tids = sorted(int(t) for t in os.listdir(task_dir) if t.isdigit())
+    me = os.getpid()
+    before = os.getpriority(os.PRIO_PROCESS, me)
+    n_set = n_kept = 0
+    for tid in tids:
+        try:
+            cur = os.getpriority(os.PRIO_PROCESS, tid)
+        except ProcessLookupError:                       # a thread that ended meanwhile
+            continue
+        if cur >= value:
+            n_kept += 1
+            continue
+        os.setpriority(os.PRIO_PROCESS, tid, int(value))
+        n_set += 1
+    return dict(value=int(value), threads=len(tids), set=n_set, kept=n_kept, before=before,
+                after=os.getpriority(os.PRIO_PROCESS, me))
 
 
 # ------------------------------------------------------------------------------------------------------ engine
@@ -696,6 +760,8 @@ class Engine:
         self.lpd_on = False
         self.bo: Backoff | None = None           # the GPU back-off (backoff.enabled and exchange.from_cuopt; in begin)
         self._bo_sleeping = False                # True during a between-generation pause (`_lps_use` waits)
+        self.cuda_rec: dict | None = None        # host.cuda_sched: the driver-API record (prepare)
+        self.host_renice: dict | None = None     # host.nice_after_lp_spawn: what the renice after the spawn did (begin)
 
     def incumbent_log(self, run_dir: str | os.PathLike, role: str = "ea") -> None:
         """Append every incumbent to `<role>.incumbents.part` as it is found (with `<role>.names.json`), in the solver
@@ -718,10 +784,15 @@ class Engine:
         # -------------------------------------------------------------------------------- backend
         t = time.monotonic()
         mem0 = _mem_available_gb()
+        mode = cfg.host.cuda_sched
         if self.bk is None:
             if cfg.backend == "auto" and not self.allow_cpu_fallback:
                 raise ValueError("backend 'auto' is refused for an EA run (a silent CPU fallback would mislabel a GPU "
                                  "arm); choose 'cupy' or 'numpy'")
+            if cfg.backend == "cupy":
+                # host.cuda_sched (R1): the primary context's scheduling flag through the driver API, BEFORE CuPy is
+                # asked for anything — nothing may retain the context first (`ea.cuda_sched`); "auto" calls nothing
+                self.cuda_rec = cuda_sched.apply(mode)
             self.bk = get_backend(cfg.backend, gpu_mem_gb=cfg.gpu_mem_gb)
         bk = self.bk
         rec["backend"] = bk.name
@@ -730,6 +801,8 @@ class Engine:
             pool = cp.get_default_memory_pool()
             want = int(cfg.gpu_mem_gb * 1024 ** 3)
             cp.zeros(1)                                          # create the context now (start-up, not the clock)
+            if self.cuda_rec is not None:                        # it must hold on the context CuPy now uses
+                cuda_sched.verify(self.cuda_rec)
             props = cp.cuda.runtime.getDeviceProperties(cp.cuda.Device().id)
             rec["device"] = props["name"].decode() if isinstance(props["name"], bytes) else str(props["name"])
             rec["pool_limit_bytes"] = int(pool.get_limit())
@@ -749,6 +822,13 @@ class Engine:
         else:
             rec["device"] = "cpu"
             rec["pool_limit_bytes"] = None
+        if self.cuda_rec is not None:
+            rec["cuda_sched"] = cuda_sched.public(self.cuda_rec)
+        elif mode != "auto":                                    # NumPy, or a backend handed in (warm-up, tests)
+            rec["cuda_sched"] = dict(mode=mode, state="inert: " + ("numpy backend" if not bk.is_gpu else
+                                                                   "backend handed in, flag not set here"))
+        if cfg.host.nice_after_lp_spawn:
+            rec["host_nice_after_lp_spawn"] = int(cfg.host.nice_after_lp_spawn)
         mem1 = _mem_available_gb()
         rec["mem_available_gb_before_backend"] = mem0
         rec["mem_available_gb_after_backend"] = mem1
@@ -879,6 +959,7 @@ class Engine:
                 "exchange.use_root_lp": True, "exchange.poll_s": 1e-6, "exchange.post_frontier": True,
                 "seeding.lp_source": "solver", "seeding.random": 0.5, "seeding.lp_rounding": 0.5,
                 "backoff.enabled": False,                       # never pace (sleep) before the clock
+                "host.nice_after_lp_spawn": 0,                  # no LP worker in the warm-up, and no renice before t0
                 "crossover.pc": 1.0,
                 "crossover.weights": {"agreement": 1.0, "uniform": 1.0, "block": 1.0, "k_point": 1.0},
                 "mutation.weights": {k: 1.0 for k in ("flip", "step", "reset", "toward_lp", "violation_guided",
@@ -887,6 +968,7 @@ class Engine:
             # inert on this instance (no active column), so the run is exactly "auto": warm "auto" (the synthetic
             # problem may hold active columns the instance does not have, and has no file for a worker)
             over["repair.continuous"] = "auto"
+            over["repair.lp_decode_gate"] = "none"
         out = {}
         for name, offspring, rows in (("many", Pw, 3), ("one", 1, 1)):
             wcfg = self.cfg.with_overrides(dict(over, **{"population.offspring_per_gen": offspring}))
@@ -910,9 +992,28 @@ class Engine:
                 out[name]["lp_decode_warmed_batches"] = int(w.c.get("lpd_batches", 0))
         if self.bk.is_gpu:
             out["scan_ladder_max"] = self._warm_scans()
+            out["concat_many_parts"] = self._warm_concat()
         self.bk.synchronize()
         out.update(n=syn.n, m=syn.m)
         return out
+
+    def _warm_concat(self) -> int:
+        """Warm-up only (GPU): a candidate set of MORE THAN 8 parts (`Population.concat`: the population and children,
+        then one part per pending batch — solver, cuOpt, LP, LP-stream and decoded batches) makes CuPy 14.2 switch to
+        its pointer-array concatenate kernels, which nothing else warms (review 2026-10-08; with lp_decode inside A9 a
+        candidate set can reach that, R2). So `xp.concatenate` runs here on CONCAT_WARM_PARTS parts of every array a
+        candidate set concatenates on the device — X in this run's gene dtype (2-D), key and V (float64) and feasible
+        (bool), 1-D — in both forms CuPy distinguishes: every part one contiguous row, and parts of mixed lengths.
+        Nothing depends on the instance. Returns the number of parts."""
+        xp, n = self.bk.xp, max(1, int(self.prob.n))
+        k = CONCAT_WARM_PARTS
+        for shape1, dtype in (((1, n), self.gene_dtype), ((1,), np.float64), ((1,), np.bool_)):
+            one = [xp.zeros(shape1, dtype=dtype) for _ in range(k)]
+            mixed = [xp.zeros((3,) + shape1[1:], dtype=dtype)] + one[1:]
+            xp.concatenate(one)
+            xp.concatenate(mixed)
+        self.bk.synchronize()
+        return k
 
     def _warm_scans(self) -> int:
         """Warm-up only (GPU): CuPy's own scan (CUB off) is still specialised by size class — it compiled new kernels
@@ -1113,7 +1214,7 @@ class Engine:
         self.rng_host = np.random.default_rng([self.seed, 0x17EA])
         self.rng_dev = bk.rng(self.seed)
         self.idc = IdCounter()
-        self.phase = _Phases(bk)
+        self.phase = _Phases(bk, block=cuda_sched.events_block(cfg.host.cuda_sched))
         self.gen = 0
         self.depth = int(cfg.lineage_depth)
         ex = cfg.exchange
@@ -1189,9 +1290,14 @@ class Engine:
         self.logged_gen = -1
         self.frontier_posted: frozenset = frozenset()
         self.wall_start = time.monotonic()
+        # the EA's own CPU from t0 on (summary `cpu_clock`): the process, its main thread, its reaped children
+        self._cpu0 = (_cpu_s(resource.RUSAGE_SELF), _cpu_s(resource.RUSAGE_THREAD), _cpu_s(resource.RUSAGE_CHILDREN))
         if cfg.seeding.lp_source == "highs_async":
             self.lp_worker = LPWorker(prob.path, cfg.seeding.lp_time_limit, cpus=None, names=prob.names).start()
             self.lp_info["state"] = "running"
+            if cfg.host.nice_after_lp_spawn:     # R1's fallback (a): the host below the LP worker it just spawned
+                self.host_renice = dict(renice_threads(cfg.host.nice_after_lp_spawn), t=self.trace.now())
+                self.trace.event("host", what="renice", **self.host_renice)
         self._lpd_begin()                        # repair.continuous: lp_decode, an instance it can act on
         # GPU back-off (module docstring): only beside cuOpt; phase Y from t0, so it paces the initial repair too
         self.bo = Backoff(cfg.backoff, self.t0) if (cfg.backoff.enabled and self.from_cuopt) else None
@@ -1483,6 +1589,7 @@ class Engine:
                 self._oom("local_search", e)
         self.c["ls_moves"] += int(st.get("moves", 0))
         self.c["ls_calls"] += 1
+        self.c["ls_launches"] = self.c.get("ls_launches", 0) + int(st.get("launches", 0) or 0)
         if self.bo is not None:
             self._bo_ls_steps += int(st.get("steps", 0))
             self._bo_max_launch = max(self._bo_max_launch, float(st.get("max_launch_s", 0.0) or 0.0))
@@ -2434,17 +2541,42 @@ class Engine:
             if self.strat_on:
                 self.sc["immigrants"] += np.bincount(sk, minlength=self.S)
 
+    def _lp_worker_stamps(self, info: dict) -> dict:
+        """The LP worker's own clock (instrumentation, every run): when it entered its solve function and when it
+        finished (`time.monotonic()`, system-wide: seconds since t0 here), its CPU seconds between the two and their
+        ratio to that wall — so solve time and the EA's poll time (`wall_seconds`, stamped when the EA reads the
+        result at a generation boundary) are recorded apart (C1 diagnosis note, §3)."""
+        out = {}
+        te, td = info.get("t_entry"), info.get("t_done")
+        if isinstance(te, (int, float)) and isinstance(td, (int, float)):
+            out.update(worker_entry_t=round(float(te) - self.t0, 6), worker_done_t=round(float(td) - self.t0, 6),
+                       worker_wall_s=round(float(td) - float(te), 6))
+            ce, cd = info.get("cpu_entry_s"), info.get("cpu_done_s")
+            if isinstance(ce, (int, float)) and isinstance(cd, (int, float)):
+                out["worker_cpu_s"] = round(float(cd) - float(ce), 6)
+                out["worker_cpu_share"] = round(out["worker_cpu_s"] / max(float(td) - float(te), 1e-9), 4)
+                out["worker_cpu_total_s"] = round(float(cd), 6)      # with the spawned interpreter's start-up
+        if isinstance(info.get("nice"), int):
+            out["worker_nice"] = int(info["nice"])
+        return out
+
     def _poll_lp_worker(self) -> None:
         x, info = self.lp_worker.poll()
         state = info.get("state")
         if state == "done" and x is not None:
+            stamps = self._lp_worker_stamps(info)
+            self.lp_info.update(stamps)
             self._lp_arrived(np.asarray(x, np.float64), source="highs_async", obj=info.get("objective"),
-                             wall_seconds=info.get("wall_seconds"))
+                             wall_seconds=info.get("wall_seconds"), **stamps)
+            self._lpd_gate_open("lp_done")
         elif state in ("no_solution", "failed", "stopped"):
-            self.lp_info.update(state=state, error=info.get("error"))
-            self.trace.event("lp", source="highs_async", state=state, error=info.get("error"))
+            stamps = self._lp_worker_stamps(info)
+            self.lp_info.update(state=state, error=info.get("error"), wall_seconds=info.get("wall_seconds"), **stamps)
+            self.trace.event("lp", source="highs_async", state=state, error=info.get("error"),
+                             wall_seconds=info.get("wall_seconds"), **stamps)
             self.lp_worker.stop()
             self.lp_worker = None
+            self._lpd_gate_open(f"lp_{state}")
 
     def _verdicts(self) -> None:
         vs = self.mailbox.verdicts()
@@ -2524,7 +2656,8 @@ class Engine:
         rec["lp_decode"] = dict(state="configured", active_columns=int(cols.size), cont_obj=self.lpd_cont_obj,
                                 per_gen=int(rp.lp_decode_per_gen), time_limit=float(rp.lp_time_limit),
                                 cold_limit=float(rp.lp_decode_cold_limit), infeasible=bool(rp.lp_decode_infeasible),
-                                int_dtype=self.lpd_int_dtype.name, constants=lpdec.constants())
+                                int_dtype=self.lpd_int_dtype.name, constants=lpdec.constants(),
+                                gate=rp.lp_decode_gate, nice=int(rp.lp_decode_nice))
 
     def _lpd_begin(self) -> None:
         """At t0: the LP decode's state and counters, and the worker (only where the decode can act)."""
@@ -2559,7 +2692,30 @@ class Engine:
         self.lpd_stopped = False
         self.lpd_state_at_stop: str | None = None
         factory = self.decoder_factory if self.decoder_factory is not None else _lp_decoder_for
-        self.lpd = factory(self).start()
+        self.lpd = factory(self)
+        # repair.lp_decode_gate "lp_worker" (R2): the worker starts once the EA's LP worker reported a final state
+        # (`_poll_lp_worker` -> `_lpd_gate_open`); until then it is "not_started" (polls read nothing, offers are
+        # refused) and the pick site counts `lpd_gated`. Without an LP worker running the gate opens now.
+        self.lpd_gate = "none" if self.cfg.repair.lp_decode_gate == "none" else "waiting"
+        self.lpd_gate_t: float | None = None
+        self.lpd_gate_why: str | None = None
+        if self.lpd_gate == "waiting":
+            self.c["lpd_gated"] = 0
+        if self.lpd_gate == "none":
+            self.lpd.start()
+        elif self.lp_worker is None:
+            self._lpd_gate_open("no_lp_worker")
+
+    def _lpd_gate_open(self, why: str) -> None:
+        """Start the LP decode worker now that the EA's LP worker is done (or failed, hit its limit, was stopped, or
+        never ran) — repair.lp_decode_gate "lp_worker"; a no-op otherwise or once open."""
+        if self.lpd is None or getattr(self, "lpd_gate", "none") != "waiting":
+            return
+        self.lpd_gate = "open"
+        self.lpd_gate_t = self.trace.now()
+        self.lpd_gate_why = why
+        self.lpd.start()
+        self.trace.event("lp_decode", what="gate_open", why=why, gate_t=self.lpd_gate_t)
 
     def _lpd_time(self, dt: float) -> None:
         self.lpd_host_s += dt
@@ -2584,6 +2740,8 @@ class Engine:
             if st != "idle":
                 if st in ("starting", "busy"):
                     self.c["lpd_busy"] += 1
+                elif st == "not_started" and self.lpd_gate == "waiting":
+                    self.c["lpd_gated"] += 1                 # the gate (R2): not idle, waiting for the LP worker
                 return
             if self._lpd_pending_batches() > n0:             # the read kept copies: no offer in this generation
                 self.c["lpd_skip_pending"] += 1
@@ -2870,7 +3028,9 @@ class Engine:
                     wait_s_max=round(self.lpd_wait_s_max, 6),
                     ipc={k: (round(v, 6) if isinstance(v, float) else v) for k, v in ipc.items()} if ipc else None,
                     batch_rows_max=int(self.lpd_batch_rows_max), worker=dict(self.lpd_stats),
-                    **self._lpd_gain_fields(),
+                    gate=getattr(self, "lpd_gate", None), gate_t=getattr(self, "lpd_gate_t", None),
+                    gate_why=getattr(self, "lpd_gate_why", None),
+                    nice=int(rp.lp_decode_nice), **self._lpd_gain_fields(),
                     active_columns=int(self.lpd_cols.size), cont_obj=self.lpd_cont_obj,
                     per_gen=int(rp.lp_decode_per_gen), time_limit=float(rp.lp_time_limit),
                     cold_limit=float(rp.lp_decode_cold_limit), infeasible=bool(rp.lp_decode_infeasible),
@@ -3003,8 +3163,25 @@ class Engine:
                        dual_key_cuopt=self.dual_key_cuopt, final_cuopt_pop=self._cuopt_members())
         if self.lpd_on:
             out["lp_decode"] = self._lpd_summary()
+        out["cpu_clock"] = self._cpu_clock(wall)
+        out["phase_events_block"] = bool(self.phase.block)
+        if self.cuda_rec is not None:
+            out["cuda_sched"] = dict(cuda_sched.public(self.cuda_rec), **cuda_sched.state_at_end(self.cuda_rec))
+        if self.host_renice is not None:
+            out["host_renice"] = dict(self.host_renice)
         out["best_x"] = self.best_x
         return out
+
+    def _cpu_clock(self, wall: float) -> dict:
+        """The EA's CPU seconds from t0 to now (R1's mechanism: under blocking sync the host's self-CPU per wall-second
+        falls well below 1): the process (all its threads), its main thread, and the reaped children (the LP worker
+        and the decode worker once joined), with the self-CPU per wall-second."""
+        s0, t0, c0 = getattr(self, "_cpu0", (0.0, 0.0, 0.0))
+        s1, t1, c1 = _cpu_s(resource.RUSAGE_SELF), _cpu_s(resource.RUSAGE_THREAD), _cpu_s(resource.RUSAGE_CHILDREN)
+        w = max(float(wall), 1e-9)
+        return dict(wall_s=round(float(wall), 6), self_s=round(s1 - s0, 6), main_thread_s=round(t1 - t0, 6),
+                    children_s=round(c1 - c0, 6), self_per_wall_s=round((s1 - s0) / w, 4),
+                    main_thread_per_wall_s=round((t1 - t0) / w, 4))
 
     def _cuopt_members(self) -> int:
         """A9: members of the population that entered as injected cuOpt rows."""

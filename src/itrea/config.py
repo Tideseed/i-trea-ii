@@ -36,8 +36,18 @@ variables); the three fields are in `_LATE_DEFAULTS`, so every recorded hash sta
 
 `repair.continuous: "lp_decode"` (D-017, issue #27) is "auto" plus the LP decode: a HiGHS worker process started at
 t0 fixes the integer part of a few candidates per generation and solves the LP over the continuous variables
-(`ea.lp_decode`). Its two later fields `repair.lp_decode_cold_limit` and `repair.lp_decode_infeasible` are in
-`_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
+(`ea.lp_decode`). Its later fields `repair.lp_decode_cold_limit`, `repair.lp_decode_infeasible`, `repair.lp_decode_gate`
+and `repair.lp_decode_nice` are in `_LATE_DEFAULTS`, so every recorded hash stands while they are at their defaults.
+`lp_decode_gate: lp_worker` (R2 of the 2026-10-14 C1 diagnosis) starts the decode worker only once the EA's own HiGHS
+LP worker (`seeding.lp_source: highs_async`) has reached a final state, so the decoder never takes CPU from it on the
+EA's one core in arm A9; the runner refuses lp_decode in A9 / A3x unless this gate is on (`experiments.pair`).
+`lp_decode_nice` is the decode worker's nice increment over the EA host (it was the module constant `NICE`, 10).
+
+`host` (`HostCfg`, R1 of the 2026-10-14 C1 diagnosis) is the EA host process itself: how its CUDA context waits on the
+GPU (`cuda_sched`: "auto" = CUDA's default, which spins while there are fewer contexts than cores; "blocking_sync" or
+"yield", set on the primary context through the driver API before anything retains it, `ea.cuda_sched`) and an
+optional nice value the host takes after it spawned the LP worker (`nice_after_lp_spawn`). The whole section is left
+out of the hash while every field is at its default, so every recorded hash stands.
 """
 from __future__ import annotations
 
@@ -173,6 +183,12 @@ class RepairCfg:
                                        # while no optimal basis exists to warm-start from
     lp_decode_infeasible: bool = True  # lp_decode: also offer infeasible candidates better than the incumbent
                                        # (completion); false = feasible sources only (polish)
+    lp_decode_gate: str = "none"       # lp_decode: "none" = the worker starts at t0 | "lp_worker" = it starts only once
+                                       # the EA's HiGHS LP worker (seeding.lp_source highs_async) has reported a final
+                                       # state (done, no_solution, failed or stopped; at t0 when there is none), so its
+                                       # read and priming never take CPU from that LP on a shared core (R2, A9)
+    lp_decode_nice: int = 10           # lp_decode: the worker's nice increment over the EA host (os.nice in the
+                                       # worker; it inherits the host's nice at the spawn); 10 = the former constant
 
 
 @dataclass
@@ -338,10 +354,32 @@ class BackoffCfg:
     assist: bool = True                # count SCIP-confirmed improvements of EA posts as contributions
 
 
+@dataclass
+class HostCfg:
+    """The EA host process (R1 of vault `30-results/2026-10-14 C1 diagnosis and improvement candidates.md`). In arm A9
+    the EA host and the HiGHS LP worker it spawns share one X925 core, and the host busy-waits on the GPU — CUDA's
+    default scheduling spins while there are fewer contexts than cores — so it keeps that core about 100 % busy while
+    99 % of its wall time is GPU repair, and the LP worker gets about half the core.
+    `cuda_sched` sets how the EA's primary CUDA context waits: "auto" (CUDA's default; nothing is called) |
+    "blocking_sync" (CU_CTX_SCHED_BLOCKING_SYNC: the host thread sleeps on a semaphore until the GPU is done; the
+    engine's per-generation timing events are then created with the blocking flag too, since a default-flag event wait
+    may spin whatever the context says) | "yield" (CU_CTX_SCHED_YIELD: the host spins but yields its time slice). It is
+    set through the driver API (`ea.cuda_sched`: cuInit, cuDeviceGet, cuDevicePrimaryCtxSetFlags) before anything
+    retains the context, before the warm-up and t0, and checked with cuDevicePrimaryCtxGetState once the context
+    exists; inert on the NumPy backend. `nice_after_lp_spawn` (0 = unchanged): right after the EA spawned the LP worker
+    at t0 (`seeding.lp_source: highs_async`), every thread of the EA host takes this nice value (os.setpriority; never
+    lowered), so on a shared core the LP worker (nice 0) wins the CPU while it runs; the host keeps it to the end (an
+    unprivileged process cannot raise its priority again). The section is left out of the configuration hash while
+    every field is at its default (`EAConfig.hash`)."""
+    cuda_sched: str = "auto"           # "auto" | "blocking_sync" | "yield"
+    nice_after_lp_spawn: int = 0       # 0 = unchanged | 1..19: the EA host's nice value after the LP worker's spawn
+
+
 # Fields added after configuration hashes were recorded (runs, D-002): left out of the hash while at these defaults.
 _LATE_DEFAULTS = {"ranks.feas_alt_scale": "none", "exchange.from_cuopt": False,
                   "ranks.rank1_mode": "top", "ranks.rank1_size": 0, "ranks.rank1_min_diff": 0,
-                  "repair.lp_decode_cold_limit": 10.0, "repair.lp_decode_infeasible": True}
+                  "repair.lp_decode_cold_limit": 10.0, "repair.lp_decode_infeasible": True,
+                  "repair.lp_decode_gate": "none", "repair.lp_decode_nice": 10}
 
 
 @dataclass
@@ -361,6 +399,7 @@ class EAConfig:
     lp_stream: LpStreamCfg = field(default_factory=LpStreamCfg)
     repair_clock: RepairClockCfg = field(default_factory=RepairClockCfg)
     backoff: BackoffCfg = field(default_factory=BackoffCfg)
+    host: HostCfg = field(default_factory=HostCfg)
     backend: str = "cupy"           # "cupy" | "numpy" — never a silent fallback ("auto" only with allow_cpu_fallback)
     gpu_mem_gb: float = 12.0           # CuPy pool limit (the only GPU memory cap on GB10) = cuOpt's RMM limit in A2:
                                        # equal GPU memory for both partners; cuOpt needs ~10.5 GB (measured 2026-10-06)
@@ -373,9 +412,10 @@ class EAConfig:
 
     def hash(self) -> str:
         """12-hex digest of the canonical JSON of every parameter except `name` — and except the `strategy`,
-        `lp_stream`, `repair_clock` and `backoff` sections while disabled, and the fields in `_LATE_DEFAULTS` while at
-        their default: they are inert then, so every configuration written before a section or field existed keeps its
-        hash (the default's `9ac4a93bf93b` among them)."""
+        `lp_stream`, `repair_clock` and `backoff` sections while disabled, the `host` section while every field of it is
+        at its default, and the fields in `_LATE_DEFAULTS` while at their default: they are inert then, so every
+        configuration written before a section or field existed keeps its hash (the default's `9ac4a93bf93b` among
+        them)."""
         d = self.to_dict()
         d.pop("name", None)
         if not self.strategy.enabled:
@@ -386,6 +426,8 @@ class EAConfig:
             d.pop("repair_clock", None)
         if not self.backoff.enabled:
             d.pop("backoff", None)
+        if self.host == HostCfg():                         # the whole section, not its keys one by one: an empty
+            d.pop("host", None)                            # {"host": {}} would change every hash
         for dotted, default in _LATE_DEFAULTS.items():     # fields added after a hash was recorded: out while default
             sec, _, k = dotted.partition(".")
             if d.get(sec, {}).get(k, object()) == default:
@@ -545,6 +587,18 @@ class EAConfig:
         _check(bo.patience_kappa > 0 and bo.materiality >= 0, "backoff.patience_kappa > 0, materiality >= 0")
         _check(not bo.enabled or (self.exchange.enabled and rp.method == "fj"),
                "backoff.enabled needs exchange.enabled and repair.method fj")
+        _check(rp.lp_decode_gate in ("none", "lp_worker"), "repair.lp_decode_gate in none|lp_worker")
+        _check(rp.lp_decode_gate == "none" or rp.continuous == "lp_decode",
+               "repair.lp_decode_gate lp_worker needs repair.continuous lp_decode")
+        _check(isinstance(rp.lp_decode_nice, int) and not isinstance(rp.lp_decode_nice, bool)
+               and 0 <= rp.lp_decode_nice <= 19, "repair.lp_decode_nice is an integer in [0, 19]")
+        ho = self.host
+        _check(ho.cuda_sched in ("auto", "blocking_sync", "yield"), "host.cuda_sched in auto|blocking_sync|yield")
+        _check(isinstance(ho.nice_after_lp_spawn, int) and not isinstance(ho.nice_after_lp_spawn, bool)
+               and 0 <= ho.nice_after_lp_spawn <= 19, "host.nice_after_lp_spawn is an integer in [0, 19]")
+        # without the EA's own LP worker the renice never happens: the variant would be mislabelled
+        _check(ho.nice_after_lp_spawn == 0 or sd.lp_source == "highs_async",
+               "host.nice_after_lp_spawn needs seeding.lp_source highs_async (it acts after the LP worker's spawn)")
         _check(self.backend in ("cupy", "numpy", "auto"), "backend in cupy|numpy|auto")
         _check(self.gpu_mem_gb > 0, "gpu_mem_gb > 0")
         _check(self.log_every >= 1 and self.lineage_depth >= 0, "logging parameters")

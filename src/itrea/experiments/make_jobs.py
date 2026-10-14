@@ -34,6 +34,8 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs itx-a0 | itx-m6 | itx-m6a                       [--out jobs/itx-<k>.jsonl]
     python -m itrea.experiments.make_jobs itx-a0 --select d024 [--out jobs/itx-a0-81.jsonl]     (D-024 (f): 81 runs)
     python -m itrea.experiments.make_jobs itx-v1 --tier T1 [--cuopt 26.10] --out FILE
+    python -m itrea.experiments.make_jobs r1-bsync --control r13x|boY [--variant bsync|bsyncn|byield] [--out F]
+    python -m itrea.experiments.make_jobs r2-ld --base bsync|boY-bsync|r13x|boY [--nice 10|0 | --ea-cpu X] [--out F]
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -51,6 +53,23 @@ instances (`backoff-report --stage 1y` reads only the 11 and names any other). `
 outcome, carried by both A9 arms: `ext` (R13 + R14 adopted — D-022's verdict of 2026-10-13) or `r13-off` (rejected: the
 ext harness with cuOpt's default gaps and its thread variables kept); A6F runs under `ext` either way (D-021 R13: gaps 0
 for every cuOpt process; R6: A6F is our cuOpt alone; D-022's reject clause covers only A9's rows).
+
+`r1-bsync` and `r2-ld` write the targeted tests (D-024) of R1 and R2 of the C1 diagnosis (vault `30-results/2026-10-14
+C1 diagnosis and improvement candidates.md`, §5), split dev, 120 s, the ext harness, one block per instance x seed; the
+control is the same-day development default re-run with its EXACT existing job (configuration file, variant label,
+harness), so its run id is the earlier one and build_runs qualifies the re-run as `<run_id>#<set>`, and the treatment
+is that control's configuration plus the one change (`configs/itrea2-dev-rc-3way-<label>.yaml`). `r1-bsync`:
+ca__Scenario400_reserves_1, sing44, neos-960392, item_placement_9903, comp21-2idx x seeds 0-1 x {A9@<variant>, the
+control} = 20 runs, set `r1-<variant>`; `--control` is D-023's verdict — `r13x` (A9@r13x, D-022's job; the treatment
+A9@<variant>) or `boY` (A9@boY, D-023's job; the treatment A9@boY-<variant>, boY + the change); `--variant` bsync (R1)
+or a pre-stated fallback, bsyncn (a: + the host reniced to 10 after the LP worker's spawn) or byield (b: yield instead
+of blocking sync); jobs/r1-bsync.jsonl is the control-r13x sample. `r2-ld`: {A9@<base>-ld[0], A9@<base>} x
+item_placement_9903 and sing44 at seeds 0-3 + ca__Scenario400_reserves_1, glass4 and neos-3656078-kumeu at seeds 0-1 =
+28 runs, set `r2-ld`; `--base` is A9's default after R1's verdict — bsync / boY-bsync (R1 adopted: the control is R1's
+treatment job, the treatment adds the LP decode gated after the EA's LP worker, `-ld` at nice 10 or `-ld0` at nice 0
+by R2's rule, `--ea-cpu` = R1's measured EA self-CPU per wall-second on item_placement_9903: < 0.5 -> 10, else 0) or
+r13x / boY (R1 not adopted: the pre-written fallback `ld0` at nice 0 against the development default);
+jobs/r2-bsync-ld.jsonl is the R1-adopted, nice-10 sample.
 
 `itx-r13f` writes D-022's INCONCLUSIVE follow-up (its clarification of 2026-10-12): the instances the seeds 0-1 report
 names (`--instances a,b` or `all`) x seeds 2-3 x the same three arms and harnesses as `itx-r13`, 120 s, set `itx-r13f`.
@@ -169,6 +188,26 @@ ITX_A0_SELECT = {"all": "jobs/itx-a0.jsonl", "d024": "jobs/itx-a0-81.jsonl", "st
 # lanes (the other 14 development / class-probe instances x 600 s)
 ITX_M6_MEASURED = ("neos-2657525-crna", "fhnw-binpack4-48", "glass4")
 ITX_M6_BUDGET, ITX_M6_LOAD_BUDGET, ITX_M6_LOADS_FIRST = 60.0, 600.0, 3
+# R1 / R2 of the C1 diagnosis (vault 30-results/2026-10-14 C1 diagnosis and improvement candidates.md, §5): targeted
+# tests (D-024) of the EA's blocking sync (R1) and of the LP decode inside A9 after the EA's LP worker (R2). The control
+# is the same-day development default, re-run with its EXACT existing job (config, variant label, harness), so its run
+# id equals the earlier one and build_runs qualifies it as `<run_id>#<set>`: A9@r13x (D-022's itx-r13), or A9@boY
+# (D-023's backoff2) if D-023 adopts phase Y. A treatment is that control plus one change (`<base>-<variant>.yaml`).
+R1_SET_PREFIX, R1_BUDGET, R1_SEEDS = "r1-", 120.0, (0, 1)
+R1_INSTANCES = ("ca__Scenario400_reserves_1", "sing44", "neos-960392", "item_placement_9903", "comp21-2idx")
+R1_VARIANTS = ("bsync", "bsyncn", "byield")     # the treatment and R1's pre-stated fallbacks (a) renice, (b) yield
+R1_CONTROLS = {"r13x": (ITX_A9_CONFIG, "r13x", ""),                        # (config, label, treatment prefix)
+               "boY": (f"{BACKOFF_BASE}-boY.yaml", "boY", "boY-")}
+R2_SET, R2_BUDGET = "r2-ld", 120.0
+R2_HINT_INSTANCES, R2_HINT_SEEDS = ("item_placement_9903", "sing44"), (0, 1, 2, 3)
+R2_GUARD_INSTANCES, R2_GUARD_SEEDS = ("ca__Scenario400_reserves_1", "glass4", "neos-3656078-kumeu"), (0, 1)
+R2_NICE = (10, 0)                               # R2's rule: 10 if R1's item EA self-CPU per wall-second < 0.5, else 0
+R2_NICE_THRESHOLD = 0.5
+# R2's base = A9's development default after R1's verdict: R1 adopted (bsync, on r13x or on boY) or not (r13x / boY:
+# the pre-written fallback, the decoder at nice 0 beside the spinning host)
+R2_BASES = {"bsync": (f"{BACKOFF_BASE}-bsync.yaml", "bsync", "bsync-"),
+            "boY-bsync": (f"{BACKOFF_BASE}-boY-bsync.yaml", "boY-bsync", "boY-bsync-"),
+            "r13x": (ITX_A9_CONFIG, "r13x", ""), "boY": (f"{BACKOFF_BASE}-boY.yaml", "boY", "boY-")}
 OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position", "priority")
 
 
@@ -875,6 +914,87 @@ def itx_m6a(set_: str = "itx-m6a", seed: int = ITX_SEED, tables=INSTANCE_TABLES)
     return _sorted([_itx(where[n], n, set_, "A0", seed, ITX_M6_BUDGET, "m6a", ITX_EXT) for n in ITX_M6_MEASURED])
 
 
+# ------------------------------------------------------------------------------- R1 / R2 of the C1 diagnosis
+def r1_bsync(control: str = "r13x", variant: str = "bsync", seeds=R1_SEEDS, budget: float = R1_BUDGET,
+             set_: str | None = None, tables=INSTANCE_TABLES) -> list[dict]:
+    """R1's targeted test (C1 diagnosis note §5, R1): ca__Scenario400_reserves_1, sing44, neos-960392 (the hint),
+    item_placement_9903 and comp21-2idx (the wake-latency guards) x seeds 0-1 x {the treatment, the control}, 120 s,
+    the ext harness, one block per instance x seed (20 runs), set `r1-<variant>`. `control` is D-023's verdict:
+    "r13x" (boY not adopted: A9@r13x, configs/itrea2-dev-rc-3way.yaml, exactly D-022's job) or "boY" (adopted:
+    A9@boY, configs/itrea2-dev-rc-3way-boY.yaml, exactly D-023's job). The treatment is that control plus the one
+    change: A9@<variant> on configs/itrea2-dev-rc-3way-<variant>.yaml (control r13x) or A9@boY-<variant> on
+    configs/itrea2-dev-rc-3way-boY-<variant>.yaml (control boY). `variant`: "bsync" (R1), or a pre-stated fallback,
+    "bsyncn" (a: bsync + the host reniced to 10 after the LP worker's spawn) or "byield" (b: CU_CTX_SCHED_YIELD)."""
+    if control not in R1_CONTROLS:
+        raise JobError(f"r1-bsync --control: one of {', '.join(R1_CONTROLS)} (D-023's verdict), not {control!r}")
+    if variant not in R1_VARIANTS:
+        raise JobError(f"r1-bsync --variant: one of {', '.join(R1_VARIANTS)}, not {variant!r}")
+    c_config, c_label, prefix = R1_CONTROLS[control]
+    t_label = prefix + variant
+    t_config = f"{BACKOFF_BASE}-{t_label}.yaml"
+    set_ = set_ or R1_SET_PREFIX + variant
+    where = instance_paths(R1_INSTANCES, tables)
+    out = []
+    for n in R1_INSTANCES:
+        for seed in seeds:
+            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}", harness=ITX_EXT)
+            out.append(job(where[n], set_, "A9", seed, budget, config=c_config, variant=c_label, **common))
+            out.append(job(where[n], set_, "A9", seed, budget, config=t_config, variant=t_label, **common))
+    return _sorted(out)
+
+
+def r2_nice(ea_self_cpu_per_wall_s: float) -> int:
+    """R2's stated rule for the decoder's nice against the EA host, from R1's measured EA self-CPU per wall-second on
+    item_placement_9903 under the adopted R1 variant: nice 10 (the D-017 constant) if it is below 0.5, else 0."""
+    v = float(ea_self_cpu_per_wall_s)
+    if not v == v or v < 0:                                    # NaN or negative: no measurement
+        raise JobError(f"r2-ld: an EA self-CPU per wall-second is a number >= 0, not {ea_self_cpu_per_wall_s!r}")
+    return R2_NICE[1] if v >= R2_NICE_THRESHOLD else R2_NICE[0]
+
+
+def r2_ld(base: str = "bsync", nice: int | None = None, budget: float = R2_BUDGET, set_: str = R2_SET,
+          tables=INSTANCE_TABLES) -> list[dict]:
+    """R2's targeted test (C1 diagnosis note §5, R2): {the treatment, the control} x the hint instances
+    item_placement_9903 and sing44 x seeds 0-3 (16 runs) and the no-harm instances ca__Scenario400_reserves_1, glass4
+    and neos-3656078-kumeu x seeds 0-1 (12 runs) = 28 runs, 120 s, the ext harness, one block per instance x seed,
+    set `r2-ld`. `base` is A9's development default after R1's verdict, re-run with its exact job as the control:
+    "bsync" (R1 adopted; configs/itrea2-dev-rc-3way-bsync.yaml) or "boY-bsync" (R1 adopted on top of D-023's phase Y);
+    the treatment is the base + the LP decode gated after the EA's LP worker, `<base>-ld` (nice 10) or `<base>-ld0`
+    (nice 0) by `nice` (`r2_nice`: R2's rule from R1's measured EA self-CPU). "r13x" or "boY" = R1 NOT adopted: the
+    pre-written fallback `ld0` / `boY-ld0` (gated, nice 0 beside the spinning host) against A9@r13x / A9@boY; `nice`
+    must then be 0 or None."""
+    if base not in R2_BASES:
+        raise JobError(f"r2-ld --base: one of {', '.join(R2_BASES)}, not {base!r}")
+    c_config, c_label, prefix = R2_BASES[base]
+    with_bsync = "bsync" in base
+    if nice is None:
+        nice = R2_NICE[0] if with_bsync else 0
+    if nice not in R2_NICE:
+        raise JobError(f"r2-ld --nice: 10 or 0 (R2's rule), not {nice!r}")
+    if not with_bsync and nice != 0:
+        raise JobError("r2-ld: the fallback without R1 (base r13x / boY) runs the decoder at nice 0 (C1 note, R2)")
+    t_label = prefix + ("ld" if nice == 10 else "ld0")
+    t_config = f"{BACKOFF_BASE}-{t_label}.yaml"
+    cells = [(n, R2_HINT_SEEDS) for n in R2_HINT_INSTANCES] + [(n, R2_GUARD_SEEDS) for n in R2_GUARD_INSTANCES]
+    where = instance_paths([n for n, _ in cells], tables)
+    out = []
+    for n, seeds in cells:
+        for seed in seeds:
+            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}", harness=ITX_EXT)
+            out.append(job(where[n], set_, "A9", seed, budget, config=c_config, variant=c_label, **common))
+            out.append(job(where[n], set_, "A9", seed, budget, config=t_config, variant=t_label, **common))
+    return _sorted(out)
+
+
+def r1_out(control: str, variant: str) -> str:
+    return f"jobs/r1-{variant}{'-boY' if control == 'boY' else ''}.jsonl"
+
+
+def r2_out(base: str, nice: int | None) -> str:
+    nice = (R2_NICE[0] if "bsync" in base else 0) if nice is None else nice
+    return f"jobs/r2-{R2_BASES[base][2]}{'ld' if nice == 10 else 'ld0'}.jsonl"
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -975,6 +1095,27 @@ def main(argv=None) -> int:
             p.add_argument("--select", choices=tuple(ITX_A0_SELECT), default="all",
                            help="all: the 230 (D-021), H_cu ∪ W_SCIP unseen first; d024: only those 81, v1's stage-1 "
                                 "25 first (D-024 (f), Berk 2026-10-13); stage1: only the 25 (D-024 (f), no hint)")
+    r1 = sub.add_parser("r1-bsync", help="R1 (C1 diagnosis 2026-10-14): 5 instances x seeds 0-1 x {A9@<variant>, "
+                                         "the same-day development default}, ext, 120 s (20 runs)")
+    r1.add_argument("--control", required=True, choices=tuple(R1_CONTROLS),
+                    help="D-023's verdict: r13x (boY not adopted: A9@r13x) or boY (adopted: A9@boY; the treatment is "
+                         "then boY + the variant)")
+    r1.add_argument("--variant", default="bsync", choices=R1_VARIANTS,
+                    help="bsync (default), or a pre-stated fallback: bsyncn (a, renice) or byield (b, yield)")
+    r1.add_argument("--seeds", default="0,1")
+    r1.add_argument("--out", type=Path, default=None, help="default jobs/r1-<variant>[-boY].jsonl")
+    r2 = sub.add_parser("r2-ld", help="R2 (C1 diagnosis 2026-10-14): {A9@<base>-ld, A9@<base>} x item_placement_9903, "
+                                      "sing44 x seeds 0-3 + ca, glass4, kumeu x seeds 0-1, ext, 120 s (28 runs)")
+    r2.add_argument("--base", required=True, choices=tuple(R2_BASES),
+                    help="A9's default after R1's verdict: bsync / boY-bsync (R1 adopted), or r13x / boY (not "
+                         "adopted: the fallback ld0 at nice 0)")
+    nice = r2.add_mutually_exclusive_group()
+    nice.add_argument("--nice", type=int, choices=R2_NICE, default=None,
+                      help="the decoder's nice against the host (default 10 with bsync, 0 without)")
+    nice.add_argument("--ea-cpu", type=float, default=None,
+                      help="R1's measured EA self-CPU per wall-second on item_placement_9903: R2's rule picks the "
+                           "nice (< 0.5 -> 10, else 0)")
+    r2.add_argument("--out", type=Path, default=None, help="default jobs/r2-<treatment>.jsonl")
     v1 = sub.add_parser("itx-v1", help="D-021 v1 external tier T1..T5 ({A9, A6F} x seed 2000; T4 the panel at 2001; "
                                        "T5 live A2F on the panel), itx1 harness, 600 s, split ext")
     v1.add_argument("--tier", required=True, choices=ITX_TIERS)
@@ -1037,6 +1178,13 @@ def main(argv=None) -> int:
             jobs = itx_m6a()
         elif a.cmd == "itx-v1":
             jobs = itx_v1(a.tier, a.cuopt, a.strata, a.a9_config, data=a.data)
+        elif a.cmd == "r1-bsync":
+            jobs = r1_bsync(a.control, a.variant, tuple(int(x) for x in a.seeds.split(",") if x))
+            a.out = a.out or paths.ROOT / r1_out(a.control, a.variant)
+        elif a.cmd == "r2-ld":
+            nv = r2_nice(a.ea_cpu) if a.ea_cpu is not None else a.nice
+            jobs = r2_ld(a.base, nv)
+            a.out = a.out or paths.ROOT / r2_out(a.base, nv)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:
