@@ -700,6 +700,15 @@ reviewer 1 rejected it (keep = false).** Replaced by R3's diagnostic.
   only if built now and run in the windows right after backoff2.
 - **If R1 or R2 is adopted before the freeze, A9's development default changes hash.** The 34 A9@r13x runs then describe
   the old default. See the first question for Berk.
+- **2026-10-14 (records, before any run):** R1 → [[D-025 A9 EA blocking sync (R1) — the EA stops spinning on the GPU so its LP worker gets core 6, development test]]
+  (set `r1-bsync`, 20 runs; control by D-023's verdict); R2 → [[D-026 lp_decode inside A9 on the EA's core after the LP worker (R2), development test]]
+  (set `r2-ld`, 28 runs; after D-025's verdict); R3 → [[D-027 Same-day diagnostic of cuOpt's thread count and SCIP's presence (R3) — reading rules fixed before the runs]]
+  (set `r3-diag`, 30 runs). Each fixes its rules before any run; none has run.
+- **2026-10-14 17:4x–17:5x (before any run):** after an adversarial review of the builds, D-025 and D-026 were clarified
+  and amended (the control's own labels `A9@r1ctl` / `A9@r2ctl`; R1's fallback (a) is a renice without the flag; the P
+  band on the hint instances, R1's generation guard on seed means and a harm leg at the C1 re-read now gate) and D-027
+  was amended to the 16 runs a rule reads (D-024 rule 4; ≈ 0.9 h), with rule 2's sources corrected and its "≤ 133"
+  outcome worded as "the EA's presence remains; MPS is one candidate". R1 + R2 + R3 ≈ 3.7 h of run time (64 runs; was 78 runs, 4.45 h).
 
 ## Open questions for Berk (real decisions only)
 
@@ -709,6 +718,7 @@ reviewer 1 rejected it (keep = false).** Replaced by R3's diagnostic.
    - (c) Read the old default for the go / no-go, with R1 / R2 as dated addenda.
    - **Default if no answer:** (a). The go / no-go should describe the configuration that is frozen, and D-021 / D-024
      practice re-runs the control in the same window.
+   - **Answered 2026-10-14 16:0x (Berk, question panel): "Re-run C1 on frozen hash"** — (a); recorded in D-025 and D-026.
 2. **Two-way exchange (#35): v1 or v1.1?** Under the D-019 addendum and R33 it is v1.1 unless you supersede.
    - Separately: may timed A9 runs on the 26.10 nightly happen before the release, as measurement only? The SET-poll
      probe (R4 step 1) needs only a normal lease and is not a timed A9 run.

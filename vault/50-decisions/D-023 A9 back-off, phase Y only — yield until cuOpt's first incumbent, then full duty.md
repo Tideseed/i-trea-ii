@@ -1,6 +1,6 @@
 # D-023 A9 back-off, phase Y only — yield until cuOpt's first incumbent, then full duty (2026-10-12, AgentRA on Berk's word)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
+**Status:** RESULT 2026-10-14 18:1x: **NOT ADOPTED** (failed M2, M5, T, G; see § Result). Decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
 superseding decision on evidence. **Amended 2026-10-13 22:5x, before any run (D-024 rule 5): 11 instances, 66 runs,
 harness ext — see the amendment at the end; clarified 23:3x, before any run: G's noise test is "slept 0 s in phase Y", "still beats A6F" binds every guard, the universe is D-018's 14, a T failure inside its band is not adopted, other seeds are outside.** The follow-up named in [[D-018 A9 — the EA backs off the GPU beside cuOpt (contribution-gated duty cycle)]]
 § "Stage 1 result". Development only (D-010). Runs after [[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]]
@@ -225,3 +225,27 @@ test for each item; non-GPU suite 1041 passed, 1 skipped, 1 xfailed (r13's stale
 `17dd3c73…4c94`). A rehearsal of 1y on D-018 stage 1's runs relabelled (bo1 as boY, A6 as A6F; not a backoff2 reading)
 reproduces the amendment's figures: M4 0.546 over 22, guard-set mean +0.051 over 6, mean over the nine +0.149, F holds.
 Its verdict is INVALID only because those runs predate the ext harness.
+
+## Result (2026-10-14 18:1x, AgentRA): NOT ADOPTED — failed M2, M5, T, G
+Set `backoff2`, pool `20261014-144534-2277541` (14:45–17:49): **66 of 66 runs completed**, 0 failed / void; harness ext on
+all three arms. `itrea build-runs` then `itrea backoff-report --stage 1y --harness ext` (merged code b84d192):
+- **T fails:** chromaticindex1024-7 d +0.030 (P 0.545 → 0.529; needs d ≥ +0.30 and P ≤ 0.30). **M2 fails:** cuOpt's first
+  incumbent inside boY at 63.47 / 63.41 s vs A6F's 10.87 / 10.52 s. Under the old harness (D-018 stage 1, bo1 with the same
+  phase-Y values) phase Y gave cuOpt its first incumbent back at 9.4 / 12.4 s (d +0.834); under ext, at duty ½ for its 30-s
+  expiry, it did not — phase Y ended without a partner post and cuOpt posted at ~63 s, as under the control. D-018's
+  classification applies: "T fails with M2 failing: duty does not restore cuOpt at run level … STOP and report; MPS needs Berk".
+- **G fails** on sing44's "still beats A6F" leg (binding for every guard since the 23:3x clarification): the control beat A6F
+  by d +0.229, boY by +0.111 < 0.15. item_placement_9903's own band failed (d −0.291, band 0.14) but it is noise by 1y's test
+  (slept 0 s in phase Y), so only the mean and "still beats" bind it (+0.375 ≥ 0.15, holds). The report's line "failing
+  ['item_placement_9903']" lists band failures before the noise exemption; the verdict reads it correctly (display only).
+  Guard-set mean −0.014 (holds), neos-960392 ΔP −0.001 (holds).
+- **M5 fails:** local-search cap hits per call on ca 0.94 / 1.00 vs the control's 0.61. M1 holds (max latency 0.87 s), M3 holds
+  (leads 575 / 60 / 16 / 7 vs 430 / 40 / 16 / 6), M4 holds (0.535 pooled over 22 runs). Ladder targets hold (kumeu d +0.255,
+  toguru +0.003). F holds (krka ΔP −0.0009, fhnw −0.0015). Mean over the nine +0.023 (holds).
+- Reported, not criteria: ca d +0.247 (0.395 → 0.298) — the LP-core mechanism the diagnosis note predicted (phase Y gives the
+  EA's own LP worker core 6), not cuOpt's GPU share; kumeu +0.255. The control's item_placement P (0.218) is well below
+  A9@r13x's on 10-13 (0.364, same EA behaviour): item_placement's day-to-day spread is large, which matters for D-025's guard.
+- **Consequences:** the back-off line (D-018, D-023) is closed for v1 without a GPU-sharing change; the next A9 development
+  control is A9@r13x (D-025 `--control r13x`). Whether chromaticindex's loss is the EA's GPU presence or the 3-thread lane under
+  ext is read by D-027's amendment of 2026-10-14 (A6@ext on chromaticindex, before any r3-diag run); MPS goes to Berk only if
+  it points at the GPU.
