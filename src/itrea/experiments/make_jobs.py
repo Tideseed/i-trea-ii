@@ -34,7 +34,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs itx-a0 | itx-m6 | itx-m6a                       [--out jobs/itx-<k>.jsonl]
     python -m itrea.experiments.make_jobs itx-a0 --select d024 [--out jobs/itx-a0-81.jsonl]     (D-024 (f): 81 runs)
     python -m itrea.experiments.make_jobs itx-v1 --tier T1 [--cuopt 26.10] --out FILE
-    python -m itrea.experiments.make_jobs r3-diag [--out jobs/r3-diag.jsonl]          (C1 diagnosis R3: 16 runs)
+    python -m itrea.experiments.make_jobs r3-diag [--out jobs/r3-diag.jsonl]          (C1 diagnosis R3: 22 runs)
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -88,10 +88,11 @@ jobs/itx-a0.jsonl —; `--select stage1` only the 25 (D-024 (f) after "no hint")
 
 `r3-diag` writes R3 of `vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` (a diagnostic, not a
 lever: its validity and reading rules are D-027's, fixed before any run; `tools/d027_report.py` applies them), only the
-runs a reading rule reads (D-027's amendment of 2026-10-14, before any run; D-024 rule 4: breadth no decision reads is
+runs a reading rule reads (D-027's amendments of 2026-10-14, before any run; D-024 rule 4: breadth no decision reads is
 not run): comp21-2idx, neos-4763324-toguru, neos-2746589-doon x {A6@r3 (cuOpt alone, 3 threads on A725 1-3), A2@r3
 (SCIP on X925 5 + the same 3-thread cuOpt, no EA, X925 6 idle)} + toguru, doon x A6F@r3 (cuOpt alone on F, 5 threads),
-all under the ext harness, seeds 0-1, 120 s, set `r3-diag`, one block per instance x seed (16 runs in 6 blocks;
+and chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3} (rule 4 of the 18:3x amendment: cuOpt's first incumbent), all under
+the ext harness, seeds 0-1, 120 s, set `r3-diag`, one block per instance x seed (22 runs in 8 blocks;
 jobs/r3-diag.jsonl). A6F@r3 is A6F@r13x's job (same harness, so the same run hash 82a371305f88) under the variant `r3`,
 so the same-window re-run is like-for-like and its run ids never equal A6F@r13x's.
 """
@@ -185,12 +186,15 @@ ITX_M6_BUDGET, ITX_M6_LOAD_BUDGET, ITX_M6_LOADS_FIRST = 60.0, 600.0, 3
 # job (the same harness, so the same run hash 82a371305f88) under another label, so its run ids never equal
 # A6F@r13x's (run ids carry no set)
 R3_SET, R3_VARIANT, R3_BUDGET, R3_SEEDS = "r3-diag", "r3", 120.0, (0, 1)
-# Only the runs a reading rule reads (D-027's amendment of 2026-10-14, before any run; D-024 rule 4): A6 on the three
+# Only the runs a reading rule reads (D-027's amendments of 2026-10-14, before any run; D-024 rule 4): A6 on the three
 # (rules 1 and 3 on toguru / doon, rule 2's precondition on comp21), A2 on the three (rules 2 and 3), A6F on toguru and
-# doon (rule 1's consequence). sing44, item_placement_9903, ca and A6F on comp21 fed no rule and are not run.
-R3_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon")                 # x A6
-R3_A6F_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon")                            # x A6F as well
-R3_A2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon")              # x A2 as well
+# doon (rule 1's consequence); chromaticindex1024-7 x all three arms (rule 4, the 18:3x amendment: cuOpt's first
+# incumbent alone on F, alone on the 3-thread lane, beside SCIP). sing44, item_placement_9903, ca and A6F on comp21 fed
+# no rule and are not run.
+R3_CHROMATIC = "chromaticindex1024-7"                                                       # rule 4
+R3_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon", R3_CHROMATIC)   # x A6
+R3_A6F_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon", R3_CHROMATIC)              # x A6F as well
+R3_A2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon", R3_CHROMATIC)  # x A2 as well
 R3_OUT = "jobs/r3-diag.jsonl"
 OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position", "priority")
 
@@ -903,9 +907,10 @@ def r3_diag(seeds=R3_SEEDS, budget: float = R3_BUDGET, set_: str = R3_SET, table
     run, made exact by D-027 and applied by `tools/d027_report.py`): R3_INSTANCES x A6@r3 (cuOpt alone, 3 threads on
     A725 1-3) + R3_A6F_INSTANCES x A6F@r3 (cuOpt alone on F, 5 threads) + R3_A2_INSTANCES x A2@r3 (SCIP on X925 5 + the
     3-thread cuOpt on A725 1-3, no EA, X925 6 idle), seeds 0-1, 120 s, the ext harness on every arm, split dev, one
-    block per instance x seed: 16 runs in 6 blocks (only what a reading rule reads, D-027's amendment). A6F@r3 is A6F@r13x's job under another variant (same config, overrides,
-    harness and budget, so the same run hash): its runs re-measure A6F in the same window as A6 and A2, and their
-    run ids never equal A6F@r13x's."""
+    block per instance x seed: 22 runs in 8 blocks (only what a reading rule reads, D-027's amendments; R3_CHROMATIC x
+    all three arms for rule 4). A6F@r3 is A6F@r13x's job under another variant (same config, overrides, harness and
+    budget, so the same run hash): its runs re-measure A6F in the same window as A6 and A2, and their run ids never
+    equal A6F@r13x's."""
     where = instance_paths(R3_INSTANCES, tables)
     out = []
     for n in R3_INSTANCES:
@@ -1028,7 +1033,8 @@ def main(argv=None) -> int:
     v1.add_argument("--data", type=Path, default=paths.DATA)
     v1.add_argument("--out", type=Path, required=True, help="no default: the v1 files are written when 26.10 is in")
     r3 = sub.add_parser("r3-diag", help="C1 diagnosis R3 (D-027 as amended): comp21, toguru, doon x {A6@r3, A2@r3} "
-                                        "+ toguru, doon x A6F@r3, ext, 120 s, seeds 0-1 (16 runs)")
+                                        "+ toguru, doon x A6F@r3 + chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3}, "
+                                        "ext, 120 s, seeds 0-1 (22 runs)")
     r3.add_argument("--out", type=Path, default=paths.ROOT / R3_OUT, help=f"default {R3_OUT}")
     a = ap.parse_args(argv)
     try:

@@ -436,23 +436,28 @@ def test_itx_a0_81_file_is_the_writers_output(tmp_path):
 # ------------------------------------------------------------------------------------- C1 diagnosis R3 (r3-diag)
 def test_r3_diag_jobs():
     """R3 (C1 diagnosis note §5, D-027 as amended 2026-10-14: only what a rule reads): comp21, toguru, doon x {A6@r3,
-    A2@r3} + toguru, doon x A6F@r3, seeds 0-1, 120 s, ext on every arm, split dev, set r3-diag, one block per instance x
-    seed: 16 runs in 6 blocks, every run id distinct."""
+    A2@r3} + toguru, doon x A6F@r3 + chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3} (rule 4, the 18:3x amendment),
+    seeds 0-1, 120 s, ext on every arm, split dev, set r3-diag, one block per instance x seed: 22 runs in 8 blocks,
+    every run id distinct, the run hashes of the 16 earlier jobs unchanged."""
     from itrea.experiments import pair
     jobs = mj.r3_diag()
-    assert len(jobs) == 16
-    assert Counter(pair.arm_label(j) for j in jobs) == {"A6@r3": 6, "A6F@r3": 4, "A2@r3": 6}
+    assert len(jobs) == 22
+    assert Counter(pair.arm_label(j) for j in jobs) == {"A6@r3": 8, "A6F@r3": 6, "A2@r3": 8}
+    chrom = [j for j in jobs if j["name"] == "chromaticindex1024-7"]
+    assert sorted((pair.arm_label(j), j["seed"]) for j in chrom) == sorted(
+        (a, s) for a in ("A6@r3", "A6F@r3", "A2@r3") for s in (0, 1))
+    assert {j["instance"] for j in chrom} == {"data/miplib/inst/chromaticindex1024-7.mps.gz"}
     assert {j["set"] for j in jobs} == {"r3-diag"} and {j["split"] for j in jobs} == {"dev"}
     assert {j["budget"] for j in jobs} == {120.0} and {j["seed"] for j in jobs} == {0, 1}
     assert all(j["harness"] == "ext" and j["config"] is None and j["overrides"] == {} for j in jobs)
     blocks = {b.id: sorted(r.label for r in b.runs) for b in make_blocks(jobs)}
-    assert len(blocks) == 6
+    assert len(blocks) == 8
     for n in mj.R3_INSTANCES:
         want = sorted(["A6@r3"] + (["A6F@r3"] if n in mj.R3_A6F_INSTANCES else [])
                       + (["A2@r3"] if n in mj.R3_A2_INSTANCES else []))
         assert blocks[f"{n}__s0__r3-diag"] == blocks[f"{n}__s1__r3-diag"] == want, n
     ids = [pair.run_id_for(j) for j in jobs]
-    assert len(set(ids)) == 16
+    assert len(set(ids)) == 22
     assert {i.rsplit("__", 1)[1] for i in ids} == {"e54170304dad", "82a371305f88", "9c3031af075f"}   # A6, A6F, A2
 
 
@@ -465,16 +470,18 @@ def test_r3_diag_file_is_the_writers_output(tmp_path):
 
 def test_r3_a6f_is_the_r13x_job_under_another_variant():
     """A6F@r3 re-runs A6F@r13x like for like: each job equals the A6F@r13x line of the committed jobs/itx-r13.jsonl
-    (the file that ran on 2026-10-13) on every field but set, block, stratum and variant, so its run hash is the same
+    (the file that ran on 2026-10-13) or, for chromaticindex1024-7, of jobs/itx-r13b.jsonl (the C1 guard, the same set
+    itx-r13) on every field but set, block, stratum and variant, so its run hash is the same
     (82a371305f88), while its run id and its directory (traces/raw/r3-diag/) differ — the pool's resume never skips
     an R3 run for an itx-r13 run, and the run table never needs a `#<set>` copy. No R3 run id is the id of any job of
     another committed job file."""
     from itrea.experiments import pair
-    r13 = {(j["name"], j["seed"]): j for j in map(json.loads, (paths.ROOT / "jobs/itx-r13.jsonl").read_text()
-                                                    .splitlines()) if pair.arm_label(j) == "A6F@r13x"}
+    r13 = {(j["name"], j["seed"]): j for f in ("itx-r13.jsonl", "itx-r13b.jsonl")
+           for j in map(json.loads, (paths.ROOT / "jobs" / f).read_text().splitlines())
+           if pair.arm_label(j) == "A6F@r13x"}
     differ = {"set", "block", "stratum", "variant"}
     r3 = [j for j in mj.r3_diag() if j["arm"] == "A6F"]
-    assert len(r3) == 4
+    assert len(r3) == 6
     for j in r3:
         old = r13[(j["name"], j["seed"])]
         assert {k: v for k, v in j.items() if k not in differ} == {k: v for k, v in old.items() if k not in differ}

@@ -18,7 +18,7 @@ the only place the mapping lives.
                                backoff2 | mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021
                                phase 1) | itx-v1 --tier T1..T5 | itx-a0 [--select all|d024|stage1] | itx-m6 | itx-m6a
                                (D-021 phase 2; itx-a0 --select d024 = D-024 (f)'s 81, the v1 stage-1 25 first) |
-                               r3-diag (C1 diagnosis R3, 16 runs)
+                               r3-diag (C1 diagnosis R3, 22 runs)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -37,7 +37,8 @@ the only place the mapping lives.
      D-022's outcome — the A9 arms' harness; by default the 11 of D-023's amendment of 2026-10-13 (66 runs);
      D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
     itrea d027-report …        D-027 (the C1 diagnosis's R3: thread count and SCIP beside cuOpt, set r3-diag): its
-                               validity and three reading rules (tools/d027_report.py; jobs: itrea make-jobs r3-diag)
+                               validity and four reading rules (rule 4: cuOpt's first incumbent on chromaticindex;
+                               tools/d027_report.py; jobs: itrea make-jobs r3-diag)
     itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
     itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
@@ -77,7 +78,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "
                     "outcome rule, C1's interim A9 result"),
     "d027-report": ("path:tools/d027_report.py", (), "D-027 (C1 diagnosis R3): thread count (A6 vs A6F) and SCIP "
-                    "beside cuOpt (A2) on set r3-diag — validity, three reading rules, what goes to Berk"),
+                    "beside cuOpt (A2), cuOpt's first incumbent on chromaticindex (rule 4) on set r3-diag — "
+                    "validity, four reading rules, what goes to Berk"),
     "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
     "itx-report": ("itrea.analysis.itx_report", (), "D-021 (ITX-1) v1 analysis: target, minimum, stratified estimates, "
                    "race and A0 secondaries, geo-means, D-019 literal, published rows; --m6 lanes"),

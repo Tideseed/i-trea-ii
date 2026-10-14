@@ -1,8 +1,9 @@
 """D-027 report: the same-day diagnostic of cuOpt's thread count and SCIP's presence (R3 of `vault/30-results/2026-10-14
 C1 diagnosis and improvement candidates.md` §5) — cuOpt alone with 3 threads on A725 1–3 (A6@ext) against cuOpt alone
 on F with 5 threads (A6F@ext), and SCIP on X925 5 beside the same 3-thread cuOpt (A2@ext, no EA, X925 6 idle), all
-under the ext harness. A diagnostic, not a lever: no hint and no adoption. Its validity and three reading rules are
-D-027's, fixed before any run (the note's rules, made exact there); nothing is chosen by eye.
+under the ext harness — and, on chromaticindex1024-7, what delays cuOpt's first incumbent inside A9 (rule 4). A
+diagnostic, not a lever: no hint and no adoption. Its validity and four reading rules are D-027's, fixed before any run
+(the note's rules, made exact there; rule 4 by the amendment of 2026-10-14 18:3x); nothing is chosen by eye.
 
 Usage (repository root, after `itrea build-runs`; untimed analysis: OMP_NUM_THREADS=1, never beside timed runs with
 default thread counts):
@@ -11,17 +12,20 @@ default thread counts):
                                                             [--failed both|exclude|keep] [--json out]
     itrea d027-report …                       (the same, through the entry point)
 
-Runs (`make-jobs r3-diag` -> jobs/r3-diag.jsonl, set r3-diag, 120 s, seeds 0–1, 16 runs — only what a rule reads,
-D-027's amendment of 2026-10-14 before any run, D-024 rule 4): R3_INSTANCES (comp21-2idx, neos-4763324-toguru,
-neos-2746589-doon) x A6@r3, R3_A6F_INSTANCES (toguru, doon) x A6F@r3 and R3_A2_INSTANCES (comp21-2idx, toguru, doon) x
-A2@r3; instances and labels come from `make_jobs`, so the report and the job file cannot drift apart. Reads `datasets/runs.parquet` — `pt` (P(120) on the call clock), `cuopt_pt` (P(120) of
-cuOpt's own checked incumbents), `cuopt_best_obj` (the objective of cuOpt's own last checked incumbent at 120 s),
-`sense`, `status`, `harness`, `cuda_compiled_on_clock`, `run_dir` — and each run's `run.json` (`processes[*].role /
-cores / cmd`, `config.harness`, `compiled_on_clock_cuda`).
+Runs (`make-jobs r3-diag` -> jobs/r3-diag.jsonl, set r3-diag, 120 s, seeds 0–1, 22 runs in 8 blocks — only what a rule
+reads, D-027's amendments of 2026-10-14 before any run, D-024 rule 4): R3_INSTANCES (comp21-2idx, neos-4763324-toguru,
+neos-2746589-doon, chromaticindex1024-7) x A6@r3, R3_A6F_INSTANCES (toguru, doon, chromaticindex) x A6F@r3 and
+R3_A2_INSTANCES (comp21-2idx, toguru, doon, chromaticindex) x A2@r3; instances and labels come from `make_jobs`, so the
+report and the job file cannot drift apart. Reads `datasets/runs.parquet` — `pt` (P(120) on the call clock),
+`cuopt_pt` (P(120) of cuOpt's own checked incumbents), `cuopt_best_obj` (the objective of cuOpt's own last checked
+incumbent at 120 s), `cuopt_t_first` / `cuopt_t_first_event` (cuOpt's own first checked incumbent; event false = none
+by 120 s), `sense`, `status`, `harness`, `cuda_compiled_on_clock`, `run_dir` — and each run's `run.json`
+(`processes[*].role / cores / cmd`, `config.harness`, `compiled_on_clock_cuda`).
 
 Validity (D-027: must hold before any rule is read; otherwise INVALID, and the report names the leg):
-  (a) complete: the 16 runs present and completed, each with P(120) (a void is moved aside by the pool and its rerun is
-      the run read; a block skipped after its void leaves runs missing);
+  (a) complete: the 22 runs present and completed, each with P(120) (a void is moved aside by the pool and its rerun is
+      the run read; a block skipped after its void leaves runs missing — a missing cell leaves every rule unread, rule
+      4 included);
   (b) the harness: every run's resolved harness (run.json `config.harness`, else the run table's `harness`) equals
       `pair.resolve_harness("ext")`;
   (c) the layout, from each run's run.json: cuOpt with `--cpu-threads 3` on cores [1, 2, 3] in A6@r3 and A2@r3, with
@@ -31,7 +35,7 @@ Validity (D-027: must hold before any rule is read; otherwise INVALID, and the r
 Failed runs (`--failed`): `exclude` is the letter — a failed run is not completed, so (a) fails and the reading is
 INVALID; `keep` reads a failed run as D-002 §6 keeps a crash (truncated at the crash, as build-runs scores it), a
 stated deviation from (a) that the report names; `both` (default) prints both readings when the set holds a failed run
-among the 16, else one.
+among the 22, else one.
 
 Quantities (D-027): P = P(120) on the call clock; in A6@ext and A6F@ext the arm's P is cuOpt's (`pt`); in A2@ext "P of
 cuOpt" is `cuopt_pt`, not the portfolio's; a seed spread is |P_s0 − P_s1| in raw P.
@@ -54,19 +58,37 @@ Reading rules (D-027, fixed before the runs):
   3. SCIP's presence on toguru and doon: present iff P̄_cuOpt(A2@ext) − P̄(A6@ext) > max(0.05, the larger seed spread of
      either arm). Present → recorded as a cause of cuOpt's slowdown on that instance; absent → ruled out there at n = 2.
      Either way it names no lever and asks Berk nothing.
+  4. (amendment of 2026-10-14 18:3x) chromaticindex1024-7; cuOpt's first-incumbent time t = the run table's
+     `cuopt_t_first`, a run with no cuOpt incumbent counts as 120 s; seeds 0–1; same window. L = 2 x max(t of A6F@r3
+     seed 0, seed 1).
+     (a) A6@r3's t <= L on both seeds: the 3-thread lane under ext is not the cause. Then A2@r3's t <= L on both seeds
+         → SCIP's presence is not the cause either → "EA PRESENCE (chromaticindex)": inside A9 every run on record posts
+         cuOpt's first incumbent at 62–66 s (A9@r13x 65.26 / 65.30, A9@bo1s 65.31 / 65.46, A9@boY 63.47 / 63.41 under
+         ext); the EA's presence (GPU work, its CUDA context, its LP worker's CPU, send callback, memory traffic) delays
+         cuOpt; the GPU-sharing / CUDA MPS question goes to Berk with that wording (MPS one candidate, not an
+         attribution). A2@r3's t >= 50 s on both seeds → "SCIP PRESENCE (chromaticindex)". Otherwise inconclusive at
+         n = 2.
+     (b) A6@r3's t >= 50 s on both seeds → "3-THREAD LANE UNDER EXT (chromaticindex)": the layout question goes to Berk.
+     (c) Otherwise inconclusive at n = 2.
+     The report prints the six t values and L.
 Reported beside, read by no rule: A6F@r3 against A6F@r13x of 10-13 (set itx-r13, the same job and run hash) on toguru
-and doon — a day-to-day replicate of cuOpt alone on F. What goes to Berk: only rule 1 present on toguru or doon (the layout
-exception) and rule 2's "<= 133 on both seeds" with its precondition met (CUDA MPS); every other outcome asks nothing.
+and doon — a day-to-day replicate of cuOpt alone on F. What goes to Berk: only rule 1 present on toguru or doon (the
+layout exception), rule 2's "<= 133 on both seeds" with its precondition met (CUDA MPS), rule 4's "EA PRESENCE
+(chromaticindex)" (the GPU-sharing / CUDA MPS question) and rule 4's "3-THREAD LANE UNDER EXT (chromaticindex)" (the
+layout question); every other outcome asks nothing.
 
 Readings this report adds where D-027 is silent (written with the code, 2026-10-14, before any run): rules 1 and 3 are
 one-sided as written ("present" only when the 3-thread / SCIP-beside arm is worse, i.e. higher P, by more than the
 band; the other direction is printed as a number); rule 1's "goes to Berk" fires as soon as toguru or doon is present;
 comp21-2idx is a minimisation (sense +1, checked; another sense leaves rule 2 not read); a run whose cuOpt holds no
 checked incumbent at 120 s has final objective +inf; the thresholds are compared with a 1e-6 tolerance (comp21's
-objective values are integers). Selection: rows of `--set` x the three labels x seeds 0–1 x 120 s, not synthetic, not
-in a voided block; one row per (instance, arm, seed): the bare run id before a `<run_id>#<set>` copy
-(build_runs.qualify_reused_ids), then the highest attempt; other rows of the set are listed, never read. Interim: n = 2
-seeds per cell; doon is a ceiling case.
+objective values are integers). Rule 4: t = 120 s when `cuopt_t_first_event` is false or `cuopt_t_first` is not a
+finite number (no cuOpt incumbent; build_runs already stores the budget with the flag false), else `cuopt_t_first`;
+times are compared as they stand (no tolerance); its branches are read in the order written — (a) before (b), and in
+(a) "A2@r3 <= L" before ">= 50 s" — which decides only when L >= 50 s, where both could hold. Selection: rows of `--set`
+x the three labels x seeds 0–1 x 120 s, not synthetic, not in a voided block; one row per (instance, arm, seed): the
+bare run id before a `<run_id>#<set>` copy (build_runs.qualify_reused_ids), then the highest attempt; other rows of the
+set are listed, never read. Interim: n = 2 seeds per cell; doon is a ceiling case.
 """
 from __future__ import annotations
 
@@ -79,8 +101,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from itrea.experiments.make_jobs import (R3_A2_INSTANCES, R3_A6F_INSTANCES, R3_BUDGET, R3_INSTANCES, R3_SEEDS,
-                                         R3_SET, R3_VARIANT)
+from itrea.experiments.make_jobs import (R3_A2_INSTANCES, R3_A6F_INSTANCES, R3_BUDGET, R3_CHROMATIC, R3_INSTANCES,
+                                         R3_SEEDS, R3_SET, R3_VARIANT)
 from itrea.paths import DATASETS, ROOT
 
 A6, A6F, A2 = (f"{a}@{R3_VARIANT}" for a in ("A6", "A6F", "A2"))
@@ -88,10 +110,14 @@ ARMS = (A6, A6F, A2)
 SET, SEEDS, BUDGET = R3_SET, tuple(R3_SEEDS), float(R3_BUDGET)
 INSTANCES, A6F_INSTANCES, A2_INSTANCES = tuple(R3_INSTANCES), tuple(R3_A6F_INSTANCES), tuple(R3_A2_INSTANCES)
 REPLICATE_SET, REPLICATE_ARM = "itx-r13", "A6F@r13x"       # reported beside A6F@r3, read by no rule
+REPLICATE_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon")  # the replicate is printed there only (17:5x)
 BAND_MIN = 0.05
 LAYOUT_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon")     # rule 1's consequence
 SCIP_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon")       # rule 3
 COMP21, STALL_OBJ, ALONE_OBJ, OBJ_TOL = "comp21-2idx", 146.0, 133.0, 1e-6
+CHROMATIC, LATE_T, L_FACTOR = R3_CHROMATIC, 50.0, 2.0                # rule 4: L = 2 x max(t of A6F@r3); ">= 50 s"
+EA_SEEN = ("inside A9 every run on record posts cuOpt's first incumbent at 62–66 s (A9@r13x 65.26 / 65.30, A9@bo1s "
+           "65.31 / 65.46, A9@boY 63.47 / 63.41 under ext)")
 # D-027's layout per arm: role -> (cores, cuOpt's --cpu-threads or None)
 LAYOUT = {A6: {"cuopt": ([1, 2, 3], 3)},
           A6F: {"cuopt": ([1, 2, 3, 5, 6], 5)},
@@ -102,7 +128,7 @@ REUSE_SEP = "#"
 
 
 def expected_keys() -> list[tuple[str, str, int]]:
-    """(instance, label, seed) of the 16 runs the rules read."""
+    """(instance, label, seed) of the runs the rules read (22: D-027 as amended 2026-10-14)."""
     out = []
     for n in INSTANCES:
         for arm in (A6,) + ((A6F,) if n in A6F_INSTANCES else ()) + ((A2,) if n in A2_INSTANCES else ()):
@@ -226,8 +252,9 @@ def run_problems(row: dict, root: Path, ext: dict | None = None) -> dict[str, li
 
 
 def validity(cells: dict, missing: list, no_p: list, kept_failed: list, failed=()) -> dict:
-    """D-027's validity over the 16 runs: {leg: [problems]} and the verdict VALID / INVALID. `failed`: the missing keys
-    whose run failed (excluded by the letter)."""
+    """D-027's validity over the expected runs (22): {leg: [problems]} and the verdict VALID / INVALID. `failed`: the
+    missing keys whose run failed (excluded by the letter)."""
+    n = len(expected_keys())
     legs: dict[str, list[str]] = {k: [] for k in LEGS}
     legs["complete"] = [f"{'failed (not completed)' if k in failed else 'missing'} {k[0]} {k[1]} s{k[2]}"
                         for k in missing] + [f"no P(120): {i} {a} s{s}" for i, a, s in no_p]
@@ -237,7 +264,7 @@ def validity(cells: dict, missing: list, no_p: list, kept_failed: list, failed=(
     bad = [k for k in LEGS if legs[k]]
     return dict(verdict="INVALID" if bad else "VALID", failing=bad, legs=legs,
                 deviation=[f"{i} {a} s{s} failed and is read as D-002 §6 keeps a crash (a stated deviation from leg "
-                           f"(a): 16 of 16 completed)" for i, a, s in kept_failed])
+                           f"(a): {n} of {n} completed)" for i, a, s in kept_failed])
 
 
 # ----------------------------------------------------------------------------------------------- the rules
@@ -254,7 +281,7 @@ def banded(a: list[float], b: list[float]) -> dict:
 
 
 def rule1(cells: dict) -> dict:
-    per = {n: banded(_two(cells, n, A6, "pt"), _two(cells, n, A6F, "pt")) for n in A6F_INSTANCES}
+    per = {n: banded(_two(cells, n, A6, "pt"), _two(cells, n, A6F, "pt")) for n in LAYOUT_INSTANCES}
     hit = [n for n in LAYOUT_INSTANCES if per[n]["present"]]
     if hit:
         return dict(per=per, consequence="QUESTION", text=f"thread effect present on {', '.join(hit)}: the layout "
@@ -320,24 +347,79 @@ def rule3(cells: dict) -> dict:
     return dict(per=per)
 
 
-def to_berk(r1: dict, r2: dict) -> list[str]:
-    """D-027: only the layout exception (rule 1 on toguru or doon) and CUDA MPS (rule 2 <= 133, precondition met)."""
+def first_t(row: dict) -> tuple[float, bool]:
+    """Rule 4's t of one run: (cuOpt's first checked incumbent in seconds, False), or (BUDGET, True) when cuOpt holds no
+    incumbent by then — `cuopt_t_first_event` false (build_runs stores the budget with the flag false) or no finite
+    `cuopt_t_first` at all."""
+    t, ev = row.get("cuopt_t_first"), row.get("cuopt_t_first_event")
+    try:
+        censored = ev is not None and not pd.isna(ev) and not bool(ev)
+    except (TypeError, ValueError):
+        censored = False
+    if censored or not _fin(t):
+        return BUDGET, True
+    return float(t), False
+
+
+EA4, SCIP4, LANE4 = ("EA PRESENCE (chromaticindex)", "SCIP PRESENCE (chromaticindex)",
+                     "3-THREAD LANE UNDER EXT (chromaticindex)")
+
+
+def rule4(cells: dict) -> dict:
+    """D-027's rule 4 (amendment of 2026-10-14 18:3x) on chromaticindex1024-7: L = 2 x max(t of A6F@r3); (a) A6@r3 <= L
+    on both seeds, then A2@r3 <= L on both → EA PRESENCE, >= 50 s on both → SCIP PRESENCE, else inconclusive; (b)
+    A6@r3 >= 50 s on both → 3-THREAD LANE UNDER EXT; (c) otherwise inconclusive. Branches in the order written."""
+    got = {a: [first_t(cells[(CHROMATIC, a, s)]["row"]) for s in SEEDS] for a in (A6F, A6, A2)}
+    t = {a: [x for x, _ in v] for a, v in got.items()}
+    none = {a: [c for _, c in v] for a, v in got.items()}
+    lim = L_FACTOR * max(t[A6F])
+    out = dict(t=t, no_incumbent=none, L=lim)
+    if all(x <= lim for x in t[A6]):
+        lane = "A6@r3's t <= L on both seeds: the 3-thread lane under ext is not the cause"
+        if all(x <= lim for x in t[A2]):
+            return dict(out, branch="a", status=EA4, text=f"{lane}; A2@r3's t <= L on both seeds: SCIP's presence is "
+                        f"not the cause either; {EA_SEEN}; the EA's presence (GPU work, its CUDA context, its LP "
+                        "worker's CPU, send callback, memory traffic) delays cuOpt; the GPU-sharing / CUDA MPS "
+                        "question goes to Berk with that wording (MPS one candidate, not an attribution)")
+        if all(x >= LATE_T for x in t[A2]):
+            return dict(out, branch="a", status=SCIP4, text=f"{lane}; A2@r3's t >= {LATE_T:g} s on both seeds: SCIP's "
+                        "presence delays cuOpt's first incumbent on chromaticindex (recorded; asks Berk nothing)")
+        return dict(out, branch="a", status="INCONCLUSIVE", text=f"{lane}; A2@r3's t neither <= L nor >= {LATE_T:g} s "
+                    "on both seeds: inconclusive at n = 2")
+    if all(x >= LATE_T for x in t[A6]):
+        return dict(out, branch="b", status=LANE4, text=f"A6@r3's t >= {LATE_T:g} s on both seeds: the 3-thread lane "
+                    "under ext delays cuOpt's first incumbent on chromaticindex; the layout question goes to Berk with "
+                    "these numbers")
+    return dict(out, branch="c", status="INCONCLUSIVE", text=f"A6@r3's t neither <= L nor >= {LATE_T:g} s on both "
+                "seeds: inconclusive at n = 2")
+
+
+def to_berk(r1: dict, r2: dict, r4: dict) -> list[str]:
+    """D-027: only the layout exception (rule 1 on toguru or doon; rule 4's 3-thread lane on chromaticindex) and CUDA
+    MPS (rule 2 <= 133 with its precondition met; rule 4's EA presence on chromaticindex)."""
     out = []
     if r1["consequence"] == "QUESTION":
         out.append("the layout question (a cuOpt thread on X925 6): " + r1["text"].split(":")[0]
                    + ("; with rule 2's footprint reading on comp21" if r2["status"] == "FOOTPRINT" else ""))
     if r2["status"] == "EA PRESENCE":
         out.append("the MPS question (a host change): cuOpt in A2@r3 <= 133 on both seeds on comp21")
+    if r4["status"] == EA4:
+        out.append(f"the GPU-sharing / CUDA MPS question (a host change; rule 4, {EA4}): cuOpt's first incumbent on "
+                   f"{CHROMATIC} within L = {r4['L']:.2f} s on both seeds alone on the 3-thread lane and beside SCIP, "
+                   f"while {EA_SEEN}; the EA's presence delays cuOpt (MPS one candidate, not an attribution)")
+    if r4["status"] == LANE4:
+        out.append(f"the layout question (a cuOpt thread on X925 6; rule 4, {LANE4}): cuOpt's first incumbent on "
+                   f"{CHROMATIC} >= {LATE_T:g} s on both seeds on the 3-thread lane under ext")
     return out
 
 
 def replicate(runs: pd.DataFrame, cells: dict) -> dict:
-    """A6F@r3 against A6F@r13x of 10-13 on toguru and doon (reported beside, read by no rule): {instance: P per
-    seed}."""
+    """A6F@r3 against A6F@r13x of 10-13 on toguru and doon (REPLICATE_INSTANCES; reported beside, read by no rule):
+    {instance: P per seed}."""
     old, _ = select(runs, REPLICATE_SET, False, (REPLICATE_ARM,))
     by = {(r["instance"], int(r["seed"])): r.get("pt") for r in old.to_dict("records")}
     out = {}
-    for n in A6F_INSTANCES:
+    for n in REPLICATE_INSTANCES:
         now = [cells[(n, A6F, s)]["row"].get("pt") if (n, A6F, s) in cells else None for s in SEEDS]
         out[n] = dict(r3=now, r13x=[by.get((n, s)) for s in SEEDS])
     return out
@@ -364,10 +446,10 @@ def reading(runs: pd.DataFrame, root: Path, set_: str = SET, keep_failed: bool =
     val = validity(cells, missing, no_p, kept, failed)
     out = dict(keep_failed=keep_failed, n_expected=len(expected_keys()), n_present=len(cells), validity=val,
                duplicates=dropped, replicate=replicate(runs, cells), cells=cells, rule1=None, rule2=None, rule3=None,
-               to_berk=None)
+               rule4=None, to_berk=None)
     if val["verdict"] == "VALID":
-        out.update(rule1=rule1(cells), rule2=rule2(cells), rule3=rule3(cells))
-        out["to_berk"] = to_berk(out["rule1"], out["rule2"])
+        out.update(rule1=rule1(cells), rule2=rule2(cells), rule3=rule3(cells), rule4=rule4(cells))
+        out["to_berk"] = to_berk(out["rule1"], out["rule2"], out["rule4"])
     return out
 
 
@@ -385,6 +467,10 @@ def _f(v, nd=3) -> str:
     return "inf" if v == math.inf else (f"{float(v):.{nd}f}" if _fin(v) else "–")
 
 
+def _t(v: float, none: bool) -> str:
+    return f"{v:.2f}" + (" (no incumbent)" if none else "")
+
+
 def _obj(v) -> str:
     return "–" if v is None else " / ".join("no incumbent" if x == math.inf else f"{x:g}" for x in v)
 
@@ -393,7 +479,7 @@ def render(rep: dict) -> str:
     L = [f"D-027 report (C1 diagnosis R3), set {rep['set']}: rules fixed in D-027 before any run; interim, n = 2 seeds "
          f"per cell; a diagnostic — no hint, no adoption"]
     if rep["failed_runs"]:
-        L.append(f"failed runs among the 16: {', '.join(rep['failed_runs'])}")
+        L.append(f"failed runs among the {len(expected_keys())}: {', '.join(rep['failed_runs'])}")
     if rep["other_rows"]:
         L.append(f"rows of the set no rule reads: {', '.join(rep['other_rows'])}")
     for rd in rep["readings"]:
@@ -437,6 +523,13 @@ def render(rep: dict) -> str:
                                                        else "absent")
                 L.append(f"  {n}: A2 cuOpt {_f(x['a'][0])} / {_f(x['a'][1])}, A6 {_f(x['b'][0])} / {_f(x['b'][1])}; "
                          f"diff {x['diff']:+.3f}, band {x['band']:.3f} -> {word}: {x['text']}")
+            r4 = rd["rule4"]
+            L.append(f"Rule 4 ({CHROMATIC}; t = cuOpt's first incumbent, cuopt_t_first, no incumbent = {BUDGET:g} s; "
+                     f"L = {L_FACTOR:g} x max(t of A6F@r3); seeds 0 / 1):")
+            for arm in (A6F, A6, A2):
+                L.append(f"  {arm:<7} t " + " / ".join(_t(x, c) for x, c in zip(r4["t"][arm], r4["no_incumbent"][arm]))
+                         + (f"  -> L = {r4['L']:.2f}" if arm == A6F else ""))
+            L.append(f"  -> {r4['status']} (branch {r4['branch']}): {r4['text']}")
             L.append("To Berk: " + ("; ".join(rd["to_berk"]) if rd["to_berk"] else "nothing (every outcome is recorded "
                                                                                     "in the Development log and the "
                                                                                     "note's §7)"))
