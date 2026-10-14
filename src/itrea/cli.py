@@ -36,8 +36,8 @@ the only place the mapping lives.
     (D-023's job files: itrea make-jobs backoff2 --harness ext|r13-off [--instances amended|stage1|a,b], from
      D-022's outcome — the A9 arms' harness; by default the 11 of D-023's amendment of 2026-10-13 (66 runs);
      D-022's INCONCLUSIVE follow-up: itrea make-jobs itx-r13f --instances …, read by d022-report --followup)
-    itrea r3-report …          C1 diagnosis R3 (thread count and SCIP beside cuOpt, set r3-diag): the note's three
-                               reading rules on the run table (tools/r3_report.py; jobs: itrea make-jobs r3-diag)
+    itrea d027-report …        D-027 (the C1 diagnosis's R3: thread count and SCIP beside cuOpt, set r3-diag): its
+                               validity and three reading rules (tools/d027_report.py; jobs: itrea make-jobs r3-diag)
     itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
     itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
@@ -76,8 +76,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
                        "(D-021 M4, late-clock check) or A6m (D-020), verdict"),
     "d022-report": ("path:tools/d022_report.py", (), "D-022: A9 under the ext harness (R13 + R14) — validity, "
                     "outcome rule, C1's interim A9 result"),
-    "r3-report": ("path:tools/r3_report.py", (), "C1 diagnosis R3: thread count (A6 vs A6F) and SCIP beside cuOpt "
-                  "(A2), the note's three reading rules on set r3-diag"),
+    "d027-report": ("path:tools/d027_report.py", (), "D-027 (C1 diagnosis R3): thread count (A6 vs A6F) and SCIP "
+                    "beside cuOpt (A2) on set r3-diag — validity, three reading rules, what goes to Berk"),
     "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
     "itx-report": ("itrea.analysis.itx_report", (), "D-021 (ITX-1) v1 analysis: target, minimum, stratified estimates, "
                    "race and A0 secondaries, geo-means, D-019 literal, published rows; --m6 lanes"),
