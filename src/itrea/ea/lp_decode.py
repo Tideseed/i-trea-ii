@@ -23,11 +23,14 @@ of int8 / int16 / int32 that holds every integer column's bounds when they are f
 all binary: int8), else float64; the reply carries the continuous values (float64) of the rows solved with a
 primal-feasible point.
 
-The worker (`LPDecoder`, a "spawn" process started at t0 — the read of the instance and every solve are on the clock,
-D-002): one persistent `highspy.Highs` (output off, 1 thread, `solve_relaxation`, presolve at its default), niced by
-NICE; `OMP/OPENBLAS/MKL_NUM_THREADS=1` and `CUDA_VISIBLE_DEVICES=""` in its environment. It reads the instance file
-itself and refuses to work (state "failed") unless the digest of its column names and integrality equals the EA's
-(`model_digest`), so a column-order mismatch can never produce wrong vectors. Until it replies "ready" it counts as busy.
+The worker (`LPDecoder`, a "spawn" process started at t0 — or, with `repair.lp_decode_gate: lp_worker` (R2), once the
+EA's HiGHS LP worker has reported a final state — the read of the instance and every solve are on the clock, D-002): one
+persistent `highspy.Highs` (output off, 1 thread, `solve_relaxation`, presolve at its default), niced by
+`repair.lp_decode_nice` over the EA host (an os.nice increment; default NICE); it inherits the EA's cores (in A9 the
+EA's one X925 core); `OMP/OPENBLAS/MKL_NUM_THREADS=1` and `CUDA_VISIBLE_DEVICES=""` in its environment. It reads the
+instance file itself and refuses to work (state "failed") unless the digest of its column names and integrality equals
+the EA's (`model_digest`), so a column-order mismatch can never produce wrong vectors. Until it replies "ready" it
+counts as busy.
 Per batch (`_DecodeSolver.solve`):
   1. cache: a row whose integer part was already solved (blake2b of its bytes; also a repeat inside the batch) is CACHED;
   2. range screen, I rows only: every row's activity range over the continuous columns' bounds, plus the fixed integer
@@ -67,8 +70,9 @@ either: the worker gets SIGTERM, the pipe is closed, the process is reaped later
 (so the PID is gone) — it is idempotent and runs after the clock.
 
 Constants (echoed in the start-up record; any of them must become a `_LATE_DEFAULTS` configuration field before it is
-changed): OFFER_FACTOR = 3, I_LIMIT_FACTOR = 0.5, NICE = 10, CACHE_CAP = 65,536 integer parts; STARVED_CPU_SHARE = 0.5
-(a diagnostic threshold only).
+changed): OFFER_FACTOR = 3, I_LIMIT_FACTOR = 0.5, NICE = 10 (since R2 the default of the field
+`repair.lp_decode_nice`, which the start-up record and the summary echo as `nice`), CACHE_CAP = 65,536 integer parts;
+STARVED_CPU_SHARE = 0.5 (a diagnostic threshold only).
 
 This module imports no other `itrea` module (the spawned worker unpickles its target from here) and never CuPy; highspy
 is imported inside the worker.
@@ -87,7 +91,7 @@ import scipy.sparse as sps
 
 OFFER_FACTOR = 3              # at most OFFER_FACTOR * N completion (I) rows offered per batch
 I_LIMIT_FACTOR = 0.5          # an I row's warm LP gets this share of lp_time_limit (cuOpt: 2 s / 1 s)
-NICE = 10                     # os.nice of the worker
+NICE = 10                     # os.nice of the worker: the default of repair.lp_decode_nice
 CACHE_CAP = 65_536            # integer parts remembered as solved (oldest forgotten first)
 STARVED_CPU_SHARE = 0.5       # diagnostic only: a time-limit hit whose solve got < this share of a core was starved
 
@@ -438,12 +442,14 @@ class _DecodeSolver:
 
 
 def _decoder_main(conn, path: str, digest: str, int_dtype: str, time_limit: float, cold_limit: float,
-                  feas_tol: float, deadline: float, cache_cap: int = CACHE_CAP, hooks: dict | None = None) -> None:
+                  feas_tol: float, deadline: float, cache_cap: int = CACHE_CAP, hooks: dict | None = None,
+                  nice: int = NICE) -> None:
     """Entry point of the spawned worker (module docstring): read, check the digest, "ready", then one reply per
-    request until the pipe closes."""
+    request until the pipe closes. `nice` is an increment over the EA host's nice (inherited at the spawn)."""
     try:
         try:
-            os.nice(NICE)
+            if nice:
+                os.nice(int(nice))
         except OSError:
             pass
         solver = _DecodeSolver(path, digest, int_dtype, time_limit, cold_limit, feas_tol, deadline, cache_cap, hooks)
@@ -494,8 +500,10 @@ class LPDecoder:
     basis restore}) exist for tests; a run uses the defaults."""
 
     def __init__(self, path, digest: str, int_dtype, per_gen: int, time_limit: float, cold_limit: float,
-                 feas_tol: float, deadline: float = math.inf, *, cache_cap: int = CACHE_CAP, hooks: dict | None = None):
+                 feas_tol: float, deadline: float = math.inf, *, cache_cap: int = CACHE_CAP, hooks: dict | None = None,
+                 nice: int = NICE):
         self.path = str(path)
+        self.nice = int(nice)
         self.digest = str(digest)
         self.int_dtype = np.dtype(int_dtype)
         self.per_gen = int(per_gen)
@@ -525,7 +533,7 @@ class LPDecoder:
         parent, child = ctx.Pipe(duplex=True)
         proc = ctx.Process(target=_decoder_main, name="itrea-lp-decoder", daemon=True,
                            args=(child, self.path, self.digest, self.int_dtype.name, self.time_limit, self.cold_limit,
-                                 self.feas_tol, self.deadline, self.cache_cap, self.hooks))
+                                 self.feas_tol, self.deadline, self.cache_cap, self.hooks, self.nice))
         env = {v: "1" for v in _THREAD_VARS}
         env["CUDA_VISIBLE_DEVICES"] = ""                  # the worker must never create a CUDA context
         saved = {v: os.environ.get(v) for v in env}

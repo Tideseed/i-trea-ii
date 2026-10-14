@@ -25,6 +25,10 @@
 # `repair.continuous: lp_decode` (D-017, issue #27) added at their defaults, under the _LATE_DEFAULTS rule.
 # 2026-10-09 (hash unchanged): the `backoff` section (D-018: the EA backs off the GPU beside cuOpt in arm A9 by a
 # contribution-gated duty cycle) was added OFF, under the same rule as strategy / lp_stream / repair_clock.
+# 2026-10-14 (hash unchanged): repair.lp_decode_gate ("none") and repair.lp_decode_nice (10, the former constant) added
+# at their defaults under the _LATE_DEFAULTS rule, and the `host` section (the EA host's CUDA scheduling flag and its
+# nice after the LP worker's spawn; R1 of the C1 diagnosis) at its defaults ("auto", 0), left out of the hash while
+# every field of it is at its default.
 # Load with EAConfig.from_yaml("configs/itrea2-default.yaml"). Unknown keys are an error.
 name: itrea2-default
 population:
@@ -97,6 +101,8 @@ repair:
   lp_time_limit: 2.0
   lp_decode_cold_limit: 10.0
   lp_decode_infeasible: true
+  lp_decode_gate: none
+  lp_decode_nice: 10
 exchange:
   enabled: true
   to_solver: true
@@ -180,6 +186,9 @@ backoff:
   slice_s: 0.25
   wake_min_s: 5.0
   assist: true
+host:
+  cuda_sched: auto
+  nice_after_lp_spawn: 0
 backend: cupy
 gpu_mem_gb: 12.0
 log_every: 10

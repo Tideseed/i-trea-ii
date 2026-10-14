@@ -70,7 +70,11 @@ description: >
   two-core layout, #30); D-018 stage 1 → `itrea2-dev-rc-3way-bo1.yaml` (active) vs `-bo1s.yaml` (shadow control) — not
   adopted; D-023 → `itrea2-dev-rc-3way-boY.yaml` (phase Y only, `5c8b535fb245`) vs `-bo1s.yaml`, under the harness
   D-022 leaves (`make-jobs backoff2 --harness ext|r13-off`; A6F always ext); `ranks.rank1_mode` stays off (D-016 not
-  adopted). Ablations:
+  adopted). The C1 diagnosis's R1 / R2 (D-025 / D-026; branch `r1-bsync`): variant files `-3way-[boY-]bsync.yaml`
+  (fallbacks `-bnice`, `-ysync`) and `-3way-[boY-]bsync-ld[0].yaml` / `-[boY-]ld0.yaml`, each its base + one change;
+  `make-jobs r1-bsync --control r13x|boY` is written only after D-023's verdict, `make-jobs r2-ld --base …` only after
+  D-025's (with `--nice` / `--ea-cpu` from D-025's measurement); the control runs under the set's own label (`A9@r1ctl`,
+  `A9@r2ctl`: the same run hash, a new id); read with `itrea d025-report` / `itrea d026-report`. Ablations:
   `configs/ablations/*.yaml` or `--set key=value` overrides on the base (the comment at the top of each ablation file
   gives the dotted keys; a job file carries them as `overrides`). Record the **config hash** (`EAConfig.hash()`); the
   runner refuses test-set instances unless it equals `frozen-e2`'s.

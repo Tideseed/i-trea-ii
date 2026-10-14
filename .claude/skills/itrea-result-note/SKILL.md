@@ -18,7 +18,8 @@ with times, arms × instances × seeds and the verdict; pool id, commit, runs co
 `compiled_on_clock`, both LLM servers' state; the numbers; the report that produced them) plus a "Result" section in
 the test's decision record with the verdict by its own rules (e.g. *adopted*, *not adopted*, *inconclusive*,
 *proceed*) and any stated deviation from the letter of a rule. The numbers come from the test's report, which applies
-the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_report.py`, `itrea backoff-report --stage
+the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_report.py`, `itrea d025-report` / `itrea
+d026-report` (the C1 diagnosis's R1 / R2), `itrea backoff-report --stage
 0|1|1y`, `itrea d022-report [--followup]`, `itrea mipfeas-report --arm A6F`; commit it before the pool ends, as for
 D-017, D-018 and D-022), run single-threaded after `itrea build-runs`.
 Development results are descriptive; they are never quoted as confirmatory.

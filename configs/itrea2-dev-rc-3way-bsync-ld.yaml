@@ -1,0 +1,30 @@
+# I-TREA II -- R2 of the C1 diagnosis (vault 30-results/2026-10-14 C1 diagnosis and improvement candidates.md), variant
+# `bsync-ld`: bsync + the LP decode inside A9 (`repair.continuous: lp_decode`): its worker inherits the EA's one X925
+# core, and starts only once the EA's HiGHS LP worker has reported a final state (done, no solution, failed or stopped;
+# `repair.lp_decode_gate: lp_worker`), so it never takes CPU from that LP; nice +10 over the host
+# (`repair.lp_decode_nice: 10`, D-017's constant). R2's rule: nice 10 when R1's measured EA self-CPU per wall-second on
+# item_placement_9903 is below 0.5, else 0 (the `-ld0` file).
+#
+# Base = configs/itrea2-dev-rc-3way-bsync.yaml verbatim (R1's treatment), plus the decode; the runner accepts lp_decode
+# in A9 only with this gate (pair.py), and the warm-up compiles the >8-part concatenate a decoded batch can bring.
+# `exchange.from_cuopt` is added by the runner for A9. The test (`itrea make-jobs r2-ld --base bsync`, set `r2-ld`,
+# D-026) runs it as A9@r2ld against A9@bsync's configuration re-run as A9@r2ctl. Development only (D-010); it becomes a
+# default only by a decision on a verdict.
+name: itrea2-dev-rc-3way-bsync-ld
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+  continuous: lp_decode
+  lp_decode_gate: lp_worker
+  lp_decode_nice: 10
+repair_clock:
+  enabled: true
+  mode: active
+host:
+  cuda_sched: blocking_sync

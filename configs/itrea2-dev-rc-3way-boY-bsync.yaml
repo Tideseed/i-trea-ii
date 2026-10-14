@@ -1,0 +1,36 @@
+# I-TREA II -- R1 of the C1 diagnosis (vault 30-results/2026-10-14 C1 diagnosis and improvement candidates.md), variant
+# `boY-bsync`: the EA's primary CUDA context waits by blocking sync (`host.cuda_sched: blocking_sync`:
+# CU_CTX_SCHED_BLOCKING_SYNC set through the driver API before anything retains the context, the per-generation timing
+# events blocking too), so the host sleeps during its GPU waits and the HiGHS LP worker it spawns at t0 gets the X925
+# core they share in A9.
+#
+# Base = configs/itrea2-dev-rc-3way-boY.yaml verbatim (D-023's phase Y only, 5c8b535fb245: the A9 development default if
+# D-023 adopts it), plus that one change; `exchange.from_cuopt` is added by the runner for A9. The test (`itrea
+# make-jobs r1-bsync --control boY`, set `r1-bsync`, D-025) runs it against A9@boY's configuration, the same-day
+# development default re-run under the label A9@r1ctl. Development only (D-010); it becomes a default only by a decision
+# on a verdict.
+name: itrea2-dev-rc-3way-boY-bsync
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+repair_clock:
+  enabled: true
+  mode: active
+backoff:
+  enabled: true
+  mode: active
+  yield_level: 1
+  levels: 3
+  yield_until_s: 30.0
+  patience_search_s: 100000.0
+  patience_own_s: 100000.0
+  patience_min_s: 100000.0
+  patience_max_s: 100000.0
+host:
+  cuda_sched: blocking_sync
