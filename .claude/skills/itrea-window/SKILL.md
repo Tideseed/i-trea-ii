@@ -53,6 +53,7 @@ Berk usually does not coordinate the sessions — the lease does.
    | M5 A9 preview | `itx-m5.jsonl` (itx-m5): the 15 dev / class-probe instances in the 233 × A9 ext, 600 s | 15 | 97 | ≈ 2.0–2.5 | optional |
    | R13 + R14 test + C1 hint (D-022, narrowed 2026-10-13) | `itx-r13.jsonl` (itx-r13): the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x}, seeds 0–1, 120 s | 58 | 97 | ≈ 1.9 | its decision record first; then `itrea d022-report` |
    | C1 guard (D-022 second amendment) | `itx-r13b.jsonl` (itx-r13): chromaticindex1024-7, kumeu, glass4, radiationm18-12-05 × {A9@r13x, A6F@r13x} × seeds 0–1, 120 s | 16 | 97 | ≈ 0.5 | after the 58, same set |
+   | C1 diagnosis R3 (thread count, SCIP beside cuOpt) | `r3-diag.jsonl` (r3-diag): comp21-2idx, toguru, doon, sing44, item_placement_9903, ca × {A6@r3, A6F@r3} + comp21, toguru, doon × A2@r3, ext, seeds 0–1, 120 s | 30 | 78 (A2; A6 / A6F 69) | ≈ 1.7 | no EA code; any window after backoff2; then `itrea r3-report` |
 
    Run hours exclude the ~8 s per run of harness overhead and the governor's rests; window hours ≈ run hours / 0.55 +
    0.5 per window (D-021's budget). M4's stop rule: any thermal or cap void, or any run with a steady-state p95 above

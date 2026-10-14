@@ -90,6 +90,10 @@ description: >
   `make_jobs.job(...)` and `make_jobs.write_jobs(...)`, one `variant` label per arm. Instance paths relative to the repository root, arm, seed,
   budget, config path and overrides; the pool applies the Williams arm order per block from hash(instance, seed,
   20261005) and runs blocks in random order with strata interleaved.
+- The C1 diagnosis's R3 (`vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` §5; a diagnostic with
+  reading rules fixed in the note, no hint): `itrea make-jobs r3-diag` → `jobs/r3-diag.jsonl` (set `r3-diag`, 30 runs:
+  A6@r3 / A6F@r3 on six instances + A2@r3 on comp21, toguru, doon, ext, 120 s, seeds 0–1; A6F@r3 is A6F@r13x's job under
+  its own variant, so its run ids are new); read with `itrea r3-report`.
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
   before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
   seeds 0–1 — plus `jobs/itx-r13b.jsonl`, the guard's 16 on the 4 remaining instances, same set `itx-r13`; follow-up
@@ -143,7 +147,7 @@ Close the window (skill `itrea-window`), run the analysis, write the result note
 index row, journal entry (skill `itrea-journal`). For a development test the analysis is the test's report, committed
 before the pool ends (as for D-017 and D-018) — `itrea build-runs`, then `tools/d016_report.py`, `tools/d017_report.py`,
 `itrea backoff-report --stage 0|1` (D-018) or `--stage 1y [--harness ext|r13-off]` (D-023), `itrea d022-report
-[--followup]` (D-022 and C1's interim hint and guard), all with `OMP_NUM_THREADS=1` — and the result goes into the
-Development log and the decision record's Result section (D-010 §3). A staged test reports its hint as written (present
-/ no hint / incomplete) and what it gated; an interim reading is labelled interim and decides nothing (skill
-`itrea-result-note`).
+[--followup]` (D-022 and C1's interim hint and guard), `itrea r3-report` (the C1 diagnosis's R3), all with
+`OMP_NUM_THREADS=1` — and the result goes into the Development log and the decision record's Result section (D-010
+§3). A staged test reports its hint as written (present / no hint / incomplete) and what it gated; an interim reading
+is labelled interim and decides nothing (skill `itrea-result-note`).

@@ -34,6 +34,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs itx-a0 | itx-m6 | itx-m6a                       [--out jobs/itx-<k>.jsonl]
     python -m itrea.experiments.make_jobs itx-a0 --select d024 [--out jobs/itx-a0-81.jsonl]     (D-024 (f): 81 runs)
     python -m itrea.experiments.make_jobs itx-v1 --tier T1 [--cuopt 26.10] --out FILE
+    python -m itrea.experiments.make_jobs r3-diag [--out jobs/r3-diag.jsonl]          (C1 diagnosis R3: 30 runs)
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -84,6 +85,15 @@ unseen first by the jobs' `priority`) and M6 (`itx_m6` / `itx_m6a`, jobs/itx-m6.
 instances first (priority 0: the 20-instance panel + the 5 H_cu-unseen instances where cuOpt finds no solution,
 `v1_stage1_mask`; priority 1: the other 56) — jobs/itx-a0-81.jsonl, the same jobs and run ids as those 81 lines of
 jobs/itx-a0.jsonl —; `--select stage1` only the 25 (D-024 (f) after "no hint").
+
+`r3-diag` writes R3 of `vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` (a diagnostic, not a
+lever: its reading rules were fixed in that note before any run; `tools/r3_report.py` applies them): comp21-2idx,
+neos-4763324-toguru, neos-2746589-doon, sing44, item_placement_9903, ca__Scenario400_reserves_1 x {A6@r3 (cuOpt alone,
+3 threads on A725 1-3), A6F@r3 (cuOpt alone on F, 5 threads)} + comp21-2idx, toguru, doon x A2@r3 (SCIP on X925 5 +
+the same 3-thread cuOpt, no EA, X925 6 idle), all under the ext harness, seeds 0-1, 120 s, set `r3-diag`, one block per
+instance x seed (30 runs in 12 blocks; jobs/r3-diag.jsonl). A6F@r3 is A6F@r13x's job (same harness, so the same run
+hash 82a371305f88) under the variant `r3`, so the same-window re-run is like-for-like and its run ids never equal
+A6F@r13x's.
 """
 from __future__ import annotations
 
@@ -169,6 +179,16 @@ ITX_A0_SELECT = {"all": "jobs/itx-a0.jsonl", "d024": "jobs/itx-a0-81.jsonl", "st
 # lanes (the other 14 development / class-probe instances x 600 s)
 ITX_M6_MEASURED = ("neos-2657525-crna", "fhnw-binpack4-48", "glass4")
 ITX_M6_BUDGET, ITX_M6_LOAD_BUDGET, ITX_M6_LOADS_FIRST = 60.0, 600.0, 3
+# R3 (vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md §5 R3): the same-window diagnostic of
+# cuOpt's thread count (A6 = 3 threads on A725 1-3 vs A6F = 5 on F) and of SCIP beside cuOpt (A2 = SCIP on X925 5 +
+# the same 3-thread cuOpt, core 6 idle), all under the ext harness. Variant `r3` on every arm: A6F@r3 is A6F@r13x's
+# job (the same harness, so the same run hash 82a371305f88) under another label, so its run ids never equal
+# A6F@r13x's (run ids carry no set)
+R3_SET, R3_VARIANT, R3_BUDGET, R3_SEEDS = "r3-diag", "r3", 120.0, (0, 1)
+R3_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon", "sing44", "item_placement_9903",
+                "ca__Scenario400_reserves_1")      # x {A6, A6F}
+R3_A2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon")    # x A2 as well
+R3_OUT = "jobs/r3-diag.jsonl"
 OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position", "priority")
 
 
@@ -875,6 +895,23 @@ def itx_m6a(set_: str = "itx-m6a", seed: int = ITX_SEED, tables=INSTANCE_TABLES)
     return _sorted([_itx(where[n], n, set_, "A0", seed, ITX_M6_BUDGET, "m6a", ITX_EXT) for n in ITX_M6_MEASURED])
 
 
+def r3_diag(seeds=R3_SEEDS, budget: float = R3_BUDGET, set_: str = R3_SET, tables=INSTANCE_TABLES) -> list[dict]:
+    """R3, the same-window diagnostic of the C1 diagnosis note (2026-10-14, §5 R3; reading rules fixed there before any
+    run, applied by `tools/r3_report.py`): R3_INSTANCES x {A6@r3 (cuOpt alone, 3 threads on A725 1-3), A6F@r3 (cuOpt
+    alone on F, 5 threads)} + R3_A2_INSTANCES x A2@r3 (SCIP on X925 5 + the 3-thread cuOpt on A725 1-3, no EA, X925 6
+    idle), seeds 0-1, 120 s, the ext harness on every arm, split dev, one block per instance x seed: 30 runs in 12
+    blocks. A6F@r3 is A6F@r13x's job under another variant (same config, overrides, harness and budget, so the same run
+    hash): its runs re-measure A6F in the same window as A6 and A2, and their run ids never equal A6F@r13x's."""
+    where = instance_paths(R3_INSTANCES, tables)
+    out = []
+    for n in R3_INSTANCES:
+        arms = ("A6", "A6F") + (("A2",) if n in R3_A2_INSTANCES else ())
+        for seed in seeds:
+            for arm in arms:
+                out.append(_itx(where[n], n, set_, arm, seed, budget, R3_VARIANT, ITX_EXT))
+    return _sorted(out)
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -986,6 +1023,10 @@ def main(argv=None) -> int:
     v1.add_argument("--strata", type=Path, default=None, help="default datasets/mipfeas_strata.csv")
     v1.add_argument("--data", type=Path, default=paths.DATA)
     v1.add_argument("--out", type=Path, required=True, help="no default: the v1 files are written when 26.10 is in")
+    r3 = sub.add_parser("r3-diag", help="C1 diagnosis R3: comp21, toguru, doon, sing44, item_placement_9903, ca x "
+                                        "{A6@r3, A6F@r3} + comp21, toguru, doon x A2@r3, ext, 120 s, seeds 0-1 "
+                                        "(30 runs)")
+    r3.add_argument("--out", type=Path, default=paths.ROOT / R3_OUT, help=f"default {R3_OUT}")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -1037,6 +1078,8 @@ def main(argv=None) -> int:
             jobs = itx_m6a()
         elif a.cmd == "itx-v1":
             jobs = itx_v1(a.tier, a.cuopt, a.strata, a.a9_config, data=a.data)
+        elif a.cmd == "r3-diag":
+            jobs = r3_diag()
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:
