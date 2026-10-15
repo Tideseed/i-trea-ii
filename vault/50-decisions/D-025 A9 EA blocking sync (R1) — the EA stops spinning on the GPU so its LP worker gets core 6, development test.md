@@ -1,6 +1,6 @@
 # D-025 A9 EA blocking sync (R1) — the EA stops spinning on the GPU so its LP worker gets core 6, development test (2026-10-14, AgentRA)
 
-**Status:** bsync RESULT 2026-10-15 08:1x: NOT ADOPTED (hint present 0.765; generation guard and comp21 P failed) → fallback (b) ysync queued (§ Result). amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
+**Status:** ysync RESULT 2026-10-15 11:2x: NOT ADOPTED (hint 0.834 present; item_placement's generation guard failed on one seed) — the R1 line ends for C1. bsync RESULT 2026-10-15 08:1x: NOT ADOPTED (hint present 0.765; generation guard and comp21 P failed) → fallback (b) ysync queued (§ Result). amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
 superseding decision on evidence. **Not run; no code merged** (branch `r1-bsync`, worktree `../i-trea-ii-r1`).
 **Clarified and amended 2026-10-14 17:4x, before any run** (the section at the end: names as built, the control's own
 label, bnice without the flag, the control's flag read back, the P band on the hint instances and a generation guard
@@ -320,3 +320,19 @@ Set `r1-bsync`, pool `20261015-071709-2205151` (07:17–08:06): **20 of 20 compl
   `52e86e06fd0c8258f2e02ca25ce2dfef7b6c38262675fa69ffd8f79b8bbc042c`), queued 08:1x in the same window. Its GPU check (07:1x): the
   host spins (0.99 per wall-second) but its core's competitor gets 0.9989; an A9-layout ysync run gave the LP worker 0.933. No
   chaining after (b). D-026 waits for (b)'s outcome.
+
+## Result of fallback (b) ysync (2026-10-15 11:2x, AgentRA): NOT ADOPTED — the R1 line ends for C1
+Set `r1-ysync`, pool `20261015-100013-3024118` (10:00–11:09): **20 of 20 completed**, 0 failed / void. `itrea d025-report
+--variant ysync --set r1-ysync` (VALID):
+- **Hint PRESENT: 0.834** (1.4332 / 1.7176); ca 0.644 (P 0.392 → 0.253; LP done 37.3 / 38.3 → 20.0 / 20.2 s), sing44 1.026
+  (0.408 → 0.418; LP done 12.6 → 6.9 / 7.1 s), neos-960392 0.777 (0.059 → 0.045). Hint-instance bands hold.
+- **No-harm:** comp21 holds now (generations 0.980 vs threshold 0.898; P −0.001); **item_placement's generation guard FAILS**
+  (means ratio 0.759 vs 0.921: seed 0 1,483 vs 1,367 = 1.085, **seed 1 678 vs 1,480 = 0.458**); item's P +0.099 within its band 0.230.
+- **Verdict: NOT ADOPTED**; no fallback of a fallback — the R1 line ends for C1, as this record fixed.
+- **Stated, not acted on:** the failing cell is one run — item_placement ysync seed 1, the pool's first run, started 10:00:14 one
+  second after M4's 600-s pool ended (load average 5.75 at its gates; GPU clock 2,392 MHz throughout, no foreign GPU process, not
+  voided). It ran 70 GPU launches per second against 122 on seed 0 and 112–124 in the control. Whether that is an effect of
+  `yield` or a start-of-pool disturbance cannot be told from one run; the rule is applied as written.
+- **Across both tests:** ca's gain is the same mechanism twice (P −0.145 / −0.139, the LP worker ~2× earlier); the guard failures
+  sit on item_placement (bsync 0.824, ysync 0.759 driven by one seed) and comp21 (bsync only). Any further R1 test is a new
+  decision, written before its runs, that reads the guards on every seed run so far (0–1 here included).
