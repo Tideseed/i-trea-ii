@@ -501,7 +501,8 @@ def test_r1_bsync_jobs(control, variant):
     trt = [j for j in jobs if j["variant"] == t_label]
     assert {j["config"] for j in trt} == {f"configs/itrea2-dev-rc-3way-{t_label}.yaml"}
     ids = {pair.run_id_for(j) for j in jobs}
-    assert len(ids) == 20 and not ids & _committed_ids()
+    own = mj.r1_out(variant).rsplit("/", 1)[1]            # the set's own file, committed once D-023 / D-025 decided
+    assert len(ids) == 20 and not ids & _committed_ids(skip=(own,))
 
 
 def test_r1_fallback_controls_do_not_repeat_r1_bsync_ids():
@@ -548,7 +549,8 @@ def test_r2_ld_jobs(base, nice, t_stem, c_stem):
             o = r1[(j["name"], j["seed"])]
             assert pair.run_hash(j) == pair.run_hash(o) and pair.run_id_for(j) != pair.run_id_for(o)
     ids = {pair.run_id_for(j) for j in jobs}
-    assert len(ids) == 28 and not ids & _committed_ids()
+    own = mj.R2_OUT.rsplit("/", 1)[1]                      # the set's own file, committed once D-025 decided
+    assert len(ids) == 28 and not ids & _committed_ids(skip=(own,))
 
 
 def test_r2_nice_rule_and_refusals():

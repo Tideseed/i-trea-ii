@@ -336,3 +336,9 @@ Set `r1-ysync`, pool `20261015-100013-3024118` (10:00–11:09): **20 of 20 compl
 - **Across both tests:** ca's gain is the same mechanism twice (P −0.145 / −0.139, the LP worker ~2× earlier); the guard failures
   sit on item_placement (bsync 0.824, ysync 0.759 driven by one seed) and comp21 (bsync only). Any further R1 test is a new
   decision, written before its runs, that reads the guards on every seed run so far (0–1 here included).
+
+**Pointer 2026-10-15 11:3x (AgentRA):** Berk chose the follow-up this Result's last line allows (question panel, "Follow-up,
+guards on all seeds (Recommended)") → [[D-029 ysync gets one follow-up at seeds 2–5, judged on all seeds 0–5 with the failing seed kept — NOT ADOPTED ends R1 for v1]]:
+ysync against a same-window control at seeds 2–5 (set `r1f-ysync`, `jobs/d029.jsonl`, 20 runs read after one unread
+warm-up run), its guards read over seeds 0–5 with item_placement's failing seed kept; rules fixed there before any run
+(amended there 12:2x, before any run); its NOT ADOPTED is final for v1. This record's verdicts stand as written.
