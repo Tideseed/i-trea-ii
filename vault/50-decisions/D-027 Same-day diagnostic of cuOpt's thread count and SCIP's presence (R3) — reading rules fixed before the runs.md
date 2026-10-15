@@ -1,6 +1,6 @@
 # D-027 Same-day diagnostic of cuOpt's thread count and SCIP's presence (R3) — reading rules fixed before the runs (2026-10-14, AgentRA)
 
-**Status:** amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
+**Status:** RESULT 2026-10-15 09:2x: rule 4 EA PRESENCE (chromaticindex) → the GPU-sharing / MPS question to Berk; rule 1 closed; rule 3 SCIP ruled out; rule 2 not read (§ Result). amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
 superseding decision on evidence. **Not run; job writer not merged** (branch `r3-diag`, worktree `../i-trea-ii-r3`).
 **Amended 2026-10-14 17:5x, before any run: 16 runs, only what a rule reads (D-024 rule 4); rule 2's sources and its
 "≤ 133" wording clarified** (the section at the end). A
@@ -191,3 +191,21 @@ L = 2 × max(t of A6F@r3 on seeds 0, 1).
 - (b) A6@r3's t ≥ 50 s on both seeds → **3-THREAD LANE UNDER EXT (chromaticindex)**; the layout question goes to Berk.
 - (c) Otherwise inconclusive at n = 2.
 Missing or failed runs: as this record's validity (exclude: a missing cell leaves rule 4 unread). `tools/d027_report.py` applies it.
+
+## Result (2026-10-15 09:2x, AgentRA): rule 4 EA PRESENCE; rule 1 closed; rule 3 SCIP ruled out; rule 2 not read
+Set `r3-diag`, pool `20261015-080645-2420956` (08:06–09:10): **22 of 22 completed**, 0 failed / void; `itrea build-runs`,
+`itrea d027-report` (VALID).
+- **Rule 4 → EA PRESENCE (chromaticindex):** cuOpt's first incumbent A6F@r3 9.80 / 7.33 s (L = 19.59 s), **A6@r3 (3-thread lane)
+  9.24 / 8.21 s, A2@r3 (beside SCIP) 6.53 / 9.65 s** — against 62–66 s inside A9 on every A9 run on record. Neither the 3-thread lane
+  under ext nor SCIP's presence is the cause; the EA's presence is. Trace (A9@r13x s0, read 09:2x): the EA's generation 0 on
+  chromaticindex is a 48.3-s repair of 256 random individuals — ~1,300 back-to-back GPU launches of ~40 ms (`rclock` gen 0,
+  `seconds.repair` 48.32) — and later generations last up to 42.7 s (`max_generation_s`); its LP worker reports no_solution at
+  91 s, so it is not the trigger. **To Berk, with this wording:** the GPU-sharing / CUDA MPS question (MPS is one candidate, not an
+  attribution; D-023 showed duty ½ in phase Y does not restore cuOpt under ext).
+- **Rule 1 → CLOSED:** no thread effect on toguru (A6 0.563 vs A6F 0.521, +0.041 < 0.050) or doon (A6 0.757 vs A6F 1.000): the
+  layout line is closed for v1.
+- **Rule 3 → SCIP's presence ruled out** on toguru (−0.015) and doon (+0.107 < band 0.486) at n = 2.
+- **Rule 2 → not read:** precondition not met (A6@r3's cuOpt on comp21 125 / 140, neither ≤ 133 nor ≥ 146 on both seeds); comp21's
+  part 2 stays inconclusive at n = 2.
+- Reported beside: A6F@r3 vs A6F@r13x — toguru 0.517 / 0.525 vs 0.539 / 0.559; **doon 1.000 / 1.000 vs 0.792 / 0.996**: cuOpt alone
+  finds doon's incumbent only sometimes within 120 s, so doon's C1 "loss" (A9 1.000 vs A6F 0.894) sits on cuOpt-alone's edge.
