@@ -1,0 +1,27 @@
+# I-TREA II -- the C1 re-read's second frozen-v2 candidate (vault 50-decisions/D-030 …): `ysync-ld0` = R2's adopted
+# `ld0` (D-026, ADOPT 2026-10-15: the LP decode inside A9, gated after the EA's HiGHS LP worker, at nice 0) plus R1's
+# fallback (b) `ysync` (D-025 / D-029: CU_CTX_SCHED_YIELD, `host.cuda_sched: yield`), the two never run together.
+#
+# Base = configs/itrea2-dev-rc-3way-ld0.yaml verbatim (A9's and A3x's development default since D-026, a05af2c732dc),
+# plus that one change (`host.cuda_sched: yield`, as in -3way-ysync.yaml); `exchange.from_cuopt` is added by the runner
+# for A9. It runs only if D-029 adopts ysync AND Berk approves the combination (D-030), as A9@c1r in set
+# `c1r-ysync-ld0` (`itrea make-jobs c1r-rerun --a9 ysync-ld0`), and only after the GPU checks D-030 names (the cold-cache
+# test in A9's layout). Development only (D-010).
+name: itrea2-dev-rc-3way-ysync-ld0
+strategy:
+  enabled: true
+seeding:
+  lp_source: highs_async
+lp_stream:
+  enabled: true
+repair:
+  max_steps: 20000
+  stall_steps: 1000
+  continuous: lp_decode
+  lp_decode_gate: lp_worker
+  lp_decode_nice: 0
+repair_clock:
+  enabled: true
+  mode: active
+host:
+  cuda_sched: yield

@@ -99,6 +99,7 @@ description: >
   as amended 2026-10-14 — only what a rule reads: A6@r3 / A2@r3 on comp21, toguru, doon, chromaticindex + A6F@r3 on toguru,
   doon, chromaticindex (rule 4, 18:3x), ext,
   120 s, seeds 0–1; A6F@r3 is A6F@r13x's job under its own variant, so its run ids are new); its record is D-027; read with `itrea d027-report`.
+- The C1 re-read on the frozen-v2 candidate (D-030): `itrea make-jobs c1r-rerun --a9 ld0|ysync-ld0` → `jobs/c1r-<a9>.jsonl` (set `c1r-<a9>`, 68 runs: D-022's C1 runs again — the 17 × {A9@c1r, A6F@c1r} × seeds 0–1, ext, 120 s; A6F@c1r is A6F@r13x's job under a new label; the arms alternate by seed, A6F first at even seeds; pinned run hashes); only one of the two files runs; read with `itrea c1r-report --a9 …`. A rerun set needs its own name: `--set c1r-<a9>-2` writes `jobs/c1r-<a9>-2.jsonl` by default (never the committed file).
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
   before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
   seeds 0–1 — plus `jobs/itx-r13b.jsonl`, the guard's 16 on the 4 remaining instances, same set `itx-r13`; follow-up
@@ -152,7 +153,7 @@ Close the window (skill `itrea-window`), run the analysis, write the result note
 index row, journal entry (skill `itrea-journal`). For a development test the analysis is the test's report, committed
 before the pool ends (as for D-017 and D-018) — `itrea build-runs`, then `tools/d016_report.py`, `tools/d017_report.py`,
 `itrea backoff-report --stage 0|1` (D-018) or `--stage 1y [--harness ext|r13-off]` (D-023), `itrea d022-report
-[--followup]` (D-022 and C1's interim hint and guard), `itrea d027-report` (D-027, R3), all with
+[--followup]` (D-022 and C1's interim hint and guard), `itrea d027-report` (D-027, R3), `itrea c1r-report --a9 …` (D-030, the C1 re-read), all with
 `OMP_NUM_THREADS=1` — and the result goes into the Development log and the decision record's Result section (D-010
 §3). A staged test reports its hint as written (present / no hint / incomplete) and what it gated; an interim reading
 is labelled interim and decides nothing (skill `itrea-result-note`).

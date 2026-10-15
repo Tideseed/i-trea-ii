@@ -38,6 +38,7 @@ optopt's checkout included) and is not named like a screening candidate; only to
     python -m itrea.experiments.make_jobs r2-ld --base bsync|boY-bsync --nice 10|0 | --ea-cpu X  [--set S] [--out F]
     python -m itrea.experiments.make_jobs r2-ld --base r13x|boY                                   [--set S] [--out F]
     python -m itrea.experiments.make_jobs r3-diag [--out jobs/r3-diag.jsonl]          (C1 diagnosis R3: 22 runs)
+    python -m itrea.experiments.make_jobs c1r-rerun --a9 ld0|ysync-ld0 [--set S] [--out F]  (D-030: 68 runs)
 
 `backoff0` writes D-018's stage-0 calibration of A9's GPU back-off (development, D-010): seed 2, 120 s,
 chromaticindex1024-7, sing44 and comp21-2idx x {A6, A9@bo0, A9@bof50, A9@bof25, A9@bof12}, ca__Scenario400_reserves_1
@@ -120,6 +121,15 @@ and chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3} (rule 4 of the 18:3x amendment
 the ext harness, seeds 0-1, 120 s, set `r3-diag`, one block per instance x seed (22 runs in 8 blocks;
 jobs/r3-diag.jsonl). A6F@r3 is A6F@r13x's job (same harness, so the same run hash 82a371305f88) under the variant `r3`,
 so the same-window re-run is like-for-like and its run ids never equal A6F@r13x's.
+
+`c1r-rerun --a9 ld0|ysync-ld0` writes D-030's C1 re-read on the frozen-v2 candidate (Berk 2026-10-14: "Re-run C1 on
+frozen hash"): D-022's C1 runs again — the 17 development + class-probe instances x {A9@c1r, A6F@c1r} x seeds 0-1,
+120 s, the ext harness, one block per instance x seed (68 runs in 34 blocks), set `c1r-<a9>`, jobs/c1r-<a9>.jsonl.
+A9@c1r runs configs/itrea2-dev-rc-3way-ld0.yaml (D-026's adopted default; run hash 341267810eed) or
+-ysync-ld0.yaml (ld0 + D-029's ysync, f345de0ab936; only if D-029 adopts ysync and Berk approves the combination);
+A6F@c1r is A6F@r13x's job under the label c1r (run hash 82a371305f88, new run ids; the same in both files — only one
+runs). The arms alternate by seed (A6F first at even seeds), not the Williams row itx-r13 used. Read by
+`tools/c1r_report.py` (`itrea c1r-report`).
 """
 from __future__ import annotations
 
@@ -243,7 +253,16 @@ R3_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon", R3_CH
 R3_A6F_INSTANCES = ("neos-4763324-toguru", "neos-2746589-doon", R3_CHROMATIC)              # x A6F as well
 R3_A2_INSTANCES = ("comp21-2idx", "neos-4763324-toguru", "neos-2746589-doon", R3_CHROMATIC)  # x A2 as well
 R3_OUT = "jobs/r3-diag.jsonl"
-OPTIONAL = ("emphasis", "ablation", "variant", "harness", "position", "priority")
+# D-030: the C1 re-read on the frozen-v2 candidate (D-026 ADOPT; Berk 2026-10-14, D-025's open question 1: "Re-run C1
+# on frozen hash"): D-022's C1 runs — the A9@r13x / A6F@r13x rows of jobs/itx-r13.jsonl + itx-r13b.jsonl: the 17
+# development + class-probe instances x {A9, A6F} x seeds 0-1, 120 s, harness ext = 68 runs — again, in one set
+# `c1r-<a9>` under the labels A9@c1r / A6F@c1r (new run ids). A9 runs the candidate's file; A6F is A6F@r13x's job
+# (the same run hash) under the new label. The run hashes are pinned: the writer refuses a job whose run hash moved.
+C1R_SET_PREFIX, C1R_VARIANT, C1R_BUDGET, C1R_SEEDS = "c1r-", "c1r", 120.0, (0, 1)
+C1R_A9 = {"ld0": (f"{BACKOFF_BASE}-ld0.yaml", "341267810eed"),               # D-026's adopted default (EA a05af2c732dc)
+          "ysync-ld0": (f"{BACKOFF_BASE}-ysync-ld0.yaml", "f345de0ab936")}   # ld0 + D-029's ysync (EA 835c7c5a249c)
+C1R_A6F_HASH = "82a371305f88"                   # A6F@r13x's run hash under ext (and A6F@r3's)
+OPTIONAL =("emphasis", "ablation", "variant", "harness", "position", "priority")
 
 
 class JobError(ValueError):
@@ -1063,6 +1082,48 @@ def r3_diag(seeds=R3_SEEDS, budget: float = R3_BUDGET, set_: str = R3_SET, table
     return _sorted(out)
 
 
+def c1r_out(a9: str, set_: str | None = None) -> str:
+    """D-030's job file: jobs/<set>.jsonl, the set defaulting to c1r-<a9> — so `--set S` without `--out` writes
+    jobs/S.jsonl and never overwrites the committed jobs/c1r-<a9>.jsonl (whose sha256 D-030 records)."""
+    return f"jobs/{set_ or C1R_SET_PREFIX + a9}.jsonl"
+
+
+def c1_rerun(a9: str = "ld0", seeds=C1R_SEEDS, budget: float = C1R_BUDGET, set_: str | None = None,
+             tables=INSTANCE_TABLES) -> list[dict]:
+    """D-030: the C1 re-read on the frozen-v2 candidate `a9` — "ld0" (D-026's adopted development default,
+    configs/itrea2-dev-rc-3way-ld0.yaml) or "ysync-ld0" (ld0 + D-029's ysync, only if D-029 adopts it and Berk approves
+    the combination). D-022's C1 runs again: the 17 development + class-probe instances x {A9@c1r, A6F@c1r} x seeds
+    0-1, 120 s, the ext harness, split dev, one block per instance x seed = 68 runs in 34 blocks, set `c1r-<a9>`.
+    A9@c1r runs the candidate's file; A6F@c1r is A6F@r13x's job (jobs/itx-r13.jsonl / itx-r13b.jsonl) under another
+    label — every field but set / stratum / block / variant / position equal, so the same run hash 82a371305f88 and a
+    new run id. Order: the two arms of a block carry explicit positions, A6F first at even seeds and A9 first at odd
+    ones (`_alternated`), so each instance runs both orders and the position effect cancels in its seed means (the
+    pool's two-arm Williams row, by hash, gives 5 of the 17 instances the same first arm on both seeds); itx-r13 ran
+    in Williams order — a stated difference. The A6F jobs of the two candidates' files are the same jobs, so their
+    run ids coincide: only one of the two files runs (D-030). The run hashes are pinned (C1R_A9, C1R_A6F_HASH)."""
+    from itrea.experiments.pair import run_hash
+    if a9 not in C1R_A9:
+        raise JobError(f"c1r-rerun --a9: one of {', '.join(C1R_A9)} (D-030's candidates), not {a9!r}")
+    config, a9_hash = C1R_A9[a9]
+    set_ = set_ or C1R_SET_PREFIX + a9
+    names = development_names(tables)
+    where = instance_paths(names, tables)
+    out = []
+    for n in names:
+        for seed in seeds:
+            common = dict(name=n, stratum=set_, split="dev", block=f"{n}__s{int(seed)}__{set_}", variant=C1R_VARIANT,
+                          harness=ITX_EXT)
+            out += _alternated(seed, job(where[n], set_, "A6F", seed, budget, config=None, **common),
+                               job(where[n], set_, "A9", seed, budget, config=config, **common))
+    for j in out:
+        want = a9_hash if j["arm"] == "A9" else C1R_A6F_HASH
+        got = run_hash(j)
+        if got != want:
+            raise JobError(f"c1r-rerun: {j['name']} {j['arm']} s{j['seed']} hashes to {got}, not the pinned {want} "
+                           f"(the configuration or the harness moved; D-030 pins them)")
+    return _sorted(out)
+
+
 def smoke(instances: list[str], arms, seeds=(0,), budget: float = 5.0, set_: str = "smoke",
           config: str | None = None) -> list[dict]:
     """Toy smoke-test jobs (split "smoke": the only split the pool runs without a lease)."""
@@ -1202,6 +1263,15 @@ def main(argv=None) -> int:
                                         "+ toguru, doon x A6F@r3 + chromaticindex1024-7 x {A6@r3, A6F@r3, A2@r3}, "
                                         "ext, 120 s, seeds 0-1 (22 runs)")
     r3.add_argument("--out", type=Path, default=paths.ROOT / R3_OUT, help=f"default {R3_OUT}")
+    c1r = sub.add_parser("c1r-rerun", help="D-030: the C1 re-read on the frozen-v2 candidate — the 17 development + "
+                                           "class-probe instances x {A9@c1r, A6F@c1r} x seeds 0-1, ext, 120 s, set "
+                                           "c1r-<a9> (68 runs)")
+    c1r.add_argument("--a9", required=True, choices=tuple(C1R_A9),
+                     help="the candidate: ld0 (D-026's adopted default) or ysync-ld0 (ld0 + D-029's ysync; only if "
+                          "D-029 adopts it and Berk approves the combination)")
+    c1r.add_argument("--set", dest="set_", default=None, help="default c1r-<a9>")
+    c1r.add_argument("--out", type=Path, default=None, help="default jobs/<set>.jsonl (jobs/c1r-<a9>.jsonl without "
+                                                            "--set)")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -1262,6 +1332,9 @@ def main(argv=None) -> int:
             a.out = a.out or paths.ROOT / R2_OUT
         elif a.cmd == "r3-diag":
             jobs = r3_diag()
+        elif a.cmd == "c1r-rerun":
+            jobs = c1_rerun(a.a9, set_=a.set_)
+            a.out = a.out or paths.ROOT / c1r_out(a.a9, a.set_)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:
