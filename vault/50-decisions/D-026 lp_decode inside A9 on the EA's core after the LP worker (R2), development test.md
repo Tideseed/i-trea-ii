@@ -1,6 +1,6 @@
 # D-026 lp_decode inside A9 on the EA's core after the LP worker (R2), development test (2026-10-14, AgentRA)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
+**Status:** RESULT 2026-10-15 13:2x: **ADOPT** (hint 0.758; every no-harm leg and mechanism holds; § Result) — `-3way-ld0.yaml` is A9's development default. decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
 superseding decision on evidence. **Not run; no code merged** (branch `r1-bsync`, worktree `../i-trea-ii-r1`).
 **Clarified and amended 2026-10-14 17:4x, before any run** (the section at the end: names as built, the labels
 A9@r2ld / A9@r2ctl with new ids, the gate's final states, the no-harm band on item_placement and sing44 now gates, the
@@ -191,3 +191,25 @@ copies entered, nothing compiled after t0). A toy run need not reach 9 parts; ev
    no-go, and the frozen-v2 candidate is not presumed.
 
 **Correction:** the null replicate at 2 seeds is 1.484 / 1.618 = **0.917** (the record says 0.918).
+
+## Result (2026-10-15 13:2x, AgentRA): ADOPT — `-3way-ld0.yaml` becomes A9's and A3x's development default
+D-025's line ended without adoption (bsync and ysync NOT ADOPTED, 08:1x / 11:2x; D-029's follow-up pending), so R2 ran on the
+pre-written branch "R1 not adopted": `itrea make-jobs r2-ld --base r13x` → `jobs/r2-ld.jsonl` (sha256 1ad5191f…8042), A9@r2ld
+(`configs/itrea2-dev-rc-3way-ld0.yaml`: the decoder gated after the LP worker, nice 0 beside the spinning host; run hash
+341267810eed) vs A9@r2ctl (`-3way.yaml`, 28e5a5e9c725). Pool `20261015-111740-3344629` (11:17–13:16): **28 of 28 completed**, 0
+failed / void. `itrea build-runs`, `itrea d026-report --base r13x` (VALID):
+- **Mechanisms hold:** (1) ready after the gate 0.23–0.26 s on item / glass4 / sing44 / kumeu, 5.83 / 5.91 s on ca (≤ 10 s); (2)
+  decoded incumbents per seed item 54 / 22 / 45 / 38, sing44 6 / 2 / 5 / 3 (≥ 1); (3) ca's LP worker solve wall 37.87 vs 36.46 s
+  (1.039) and 37.76 vs 40.19 s (0.940) (≤ 1.1).
+- **No harm, every leg:** ca −0.006 (band 0.021), glass4 −0.030 (0.050), kumeu −0.054 (0.138), item_placement −0.133 (0.104),
+  sing44 −0.062 (0.050) — all in the treatment's favour.
+- **Hint PRESENT: 0.758** (ΣP 2.4362 / 3.2145 over item_placement and sing44 × seeds 0–3; threshold 0.90): item_placement 0.598
+  (P 0.330 → 0.198; better on all four seeds: 0.162 / 0.286 / 0.187 / 0.155 vs 0.261 / 0.365 / 0.362 / 0.334), sing44 0.869
+  (0.473 → 0.411; better on all four seeds).
+- **Verdict: ADOPT.** As fixed above: `configs/itrea2-dev-rc-3way-ld0.yaml` (EA hash a05af2c732dc) becomes A9's and A3x's
+  development default and the frozen-v2 candidate; nothing claims that R2 improves A9 in general (development, n = 2–4 seeds on
+  5 instances). C1 is re-read once on the frozen-v2 hash with A6F re-run in the same window (Berk 2026-10-14: 68 runs ≈ 3.9 h),
+  with D-025 amendment 3's harm leg against A9@r13x per instance. If D-029 (running, set r1f-ysync, control pinned to `-3way.yaml`)
+  also adopts ysync, frozen-v2 would combine ysync + ld0 — never run together; that combination is Berk's call before the C1 re-run.
+- Code follow-up (not before the running pool ends): `ITX_A9_CONFIG` in `make_jobs.py` (and wherever the runner names the A9 /
+  A3x default) points at `-3way-ld0.yaml` — a src change, merged only between pools.
