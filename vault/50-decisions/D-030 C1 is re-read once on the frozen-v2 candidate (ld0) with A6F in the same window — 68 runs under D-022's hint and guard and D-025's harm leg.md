@@ -277,3 +277,12 @@ tests deselected; the new skip is the frozen-v2 test (no file yet). New / rewrit
 frozen-v2, the flag leg), `tests/test_make_jobs.py` (the `--set` default path), `tests/test_cuda_sched.py` (frozen-v2).
 Read-only on main's run table the report reproduces 10-13's 0.827 / +0.063 and the numbers above; this set INCOMPLETE,
 0 of 68, as expected. Job files unchanged (sha256 above).
+
+## Which candidate runs (2026-10-15 15:0x, AgentRA, before any c1r run)
+D-029 adopted ysync (15:0x), so the frozen-v2 candidate is **ysync + ld0** (`configs/itrea2-dev-rc-3way-ysync-ld0.yaml`, A9 run hash
+f345de0ab936). The combination's approval: Berk (13:5x) "go ahead with recommendations" — the recommendation stated to him was to re-read
+C1 on ysync + ld0 if D-029 adopts, and, if the harm leg fires there, to re-read C1 on ld0 alone on Friday and freeze the variant
+without harm (what freezes stays his). GPU check before the first timed run (inside the lease, no pool running, 15:07): A9-layout
+cold-cache test for ysync-ld0 **passed** (decoder gate lag 0.135 s, `concat_parts_max` 2, nothing compiled after t0). `c1-rerun`
+merged d3fe14f; affected non-GPU tests 256 passed. **`jobs/c1r-ysync-ld0.jsonl` (sha256 50108596…5588) started 15:09:55** in
+W-1015 (queue item 5, `--layout pair --deadline 18:35`); unfinished blocks continue in Friday's window (whole blocks).

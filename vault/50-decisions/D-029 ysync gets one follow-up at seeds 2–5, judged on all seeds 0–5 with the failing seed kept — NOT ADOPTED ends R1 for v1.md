@@ -372,3 +372,14 @@ tabled above; a further change after the review would add another fork. Job file
 `8827a2a448807788ae150fe2e2a2f5e5106aff842698431a215049f42dd4fe29`) queued in W-1015 after `r2-ld`. If both D-026 and D-029
 adopt, frozen-v2 combines two changes never run together; only the C1 re-run on the frozen hash (with D-025 amendment 3's harm leg)
 covers the combination, and what freezes is Berk's.
+
+## Result (2026-10-15 15:0x, AgentRA): ADOPT — ysync joins A9's development default
+Set `r1f-ysync`, pool `20261015-131611-3862708` (13:16–14:59, two governor rests): **21 of 21 completed** (the warm-up unread);
+`tools/d029_report.py` over r1-ysync (seeds 0–1) + r1f-ysync (seeds 2–5): VALID, 28 of 28.
+- **Rule 1 (generations, seeds 0–5, ≥ 0.90):** item_placement **1.020** (1,549.7 / 1,519.7; seeds 2–5 1.205 / 1.267 / 0.911 / 1.225; seed 1's
+  0.458 stays in), comp21 **1.152** — hold.
+- **Rule 2 (P, seeds 0–5, ≤ +0.05):** item_placement **+0.016** (bootstrap upper bound +0.109, beside), comp21 **+0.015** (+0.032) — hold.
+- **Rule 3 (ca, seeds 2–3 alone, ≤ 0.95):** **0.675** (0.264 / 0.252 vs 0.377 / 0.387) — the gain replicates (seeds 0–3 pooled 0.659).
+- **Verdict: ADOPT.** `configs/itrea2-dev-rc-3way-ysync.yaml`'s change (`host.cuda_sched: yield`) joins A9's and A3x's development
+  default together with D-026's lp_decode (ld0) → the frozen-v2 candidate is `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (built for
+  D-030; ld0 + yield only). Seed 1's collapse did not recur in four more seeds; its cause stays unknown (pool-first, stated).
