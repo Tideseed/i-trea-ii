@@ -1,6 +1,6 @@
 # D-028 Does D-022's harness (R13 + R14) stop phase Y from restoring cuOpt on chromaticindex — a 4-run diagnostic (2026-10-15, AgentRA)
 
-**Status:** decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a superseding
+**Status:** RESULT 2026-10-15 11:4x: NOT R13 + R14 (A9@boY under r13-off 63.25 / 63.24 s vs L 19.82 s; § Result). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a superseding
 decision on evidence. A diagnostic (D-024 rule 1: where the claim lives; rule 4: only what the rule reads): no hint, no adoption.
 
 ## Why
@@ -36,3 +36,12 @@ Failed or void runs: a missing cell leaves the rule unread (the letter, as D-027
 
 ## Cost
 4 runs ≈ 10 min, queued in window W-1015 after D-025's fallback (b); no code.
+
+## Result (2026-10-15 11:4x, AgentRA): NOT R13 + R14
+Set `d028`, pool `20261015-110921-3312868` (11:09–11:17): **4 of 4 completed**. `itrea build-runs`; cuOpt's first incumbent
+(`cuopt_t_first`): A6F (ext, same window) 7.45 / 9.91 s → L = 19.82 s; **A9@boY under r13-off 63.25 / 63.24 s** (≥ 50 s on both
+seeds). Reading: **not R13 + R14** — with cuOpt's gaps at default and its thread variables kept, phase Y at duty ½ still does not
+give cuOpt its first incumbent back (D-023 under ext: 63.47 / 63.41 s). What differs from D-018 stage 1's rescue (old harness,
+9.54 / 12.47 s) lies in the rest of ext (RMM 24 GB as a separate pool, host 24 GB, the CUDA cache) or the day; not pursued for v1,
+as fixed above. **Consequences:** D-022's adoption of R13 + R14 is not implicated here, so the C1 freeze's harness question does
+not arise; chromaticindex stays a known v1 loss to cuOpt alone (MPS is v1.1, Berk 2026-10-15).
