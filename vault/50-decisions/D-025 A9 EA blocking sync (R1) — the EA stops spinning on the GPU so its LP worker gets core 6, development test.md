@@ -280,6 +280,9 @@ control: flags read back as "auto").
    harm goes to Berk with the numbers beside the go / no-go, and the frozen-v2 candidate is not presumed: he decides
    which configuration freezes (with R1 and R2 both adopted the re-read cannot say which change caused it). Code owed:
    the re-read's report (not written yet).
+   *Note 2026-10-15 14:3x ([[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg]], amendment before any run): band_i is read as the D-023 `band_i` cited here —
+   A9@r13x's or A6F@r13x's spread, never the new A9's —; harm cannot fire on crna and rail01 (nor on
+   cryptanalysiskb128n5obj16, doon), so this leg cannot show harm there; the report is `tools/c1r_report.py`.*
 
 **Corrections (no rule change):**
 - Null replicate: 1.772 / 1.793 = **0.988** (the record says 0.989 from 1.773 / 1.792; the run table: A9@bo1s 0.3927,
