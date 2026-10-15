@@ -761,9 +761,10 @@ def test_c1_rerun_files_are_the_writers_output(tmp_path, a9):
 
 
 def test_c1_rerun_run_ids_are_new():
-    """No run id of either c1r file is the id of a job in any other committed job file, nor of a run in the run table
-    (when this checkout has one); the two candidates' A9 ids are disjoint, their A6F ids the same on purpose (the same
-    job: only one of the two files runs, D-030)."""
+    """No run id of either c1r file is the id of a job in any other committed job file, nor of a run of another set in
+    the run table (when this checkout has one; the c1r sets' own runs are left out, so the test stays green once the
+    re-read has run); the two candidates' A9 ids are disjoint, their A6F ids the same on purpose (the same job: only one
+    of the two files runs, D-030)."""
     from itrea.experiments import pair
     ids = {a: {pair.run_id_for(j) for j in mj.c1_rerun(a)} for a in mj.C1R_A9}
     a9 = {a: {i for i in v if "__A9@c1r__" in i} for a, v in ids.items()}
@@ -775,7 +776,9 @@ def test_c1_rerun_run_ids_are_new():
     runs = paths.DATASETS / "runs.parquet"
     if runs.exists():
         import pandas as pd
-        assert not every & {str(x).split("#")[0] for x in pd.read_parquet(runs, columns=["run_id"])["run_id"]}
+        df = pd.read_parquet(runs, columns=["run_id", "set"])
+        df = df[~df["set"].astype(str).str.startswith(mj.C1R_SET_PREFIX)]
+        assert not every & {str(x).split("#")[0] for x in df["run_id"]}
 
 
 def test_c1_rerun_refuses_unknown_candidates_and_moved_hashes(monkeypatch):
