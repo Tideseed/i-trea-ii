@@ -78,3 +78,18 @@ comparison with GAMS's own GB10 cuOpt-26.08 run (Berk allowed the download of GA
 [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]] (on Berk's
 "come up with our own standards", 10-11) proposes new readings of this record's external rows and of part A for
 prereg-v2 (its "Open for Berk", 1). Until Berk answers, this record's literal readings decide.
+
+## Addendum 2026-10-15 13:4x — phase 1 (development, until C1) wraps up Sat 2026-10-17 (Berk)
+Berk (13:4x): **"Assume we are wrapping up phase 1 on Saturday."** Phase 1 = the Roadmap's stage 1 (development on the 17
+instances until C1). C1's content is unchanged — development frozen on cuOpt 26.08 (`configs/frozen-v2.yaml`), the external
+harness calibrated (D-021 M1–M4: done, M4 OUTSIDE 10-15, the footprint), the interim A9 result and the go / no-go (Berk's) —
+and its date moves from Fri 10-23 to **Sat 10-17**. Consequences (AgentRA's plan, defaults unless Berk says otherwise):
+- **Runs before Saturday:** D-029 (running), then the C1 re-read on the frozen-v2 candidate (D-030, 68 runs; Berk 10-14), then — box
+  time allowing, Friday — the same C1 set at seeds 2–3 so the phase-1 result rests on four seeds (a widening after C1's hint, D-024
+  rule 3; its rules written before its runs).
+- **Not in phase 1, carried to phase 2 with their records:** #26 (recombine a partner incumbent with the whole elite: not built),
+  #35 two-way exchange (v1.1, Berk 10-14), CUDA MPS (v1.1, Berk 10-15), the R1 line unless D-029 adopts.
+- **Due before prereg-v2, not before Saturday:** #36 (one checker rule for every arm), #32's test-set size (Berk's) and the prereg-v2 tag
+  itself — prereg-v2 gates only external A9 runs, which wait for cuOpt 26.10 (D-019).
+- **Saturday:** `configs/frozen-v2.yaml`, the phase-1 results note (what was tested, adopted, rejected, and the interim A9 result with its
+  caveats), checkpoint, Roadmap / Home / README / AGENTS, issues; the go / no-go to Berk with the numbers.

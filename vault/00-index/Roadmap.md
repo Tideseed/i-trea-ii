@@ -1,6 +1,6 @@
-# Roadmap (living; updated 2026-10-13)
+# Roadmap (living; updated 2026-10-15)
 
-**v1 target ([[D-019 v1 — deadline and performance target]], Berk 2026-10-10):** checkpoint C1 **Fri 2026-10-23**
+**v1 target ([[D-019 v1 — deadline and performance target]], Berk 2026-10-10):** checkpoint C1 **Sat 2026-10-17** (moved from Fri 10-23: Berk 2026-10-15, "Assume we are wrapping up phase 1 on Saturday"; D-019 addendum)
 (development frozen on cuOpt 26.08, external harness calibrated, interim A9 result, go / no-go); **v1 end of November**
 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10 (on 26.08 if 26.10 is not released by Fri 11-06, with 26.10 as an
 addendum — to be confirmed with Berk then; D-019); no night windows. Targets: lift SCIP's weak set (min: significant;
@@ -30,7 +30,7 @@ fill idle hours. "If the box is idle make the most of it."
 
 Each stage lists its GitHub issues (`Tideseed/i-trea-ii`). Newest checkpoint: [[2026-10-13-1600]].
 
-## C1 checkpoint — Fri 2026-10-23 (status 2026-10-13)
+## C1 checkpoint — Sat 2026-10-17, end of phase 1 (moved from Fri 10-23; table status 2026-10-13, newer results in D-023–D-029)
 | issue | item | status | next |
 |---|---|---|---|
 | #23 | A9 (SCIP ↔ EA ← cuOpt, D-015) and the EA's GPU back-off | A9 built 10-07, pilot run. Back-off [[D-018 A9 — the EA backs off the GPU beside cuOpt (contribution-gated duty cycle)]] stage 1 **NOT ADOPTED** 10-11 (outcome rules hold — chromaticindex1024-7 P 0.545 → 0.091; mechanism M1 / M3 / M5 fail: the patience ladder steps the EA down while it leads); `_band` analysis bug fixed before the verdict. Phase Y only = [[D-023 A9 back-off, phase Y only — yield until cuOpt's first incumbent, then full duty]]: decided and tooled, **not run**. R13 + R14 (cuOpt gaps 0, thread variables unset) = [[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]]: narrowed to the 3 instances where cuOpt's own 1e-4 stop occurs, amended twice before any reading; **running 10-13** (`jobs/itx-r13.jsonl` 58 + `jobs/itx-r13b.jsonl` 16 runs, all in set `itx-r13`), no result yet | read D-022; D-023 amended before any run (2026-10-13 22:5x: 11 instances, 66 runs, D-024 drafted 54; clarified 23:3x), its code on branch `d023-nine` (merge before any backoff2 run); run it on ext (D-022 adopted) |
