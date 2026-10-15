@@ -19,9 +19,11 @@ f345de0ab936 for ysync-ld0; A6F@c1r 82a371305f88 = A6F@r13x's), so the report an
 
 Reads `datasets/runs.parquet` (`pt` = P(120), `status`, `attempt`, `run_dir`, `harness`, `cuda_compiled_on_clock`,
 `window_id`, `block_void`), each run's `run.json` (`config.harness`, `compiled_on_clock_cuda`, `cupy_cache`) and, for
-A9, `ea.summary.json` (`compiled_on_clock`; beside: `cuda_sched`, `phase_events_block`, `lp_decode`, `generations`).
+A9, `ea.summary.json` (`compiled_on_clock`, `cuda_sched`, `phase_events_block`; beside: `lp_decode`, `generations`).
 Also from the run table: D-022's runs of set `itx-r13` (A9@r13x, A6F@r13x: the 10-13 reading and the harm leg's
-reference) and A0's runs of sets `dev` / `classprobe` (seeds 0-1, 120 s; vs SCIP alone, reported).
+reference and band), A0's runs of sets `dev` / `classprobe` (seeds 0-1, 120 s; vs SCIP alone, reported) and the
+same-configuration A9 replicates of 10-15 (`NULL_A9`: A9@r1ctl, A9@r1ctl-ysync, A9@r2ctl — A9@r13x's run hash
+28e5a5e9c725 re-run under the sets' own labels; beside the harm leg); the set's `void.jsonl` (beside).
 
 Validity (gating; INVALID names the leg and no rule is read; a missing run alone -> INCOMPLETE, the rules read what is
 there, each INCOMPLETE where it needs a missing run):
@@ -34,10 +36,14 @@ there, each INCOMPLETE where it needs a missing run):
     `cupy_cache.compiled_on_clock`, the EA summary's `compiled_on_clock`); A6F is never charged with a CuPy flag
     (the runner's own rule, as D-022's report reads it);
   - window: the two runs of each block (instance x seed) ran in one window (the same `window_id`); the run may split
-    across windows by whole blocks.
-  Reported beside, not gating: each A9 run's CUDA scheduling flag (ld0: CUDA's default read back; ysync-ld0: yield set,
-  verified and held to the end, timing events not blocking — a mismatch is printed as NOT AS WRITTEN) and its LP
-  decode gate (open / why / when), generations.
+    across windows by whole blocks (a deadline or a stop never splits a block, and a half-done block found on resume
+    is voided and rerun whole by the pool, `Pool.prepare`; this leg guards against a split that bypasses the pool);
+  - flag (gating since D-030's amendment of 2026-10-15, as D-025 and D-026 gate it): each A9 run's CUDA scheduling
+    flag as the candidate's file writes it — ld0: CUDA's default read back (`cuda_sched.state` "read", active "auto");
+    ysync-ld0: yield set, verified, active and held at the end — and timing events not blocking; a failed A9 run
+    without an EA summary is noted, not charged (an outcome of its arm under `keep`).
+  Reported beside, not gating: each A9 run's LP decode gate (open / why / when) and generations; the set's voids (the
+  pool's `void.jsonl`: count and reasons); whether `configs/frozen-v2.yaml` exists and hashes to the candidate.
 
 Rules (D-030 cites them; the hint and the guard are computed by D-022's own functions, `tools/d022_report.py`
 `c1_hint` / `c1_guard` / `c1_interim`, on these runs relabelled A9@c1r -> A9@r13x, A6F@c1r -> A6F@r13x):
@@ -46,14 +52,24 @@ Rules (D-030 cites them; the hint and the guard are computed by D-022's own func
     both seeds of both arms; not re-selected) is <= 0.95; INCOMPLETE while a run of the 11 is missing;
   - GUARD holds iff the mean bounded d of A9 vs A6F on seed means over all 17 (both-P = 1 at d = 0) is >= -0.05;
     INCOMPLETE (no partial mean) while a run of the 17 is missing;
-  - HARM (D-025 amendment 3, labelled cross-day): per development instance of the 17, the new A9 (A9@c1r) against
-    A9@r13x of 10-13 (set itx-r13): d_i = (P(A9@r13x) - P(new)) / max(both, 1e-3) on seed means (`stats.effect_d`),
-    band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference |a - b| / max(a, b, 1e-3) of either arm — A9@r13x
-    or the new A9); harm iff d_i < -band_i. Any harm goes to Berk with the numbers beside the go / no-go, and the
-    frozen-v2 candidate is not presumed: he decides which configuration freezes.
+  - HARM (D-025 amendment 3, labelled cross-day; band as D-030's amendment of 2026-10-15 fixes it): per development
+    instance of the 17, the new A9 (A9@c1r) against A9@r13x of 10-13 (set itx-r13): d_i = (P(A9@r13x) - P(new)) /
+    max(both, 1e-3) on seed means (`stats.effect_d`), band_i = max(0.05, the larger seed-0 vs seed-1 bounded difference
+    |a - b| / max(a, b, 1e-3) of the control or of A6F) — D-023's `band_i`, which the amendment cites: the control =
+    A9@r13x, A6F = A6F@r13x (the cuOpt-alone arm that ran beside it on 10-13), never the treatment; so band_i and the
+    threshold (the smallest P̄ of the new A9 at which harm fires) are numbers fixed by 10-13's runs before any c1r run.
+    harm iff d_i < -band_i. Any harm goes to Berk with the numbers beside the go / no-go, and the frozen-v2 candidate
+    is not presumed: he decides which configuration freezes.
+    Beside (not criteria): the band of D-030's first reading (A9@r13x or the new A9) and with A6F@c1r in A6F@r13x's
+    place; raw ΔP and whether |ΔP| <= 0.005 (D-022's floor); where harm CANNOT fire (threshold >= 1: A9@r13x at P = 1
+    on both seeds, or a band so wide that P would have to exceed 1 — rail01, cryptanalysiskb128n5obj16, doon, crna on
+    10-13's runs), with each seed's P and the EA's generations 10-13 -> new; and the null lines — the same d_i / band_i
+    on cuOpt alone (A6F@c1r against A6F@r13x: the identical job on two days) and on the same-configuration A9 replicates
+    of 10-15 against A9@r13x (`NULL_A9`), each instance's fires counted.
   Reported, not criteria (D-013 terms, as `tools/d022_report.py` reports them): A9@c1r vs A6F@c1r (same window, equal
   footprint) on the fixed 11, and vs A0 (SCIP alone; sets dev / classprobe, earlier days) on the fixed 11 and on
-  SCIP's weak set among them (A0 P >= 0.5): improved k of n, worse, mean P before -> after, mean d with its 95 %
+  SCIP's weak set among them (A0 P >= 0.5), and on SCIP's weak set among all 17 (D-019's C1 asks for the 17; the
+  fixed-11 line is D-022's reading of 10-13): improved k of n, worse, mean P before -> after, mean d with its 95 %
   bootstrap interval, the Wilcoxon test, worst P after. Beside: the 10-13 reading — the same functions on set itx-r13's
   A9@r13x / A6F@r13x (D-022's Result recorded hint 0.827, guard +0.063) — per instance and in total.
 
@@ -66,6 +82,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -74,7 +91,7 @@ import pandas as pd
 
 from itrea.analysis import c1_devtests as C
 from itrea.analysis.backoff import bounded
-from itrea.analysis.stats import effect_d
+from itrea.analysis.stats import D_FLOOR, effect_d
 from itrea.experiments import make_jobs as mj
 from itrea.experiments import pair
 from itrea.paths import DATASETS, ROOT
@@ -92,8 +109,11 @@ TO_D022 = {A9: OLD_A9, A6F: OLD_A6F}                            # D-022's functi
 FROM_D022 = {v: k for k, v in TO_D022.items()}
 C1_INSTANCES = tuple(D22.C1_INSTANCES)                          # the fixed 11 (D-022 second amendment)
 HARM_BAND_MIN = 0.05                                            # D-025 amendment 3 (D-023's band_i)
+FLOOR_DP = D22.FLOOR_DP                                         # D-022's floor (0.005 raw P): a marker beside harm
+OLD_A9_HASH = "28e5a5e9c725"                                    # A9@r13x's run hash under ext (-3way.yaml)
+NULL_A9 = (("r1-bsync", "A9@r1ctl"), ("r1-ysync", "A9@r1ctl-ysync"), ("r2-ld", "A9@r2ctl"))   # 10-15, same config
 RECORDED_1013 = dict(hint=0.827, guard=0.063)                   # D-022's Result, 2026-10-13 22:2x (as recorded)
-LEGS = ("complete", "harness", "config", "compile", "window")
+LEGS = ("complete", "harness", "config", "compile", "window", "flag")
 FLAG = {"ld0": "auto", "ysync-ld0": "yield"}                    # each candidate's CUDA scheduling flag as written
 BERK = ("go / no-go on C1 is Berk's (D-019 addendum): the hint and the guard are its inputs; any harm goes to Berk "
         "with the numbers beside the go / no-go, and the frozen-v2 candidate is not presumed — he decides which "
@@ -116,8 +136,8 @@ def cupy_compiled(rj: dict) -> bool:
 
 
 def flag_state(a9: str, row: dict, summ: dict) -> dict:
-    """Beside, not gating: the A9 run's CUDA scheduling flag against the candidate's file (ld0: CUDA's default read
-    back; ysync-ld0: yield set, verified and held, timing events not blocking)."""
+    """The A9 run's CUDA scheduling flag against the candidate's file (ld0: CUDA's default read back; ysync-ld0: yield
+    set, verified and held; timing events not blocking in both); `flag_problems` gates on it."""
     if not summ:
         return dict(ok=None, text="no ea.summary.json" + (" (failed run)" if row.get("status") == "failed" else ""))
     cs = summ.get("cuda_sched") or {}
@@ -132,6 +152,21 @@ def flag_state(a9: str, row: dict, summ: dict) -> dict:
                 text=f"{cs.get('state')}/{cs.get('sched_active')}" + ("" if ok else f" NOT AS WRITTEN (want {want})"))
 
 
+def flag_problems(a9: str, row: dict, summ: dict) -> tuple[list[str], str | None]:
+    """The flag leg (gating, D-030's amendment of 2026-10-15; d025_report / d026_report's shape): (problems, note). A
+    failed A9 run without an EA summary is noted, not charged (an outcome of its arm under `keep`); a completed one
+    without a summary fails the leg."""
+    if not summ:
+        if row.get("status") == "failed":
+            return [], "failed run without ea.summary.json: flag unread"
+        return ["no ea.summary.json: the CUDA flag is unread"], None
+    st = flag_state(a9, row, summ)
+    if st["ok"]:
+        return [], None
+    return [f"CUDA flag not as written (want {st['want']}: state {st['state']!r}, active {st['active']!r}, at the end "
+            f"{st['at_end']!r}, timing events blocking {st['events_block']!r})"], None
+
+
 def decoder_state(summ: dict) -> dict:
     ld = summ.get("lp_decode") if isinstance(summ.get("lp_decode"), dict) else {}
     return dict(gate=ld.get("gate"), gate_why=ld.get("gate_why"), gate_t=ld.get("gate_t"),
@@ -144,29 +179,99 @@ def _p_by(rows) -> dict:
     return {(r["instance"], r["arm"], int(r["seed"])): float(r["pt"]) for r in rows if C.fin(r.get("pt"))}
 
 
-def harm_leg(new: dict, old: dict, instances) -> dict:
-    """D-025 amendment 3 on each instance: `new` {(instance, seed): P of the new A9}, `old` the same of A9@r13x
-    (10-13). d_i = effect_d(P̄ old, P̄ new) (positive = the new A9 better); band_i = max(0.05, bounded(old s0, s1),
-    bounded(new s0, s1)); harm iff d_i < -band_i. An instance without both seeds of both arms is unread (INCOMPLETE)."""
+def _seeds(p: dict, i: str) -> list:
+    return [p.get((i, s)) for s in SEEDS]
+
+
+def _spread(v: list) -> float | None:
+    """The bounded seed-0 vs seed-1 difference |a - b| / max(a, b, 1e-3); None without both seeds."""
+    if any(x is None for x in v):
+        return None
+    x = bounded(v[0], v[1])
+    return float(x) if C.fin(x) else None
+
+
+def _band(*spreads) -> float:
+    return max([HARM_BAND_MIN] + [x for x in spreads if x is not None])
+
+
+def p_threshold(p_old: float, band: float) -> float:
+    """The smallest seed-mean P of the new A9 at which harm fires (effect_d(p_old, P) < -band), given P̄(A9@r13x) and
+    band_i: P > p_old / (1 - band) (P > p_old + band x 1e-3 below the 1e-3 floor); inf when band >= 1."""
+    if band >= 1.0:
+        return math.inf
+    t = p_old / (1.0 - band)
+    return t if t >= D_FLOOR else p_old + band * D_FLOOR
+
+
+def harm_bands(old: dict, a6_old: dict, instances) -> dict:
+    """{instance: band_i, threshold, cannot_fire} fixed by 10-13's runs alone (D-030's amendment of 2026-10-15): band_i
+    = max(0.05, the bounded seed spread of A9@r13x (the control), that of A6F@r13x (A6F)); the threshold = the
+    smallest P̄ of the new A9 at which harm fires; cannot_fire iff the threshold >= 1 (P <= 1). None for an instance
+    without both seeds of A9@r13x."""
+    out = {}
+    for i in instances:
+        po = _seeds(old, i)
+        if any(v is None for v in po):
+            out[i] = None
+            continue
+        so, sa = _spread(po), _spread(_seeds(a6_old, i))
+        band = _band(so, sa)
+        thr = p_threshold(float(np.mean(po)), band)
+        out[i] = dict(band=band, spread_old=so, spread_a6_old=sa, p_old=float(np.mean(po)), threshold=thr,
+                      cannot_fire=bool(thr >= 1.0))
+    return out
+
+
+def harm_leg(new: dict, old: dict, instances, a6_old: dict | None = None, a6_new: dict | None = None) -> dict:
+    """D-025 amendment 3 on each instance, band as D-030's amendment of 2026-10-15 reads D-023's `band_i`: `new`
+    {(instance, seed): P of the new A9}, `old` the same of A9@r13x (10-13), `a6_old` of A6F@r13x (10-13), `a6_new` of
+    A6F@c1r (beside only). d_i = effect_d(P̄ old, P̄ new) (positive = the new A9 better); band_i = max(0.05,
+    bounded(A9@r13x s0, s1), bounded(A6F@r13x s0, s1)) — never the treatment's own spread; harm iff d_i < -band_i.
+    An instance without both seeds of both A9 arms is unread (INCOMPLETE). Beside: `band_first` (D-030's first
+    reading: A9@r13x or the new A9), `band_a6_new` (A6F@c1r in A6F@r13x's place), `dp` (raw P̄ new - P̄ old),
+    `floor_dp` (|dp| <= 0.005), `threshold` / `cannot_fire` (`harm_bands`)."""
+    a6_old, a6_new = a6_old or {}, a6_new or {}
+    bands = harm_bands(old, a6_old, instances)
     rows, harm, unread = [], [], []
     for i in instances:
-        pn = [new.get((i, s)) for s in SEEDS]
-        po = [old.get((i, s)) for s in SEEDS]
+        pn, po = _seeds(new, i), _seeds(old, i)
+        b = bands[i] or {}
         if any(v is None for v in pn + po):
             unread.append(i)
-            rows.append(dict(instance=i, read=False, p_new_seeds=pn, p_old_seeds=po))
+            rows.append(dict(instance=i, read=False, p_new_seeds=pn, p_old_seeds=po, band=b.get("band"),
+                             threshold=b.get("threshold"), cannot_fire=b.get("cannot_fire")))
             continue
         mo, mn = float(np.mean(po)), float(np.mean(pn))
-        spreads = [x for x in (bounded(po[0], po[1]), bounded(pn[0], pn[1])) if C.fin(x)]
-        band = max([HARM_BAND_MIN] + spreads)
+        band = b["band"]
         d = effect_d(mo, mn)
         h = bool(d < -band)
+        sn, sa_new = _spread(pn), _spread(_seeds(a6_new, i))
         rows.append(dict(instance=i, read=True, p_old=mo, p_new=mn, p_old_seeds=po, p_new_seeds=pn, d=d, band=band,
-                         spread_old=bounded(po[0], po[1]), spread_new=bounded(pn[0], pn[1]), harm=h))
+                         spread_old=b["spread_old"], spread_a6_old=b["spread_a6_old"], spread_new=sn,
+                         band_first=_band(b["spread_old"], sn),
+                         band_a6_new=_band(b["spread_old"], sa_new) if sa_new is not None else None,
+                         threshold=b["threshold"], cannot_fire=b["cannot_fire"], dp=mn - mo,
+                         floor_dp=bool(abs(mn - mo) <= FLOOR_DP), harm=h))
         if h:
             harm.append(i)
     state = "HARM" if harm else ("INCOMPLETE" if unread else "none")
-    return dict(rows=rows, harm=harm, unread=unread, state=state, band_min=HARM_BAND_MIN)
+    return dict(rows=rows, harm=harm, unread=unread, state=state, band_min=HARM_BAND_MIN,
+                cannot_fire=[i for i in instances if (bands[i] or {}).get("cannot_fire")], bands=bands)
+
+
+def null_read(ref: dict, rep: dict, bands: dict, instances) -> dict:
+    """The harm rule applied to a pair with no change between them (`ref` {(instance, seed): P} on 10-13, `rep` the
+    same configuration on another day): per instance with both seeds of both, d_i = effect_d(P̄ ref, P̄ rep) against
+    the harm leg's band_i; `fired` = the instances where d_i < -band_i (noise, by construction)."""
+    rows = []
+    for i in instances:
+        pr, pp, b = _seeds(ref, i), _seeds(rep, i), bands.get(i)
+        if b is None or any(v is None for v in pr + pp):
+            continue
+        d = effect_d(float(np.mean(pr)), float(np.mean(pp)))
+        rows.append(dict(instance=i, d=d, band=b["band"], fires=bool(d < -b["band"]), p_ref_seeds=pr, p_rep_seeds=pp))
+    return dict(rows=rows, n=len(rows), fired=[r["instance"] for r in rows if r["fires"]])
 
 
 def per_instance(p: dict, a9: str, a6f: str, instances) -> dict:
@@ -195,21 +300,79 @@ def _ours(x: dict) -> dict:
     return dict(x, missing=[(i, FROM_D022.get(a, a), s) for i, a, s in x.get("missing", [])])
 
 
-def rules(rows, runs: pd.DataFrame, instances) -> dict:
-    """C1's hint and guard (D-022's functions on the relabelled rows), the D-013 blocks vs A6F and vs A0, the harm leg
-    against A9@r13x of 10-13, and the 10-13 reading beside."""
+def vs_a0_17(long: pd.DataFrame, a0: pd.DataFrame, instances) -> dict:
+    """Reported, not a criterion: A9 (D-022's label TREAT in `long`) vs A0 in D-013 terms on SCIP's weak set among ALL
+    the 17 (A0 P̄ >= 0.5) — D-019's C1 ("an interim A9 result on the 17 … vs SCIP alone and cuOpt alone, reported in
+    D-013 terms"); the fixed-11 line beside it is D-022's reading of 10-13."""
+    cols = ["instance", "seed", "arm", "pt"]
+    lg = pd.concat([long[cols], a0[cols]], ignore_index=True)
+    lg = lg[lg["pt"].notna() & lg["instance"].isin(list(instances))]
+    m = lg[lg["arm"] == D22.A0].groupby("instance")["pt"].mean()
+    weak = sorted(i for i in instances if i in m.index and m[i] >= D22.WEAK_P)
+    return dict(weak_set=weak, n_baseline=int(len(m)), block=D22._weak_block(lg, D22.TREAT, D22.A0, weak))
+
+
+def _gens(rows, root: Path) -> dict:
+    """{(instance, seed): the EA's generations} of A9 rows (their ea.summary.json; None when unread)."""
+    out = {}
+    for r in rows:
+        g = C.run_files(r, root)[1].get("generations") if str(r.get("run_dir") or "") not in ("", "nan", "None") \
+            else None
+        out[(r["instance"], int(r["seed"]))] = g
+    return out
+
+
+def null_lines(runs: pd.DataFrame, p_old: dict, bands: dict, instances, a6_old: dict, a6_new: dict) -> dict:
+    """Beside the harm leg, never a criterion: the harm rule (the same d_i and band_i) on pairs with no change between
+    them — cuOpt alone, A6F@c1r against A6F@r13x (the identical job, 10-13 and this window), and each same-configuration
+    A9 replicate of 10-15 (`NULL_A9`, A9@r13x's run hash) against A9@r13x. Rows whose run hash is not A9@r13x's are
+    left out (stated)."""
+    same, skipped = [], []
+    for set_, lab in NULL_A9:
+        df = C.select(runs, set_, (lab,), SEEDS, BUDGET, keep_failed=True)[0]
+        ok = df["run_id"].astype(str).map(lambda x: C.bare_id(x).rsplit("__", 1)[-1] == OLD_A9_HASH) \
+            if len(df) else pd.Series(dtype=bool)
+        skipped += sorted(str(x) for x in df[~ok]["run_id"]) if len(df) else []
+        df = df[ok] if len(df) else df
+        p = {(i, s): v for (i, a, s), v in _p_by(df.to_dict("records")).items()}
+        if p:
+            same.append(dict(set=set_, label=lab, **null_read(p_old, p, bands, instances)))
+    n = sum(x["n"] for x in same)
+    k = sum(len(x["fired"]) for x in same)
+    return dict(cuopt=null_read(a6_old, a6_new, bands, instances), same_config=same, n=n, k=k, skipped=skipped)
+
+
+def rules(rows, runs: pd.DataFrame, instances, root: Path = ROOT, gens_new: dict | None = None) -> dict:
+    """C1's hint and guard (D-022's functions on the relabelled rows), the D-013 blocks vs A6F and vs A0 (and vs A0 on
+    SCIP's weak set among the 17, beside), the harm leg against A9@r13x of 10-13 with its band from A9@r13x and
+    A6F@r13x, the null lines and the cannot-fire instances' seeds and generations beside, and the 10-13 reading."""
     a0, _ = D22.select(runs, D22.A0_SETS, (D22.A0,), instances=list(C1_INSTANCES))
-    c1 = D22.c1_interim(_relabel(rows), a0, list(C1_INSTANCES), list(instances))
+    a0_17, _ = D22.select(runs, D22.A0_SETS, (D22.A0,), instances=list(instances))
+    long = _relabel(rows)
+    c1 = D22.c1_interim(long, a0, list(C1_INSTANCES), list(instances))
     old = C.select(runs, OLD_SET, (OLD_A9, OLD_A6F), SEEDS, BUDGET, keep_failed=True)[0]
     old = old[old["instance"].isin(list(instances))]
-    then = D22.c1_interim(old[["instance", "seed", "arm", "pt"]].copy(), a0, list(C1_INSTANCES), list(instances))
-    p_new = {(i, s): v for (i, a, s), v in _p_by(rows).items() if a == A9}
-    p_old = {(i, s): v for (i, a, s), v in _p_by(old.to_dict("records")).items() if a == OLD_A9}
-    harm = harm_leg(p_new, p_old, instances)
+    old_long = old[["instance", "seed", "arm", "pt"]].copy()
+    then = D22.c1_interim(old_long, a0, list(C1_INSTANCES), list(instances))
+    pn_all, po_all = _p_by(rows), _p_by(old.to_dict("records"))
+    p_new = {(i, s): v for (i, a, s), v in pn_all.items() if a == A9}
+    a6_new = {(i, s): v for (i, a, s), v in pn_all.items() if a == A6F}
+    p_old = {(i, s): v for (i, a, s), v in po_all.items() if a == OLD_A9}
+    a6_old = {(i, s): v for (i, a, s), v in po_all.items() if a == OLD_A6F}
+    harm = harm_leg(p_new, p_old, instances, a6_old, a6_new)
+    gens_old = _gens([r for r in old.to_dict("records") if r["arm"] == OLD_A9], root)
+    gens_new = gens_new or {}
+    harm["cannot_fire_rows"] = [dict(instance=i, p_old_seeds=_seeds(p_old, i), p_new_seeds=_seeds(p_new, i),
+                                     gens_old=_seeds(gens_old, i), gens_new=_seeds(gens_new, i),
+                                     threshold=harm["bands"][i]["threshold"], band=harm["bands"][i]["band"])
+                                for i in harm["cannot_fire"]]
+    nulls = null_lines(runs, p_old, harm["bands"], instances, a6_old, a6_new)
     return dict(hint=_ours(c1["hint"]), guard=_ours(c1["guard"]), vs_a6f=c1[D22.A6F][D22.TREAT]["all"],
-                vs_a0=c1[D22.A0], harm=harm, table=per_instance(_p_by(rows), A9, A6F, instances),
+                vs_a0=c1[D22.A0], vs_a0_17=vs_a0_17(long, a0_17, instances), harm=harm, nulls=nulls,
+                table=per_instance(pn_all, A9, A6F, instances),
                 then=dict(hint=then["hint"], guard=then["guard"], n_runs=int(len(old)), recorded=RECORDED_1013,
-                          table=per_instance(_p_by(old.to_dict("records")), OLD_A9, OLD_A6F, instances)))
+                          vs_a0_17=vs_a0_17(old_long, a0_17, instances),
+                          table=per_instance(po_all, OLD_A9, OLD_A6F, instances)))
 
 
 # ----------------------------------------------------------------------------------------------- one reading
@@ -238,8 +401,12 @@ def reading(runs: pd.DataFrame, root: Path, a9: str, set_: str, keep_failed: boo
             legs["complete"].append(f"no P(120): {name}")
         if r.get("status") == "failed":
             kept.append(name)
+        note = None
+        if k[1] == A9:
+            fp, note = flag_problems(a9, r, summ)
+            legs["flag"] += [f"{name}: {x}" for x in fp]
         cells[k] = dict(row=r, summ=summ, flag=flag_state(a9, r, summ) if k[1] == A9 else None,
-                        decoder=decoder_state(summ) if k[1] == A9 else None)
+                        flag_note=note, decoder=decoder_state(summ) if k[1] == A9 else None)
     for i in instances:
         for s in SEEDS:
             have = [cells[(i, lab, s)] for lab in LABELS if (i, lab, s) in cells]
@@ -257,10 +424,36 @@ def reading(runs: pd.DataFrame, root: Path, a9: str, set_: str, keep_failed: boo
     out = dict(keep_failed=keep_failed, a9=a9, set=set_, n_expected=len(exp), n_present=len(cells), validity=val,
                duplicates=dropped, outside=outside, cells=cells, rules=None, summary=None)
     if verdict != "INVALID":
-        out["rules"] = rules([c["row"] for c in cells.values()], runs, instances)
+        gens = {(k[0], k[2]): c["summ"].get("generations") for k, c in cells.items() if k[1] == A9}
+        out["rules"] = rules([c["row"] for c in cells.values()], runs, instances, root, gens)
         out["summary"] = summary(out["rules"], verdict)
     else:
         out["summary"] = dict(validity="INVALID", hint="not read", guard="not read", harm="not read", berk=BERK)
+    return out
+
+
+def harm_notes(ru: dict) -> dict:
+    """{instance: [notes]} beside each harm the rule found (never a change to the list): |ΔP| within D-022's floor
+    0.005, the null reads on the instance (same-configuration A9 replicates, cuOpt alone across the two days) and
+    whether one of them reached a d_i as low."""
+    out = {}
+    rows = {r["instance"]: r for r in ru["harm"]["rows"]}
+    nl = ru["nulls"]
+    for i in ru["harm"]["harm"]:
+        r, notes = rows[i], []
+        if r["floor_dp"]:
+            notes.append(f"|ΔP| {abs(r['dp']):.4f} <= {FLOOR_DP:g} (D-022's floor)")
+        reads = [(x["label"], y["d"]) for x in nl["same_config"] for y in x["rows"] if y["instance"] == i]
+        cu = [y["d"] for y in nl["cuopt"]["rows"] if y["instance"] == i]
+        if reads:
+            low = min(d for _, d in reads)
+            notes.append("same-configuration replicates here: " + ", ".join(f"{lab} d {d:+.3f}" for lab, d in reads)
+                         + (" (one as low: within the null range)" if low <= r["d"] else " (none as low)"))
+        else:
+            notes.append("no same-configuration replicate on this instance")
+        if cu:
+            notes.append(f"cuOpt alone 10-13 -> this window d {cu[0]:+.3f}")
+        out[i] = notes
     return out
 
 
@@ -268,7 +461,30 @@ def summary(ru: dict, verdict: str) -> dict:
     h, g, hm = ru["hint"], ru["guard"], ru["harm"]
     return dict(validity=verdict, hint=h["state"], hint_ratio=h.get("ratio"), guard=g["state"],
                 guard_mean_d=g.get("mean_d"), harm=hm["state"], harm_list=list(hm["harm"]),
-                harm_unread=list(hm["unread"]), berk=BERK)
+                harm_notes=harm_notes(ru), harm_unread=list(hm["unread"]), harm_cannot_fire=list(hm["cannot_fire"]),
+                null_rate=(ru["nulls"]["k"], ru["nulls"]["n"]), berk=BERK)
+
+
+def frozen_v2_state(a9: str, root: Path = ROOT) -> dict:
+    """Beside: does configs/frozen-v2.yaml exist, and does it hash (EA hash and A9 run hash under ext; `name` is not
+    hashed) to the candidate this set ran? The re-read describes frozen-v2 only if it does (D-030's amendment);
+    `tests/test_cuda_sched.py` pins the same pair."""
+    p = Path(root) / "configs" / "frozen-v2.yaml"
+    if not p.exists():
+        return dict(state="absent", text="configs/frozen-v2.yaml not written yet")
+    try:
+        from itrea.config import EAConfig
+        want = (EAConfig.from_yaml(Path(root) / mj.C1R_A9[a9][0]).hash(), mj.C1R_A9[a9][1])
+        j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A9", seed=0, budget=BUDGET,
+                 config=str(p), harness="ext")
+        got = (EAConfig.from_yaml(p).hash(), pair.run_hash(j))
+    except Exception as e:                                            # beside only: never stops the report
+        return dict(state="unreadable", text=f"configs/frozen-v2.yaml unreadable: {e}")
+    same = got == want
+    return dict(state="same" if same else "DIFFERS", got=got, want=want,
+                text=(f"configs/frozen-v2.yaml = this set's candidate (EA {got[0]}, A9 run {got[1]})" if same else
+                      f"configs/frozen-v2.yaml DIFFERS from this set's candidate (EA {got[0]} / run {got[1]} vs "
+                      f"{want[0]} / {want[1]}): the re-read does not describe frozen-v2 — tell Berk"))
 
 
 def report(runs: pd.DataFrame, root: Path = ROOT, a9: str = "ld0", set_: str | None = None,
@@ -280,8 +496,15 @@ def report(runs: pd.DataFrame, root: Path = ROOT, a9: str = "ld0", set_: str | N
     fails = sorted(str(r) for r in cand[cand["status"] == "failed"]["run_id"])
     modes = {"exclude": [False], "keep": [True], "both": [True, False] if fails else [True]}[failed]
     ext = C.ext_harness()
+    voids = D22.void_log(runs, [set_], Path(root))
+    reasons: dict[str, int] = {}
+    for v in voids:
+        key = str(v.get("reason") or "unreadable").split(" (")[0]
+        reasons[key] = reasons.get(key, 0) + 1
     return dict(set=set_, a9=a9, config=mj.C1R_A9[a9][0], run_hash=mj.C1R_A9[a9][1], failed_runs=fails,
                 other_rows=C.others(runs, set_, LABELS, SEEDS, BUDGET),
+                voids=dict(n=len(voids), reasons=reasons, runs=[str(v.get("run_id")) for v in voids]),
+                frozen_v2=frozen_v2_state(a9, root),
                 readings=[reading(runs, root, a9, set_, k, ext) for k in modes])
 
 
@@ -300,14 +523,30 @@ def _guard_line(g: dict, label: str) -> str:
             f"(holds iff >= {g['threshold']:g}; seed means, both-P = 1 at d = 0)")
 
 
+def _fp(x, nd=3) -> str:
+    """A P / band / threshold for the table ("inf" for an infinite threshold, "–" for none)."""
+    if x is None:
+        return "–"
+    if not math.isfinite(float(x)):
+        return "inf"
+    return f"{float(x):.{nd}f}"
+
+
 def render(rep: dict) -> str:
     L = [f"C1 re-read (D-030), set {rep['set']}: {A9} on {rep['config']} (run hash {rep['run_hash']}) vs {A6F} (A6F@r13x's "
          f"job, same window), 17 instances x seeds {list(SEEDS)}, {BUDGET:g} s, ext; rules fixed before any run "
-         f"(D-022's hint / guard, D-025 amendment 3's harm leg); development, descriptive (D-010)"]
+         f"(D-022's hint / guard, D-025 amendment 3's harm leg, band as D-030's amendment of 2026-10-15); development, "
+         f"descriptive (D-010)"]
     if rep["failed_runs"]:
         L.append(f"failed runs: {', '.join(rep['failed_runs'])}")
     if rep["other_rows"]:
         L.append(f"rows of the set no rule reads: {', '.join(rep['other_rows'])}")
+    vo = rep.get("voids") or dict(n=0, reasons={})
+    L.append(f"beside (not gating): voids in {rep['set']}/void.jsonl: {vo['n']}"
+             + (f" ({', '.join(f'{k} {v}' for k, v in sorted(vo['reasons'].items()))}; each voided block was rerun "
+                f"whole, its rerun is what is read)" if vo["n"] else ""))
+    if rep.get("frozen_v2"):
+        L.append(f"beside (not gating): {rep['frozen_v2']['text']}")
     for rd in rep["readings"]:
         L.append("")
         L.append(f"== reading: failed runs {'kept (D-002 §6; the reading that leads)' if rd['keep_failed'] else 'excluded (the letter)'} ==")
@@ -327,11 +566,11 @@ def render(rep: dict) -> str:
             L.append(f"  not one of the 68 (ignored): {x}")
         a9_cells = {k: c for k, c in rd["cells"].items() if k[1] == A9}
         if a9_cells:
-            off = [f"{k[0]} s{k[2]} {c['flag']['text']}" for k, c in sorted(a9_cells.items()) if c["flag"]["ok"] is False]
-            L.append(f"beside (not gating): {A9}'s CUDA flag as written ({FLAG[rd['a9']]}) on "
+            notes = [f"{k[0]} s{k[2]}: {c['flag_note']}" for k, c in sorted(a9_cells.items()) if c.get("flag_note")]
+            L.append(f"{A9}'s CUDA flag as written ({FLAG[rd['a9']]}, gating) on "
                      f"{sum(1 for c in a9_cells.values() if c['flag']['ok'])} of {len(a9_cells)} runs"
-                     + (f"; NOT AS WRITTEN: {off}" if off else "") + "; LP decode gate open on "
-                     f"{sum(1 for c in a9_cells.values() if c['decoder']['gate'] == 'open')} of {len(a9_cells)}")
+                     + (f"; noted, not charged: {notes}" if notes else "") + "; beside (not gating): LP decode gate "
+                     f"open on {sum(1 for c in a9_cells.values() if c['decoder']['gate'] == 'open')} of {len(a9_cells)}")
         if rd["rules"] is None:
             L.append("RULES NOT READ: validity fails -> INVALID")
             L.append(f"SUMMARY: INVALID — {BERK}")
@@ -339,18 +578,28 @@ def render(rep: dict) -> str:
         ru = rd["rules"]
         g_rows, t_rows = ru["table"], ru["then"]["table"]
         L.append("per instance (seed means; d vs A6F: + = A9 better; harm: d_i = bounded d of the new A9 vs A9@r13x "
-                 "of 10-13, cross-day, harm iff d_i < -band_i):")
+                 "of 10-13, cross-day; band_i from A9@r13x and A6F@r13x, fixed before the runs; harm iff d_i < -band_i, "
+                 "i.e. iff P̄ new > 'fires >'; beside: band_i of D-030's first reading (A9@r13x / new A9) and with "
+                 "A6F@c1r, raw ΔP):")
         L.append("  " + "instance".ljust(28) + "P A6F".ljust(8) + "P A9".ljust(8) + "d".ljust(8) + "| 10-13: P A6F".ljust(15)
-                 + "P A9".ljust(8) + "d".ljust(8) + "| harm d_i".ljust(11) + "band_i".ljust(8) + "harm")
+                 + "P A9".ljust(8) + "d".ljust(8) + "| harm d_i".ljust(11) + "band_i".ljust(8) + "fires >".ljust(9)
+                 + "harm".ljust(13) + "| first".ljust(8) + "A6Fc1r".ljust(8) + "ΔP")
         hm = {r["instance"]: r for r in ru["harm"]["rows"]}
         for i in development_instances():
             g, t, h = g_rows.get(i), t_rows.get(i), hm.get(i, {})
             fixed = "*" if i in C1_INSTANCES else " "
+            cant = bool(h.get("cannot_fire"))
+            thr = "> 1" if cant else _fp(h.get("threshold"), 4)
+            if h.get("read"):
+                tag = "HARM" + (" (floor)" if h["floor_dp"] else "") if h["harm"] else ("cannot fire" if cant else "-")
+                hcell = (f"| {h['d']:+.3f}    {_fp(h['band']):<8}{thr:<9}{tag:<13}| {_fp(h['band_first']):<6}  "
+                         f"{_fp(h['band_a6_new']):<6}  {h['dp']:+.4f}")
+            else:
+                hcell = f"| unread    {_fp(h.get('band')):<8}{thr:<9}" + ("cannot fire" if cant else "")
             L.append(f"  {fixed}{i:<27}" + (f"{C.f(g['p_a6f']):<8}{C.f(g['p_a9']):<8}{g['d']:+.3f}  " if g else "–".ljust(24))
-                     + (f"| {C.f(t['p_a6f']):<13}{C.f(t['p_a9']):<8}{t['d']:+.3f}  " if t else "| –".ljust(31))
-                     + (f"| {h['d']:+.3f}    {h['band']:.3f}   {'HARM' if h['harm'] else '-'}" if h.get("read")
-                        else "| unread"))
-        L.append("  (* = the fixed 11 of the hint)")
+                     + (f"| {C.f(t['p_a6f']):<13}{C.f(t['p_a9']):<8}{t['d']:+.3f}  " if t else "| –".ljust(31)) + hcell)
+        L.append("  (* = the fixed 11 of the hint; 'fires >' = the smallest P̄ of the new A9 at which harm fires, from "
+                 "10-13's runs alone; '(floor)' = |ΔP| <= 0.005, D-022's floor — a marker, not a rule)")
         L.append(_hint_line(ru["hint"], "this set"))
         L.append(f"  beside, 10-13 (set {OLD_SET}, {ru['then']['n_runs']} runs): " + _hint_line(ru["then"]["hint"], "10-13")
                  + f"; recorded in D-022's Result: {RECORDED_1013['hint']:.3f}")
@@ -358,16 +607,37 @@ def render(rep: dict) -> str:
         L.append(f"  beside, 10-13: " + _guard_line(ru["then"]["guard"], "10-13")
                  + f"; recorded in D-022's Result: {RECORDED_1013['guard']:+.3f}")
         h = ru["harm"]
+        s = rd["summary"]
         if h["harm"]:
-            L.append("HARM (D-025 amendment 3, cross-day vs A9@r13x of 10-13) on " + ", ".join(
-                f"{r['instance']} (d_i {r['d']:+.3f} < -{r['band']:.3f}; P {C.f(r['p_old'])} -> {C.f(r['p_new'])}; seeds "
-                f"{' / '.join(C.f(x) for x in r['p_old_seeds'])} -> {' / '.join(C.f(x) for x in r['p_new_seeds'])})"
+            L.append("HARM (D-025 amendment 3, cross-day vs A9@r13x of 10-13) on " + "; ".join(
+                f"{r['instance']} (d_i {r['d']:+.3f} < -{r['band']:.3f}; P {C.f(r['p_old'])} -> {C.f(r['p_new'])}, ΔP "
+                f"{r['dp']:+.4f}; seeds {' / '.join(C.f(x) for x in r['p_old_seeds'])} -> "
+                f"{' / '.join(C.f(x) for x in r['p_new_seeds'])}; beside: {'; '.join(s['harm_notes'][r['instance']])})"
                 for r in h["rows"] if r.get("read") and r["harm"]) + " -> to Berk with these numbers")
         else:
             L.append("HARM (D-025 amendment 3, cross-day vs A9@r13x of 10-13): none"
                      + (f" on the {17 - len(h['unread'])} read" if h["unread"] else " on the 17"))
         if h["unread"]:
-            L.append(f"  harm leg INCOMPLETE: unread (a seed of either arm missing) {h['unread']}")
+            L.append(f"  harm leg INCOMPLETE: unread (a seed of either A9 arm missing) {h['unread']}")
+        if h["cannot_fire"]:
+            L.append(f"  harm CANNOT fire on {len(h['cannot_fire'])} of the 17 (threshold > 1 on 10-13's runs; P <= 1) — "
+                     "beside, not criteria, each seed's P and the EA's generations 10-13 -> new:")
+            for r in h["cannot_fire_rows"]:
+                L.append(f"    {r['instance']}: band_i {_fp(r['band'])}, fires > {_fp(r['threshold'], 3)}; P "
+                         f"{' / '.join(C.f(x) for x in r['p_old_seeds'])} -> {' / '.join(C.f(x) for x in r['p_new_seeds'])}"
+                         f"; generations {' / '.join(str(x) for x in r['gens_old'])} -> "
+                         f"{' / '.join(str(x) for x in r['gens_new'])}")
+        nl = ru["nulls"]
+        L.append(f"null lines beside the harm leg (the same d_i and band_i on pairs with no change; not criteria): "
+                 f"same-configuration A9 replicates of 10-15 vs A9@r13x fire on {nl['k']} of {nl['n']} instance reads")
+        for x in nl["same_config"]:
+            L.append(f"  {x['label']} ({x['set']}): " + ", ".join(
+                f"{y['instance']} {y['d']:+.3f}{' FIRES' if y['fires'] else ''}" for y in x["rows"]))
+        cu = nl["cuopt"]
+        L.append(f"  cuOpt alone, {A6F} vs {OLD_A6F} (the identical job, 10-13 -> this window): fires on "
+                 f"{len(cu['fired'])} of {cu['n']}" + (f" {cu['fired']}" if cu["fired"] else ""))
+        if nl["skipped"]:
+            L.append(f"  left out (run hash not A9@r13x's {OLD_A9_HASH}): {nl['skipped']}")
         L.append("reported, not criteria (D-013 terms) — vs cuOpt alone (A6F@c1r, same window, equal footprint): "
                  + D22._d013_line(ru["vs_a6f"], "the fixed 11", "instances"))
         c = ru["vs_a0"]
@@ -376,11 +646,17 @@ def render(rep: dict) -> str:
         L.append(f"  SCIP's weak set among them (A0 P >= {D22.WEAK_P}) {c['weak_set']} ({len(c['weak_set'])} of "
                  f"{c['n_baseline']} with A0 runs)" + (": " + D22._d013_line(c[D22.TREAT]["weak"], "weak set", "weak")
                                                        if c["weak_set"] else ""))
-        s = rd["summary"]
+        for lab, w in (("this set", ru["vs_a0_17"]), ("10-13, beside", ru["then"]["vs_a0_17"])):
+            L.append(f"  SCIP's weak set among all 17 (D-019's C1; A0 P >= {D22.WEAK_P}: {len(w['weak_set'])} of "
+                     f"{w['n_baseline']} with A0 runs), {lab}: "
+                     + D22._d013_line(w["block"], "weak set", "weak"))
         L.append(f"SUMMARY ({'keep' if rd['keep_failed'] else 'exclude'}): validity {s['validity']}; HINT {s['hint']}"
                  f" ({C.f(s['hint_ratio'])}); GUARD {s['guard']} ({C.f(s['guard_mean_d'])}); HARM "
-                 + (", ".join(s["harm_list"]) if s["harm_list"] else s["harm"])
-                 + (f" (unread {s['harm_unread']})" if s["harm_unread"] else ""))
+                 + ("; ".join(f"{i} [{'; '.join(s['harm_notes'][i])}]" for i in s["harm_list"]) if s["harm_list"]
+                    else s["harm"])
+                 + (f" (unread {s['harm_unread']})" if s["harm_unread"] else "")
+                 + f"; harm cannot fire on {s['harm_cannot_fire']}; null: same-configuration replicates fire on "
+                   f"{s['null_rate'][0]} of {s['null_rate'][1]} instance reads")
         L.append(f"  {BERK}")
     return "\n".join(L)
 

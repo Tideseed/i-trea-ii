@@ -99,7 +99,7 @@ description: >
   as amended 2026-10-14 — only what a rule reads: A6@r3 / A2@r3 on comp21, toguru, doon, chromaticindex + A6F@r3 on toguru,
   doon, chromaticindex (rule 4, 18:3x), ext,
   120 s, seeds 0–1; A6F@r3 is A6F@r13x's job under its own variant, so its run ids are new); its record is D-027; read with `itrea d027-report`.
-- The C1 re-read on the frozen-v2 candidate (D-030): `itrea make-jobs c1r-rerun --a9 ld0|ysync-ld0` → `jobs/c1r-<a9>.jsonl` (set `c1r-<a9>`, 68 runs: D-022's C1 runs again — the 17 × {A9@c1r, A6F@c1r} × seeds 0–1, ext, 120 s; A6F@c1r is A6F@r13x's job under a new label; the arms alternate by seed, A6F first at even seeds; pinned run hashes); only one of the two files runs; read with `itrea c1r-report --a9 …`.
+- The C1 re-read on the frozen-v2 candidate (D-030): `itrea make-jobs c1r-rerun --a9 ld0|ysync-ld0` → `jobs/c1r-<a9>.jsonl` (set `c1r-<a9>`, 68 runs: D-022's C1 runs again — the 17 × {A9@c1r, A6F@c1r} × seeds 0–1, ext, 120 s; A6F@c1r is A6F@r13x's job under a new label; the arms alternate by seed, A6F first at even seeds; pinned run hashes); only one of the two files runs; read with `itrea c1r-report --a9 …`. A rerun set needs its own name: `--set c1r-<a9>-2` writes `jobs/c1r-<a9>-2.jsonl` by default (never the committed file).
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
   before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
   seeds 0–1 — plus `jobs/itx-r13b.jsonl`, the guard's 16 on the 4 remaining instances, same set `itx-r13`; follow-up

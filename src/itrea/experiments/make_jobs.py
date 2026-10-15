@@ -1082,9 +1082,10 @@ def r3_diag(seeds=R3_SEEDS, budget: float = R3_BUDGET, set_: str = R3_SET, table
     return _sorted(out)
 
 
-def c1r_out(a9: str) -> str:
-    """D-030's job file: jobs/c1r-<a9>.jsonl."""
-    return f"jobs/{C1R_SET_PREFIX}{a9}.jsonl"
+def c1r_out(a9: str, set_: str | None = None) -> str:
+    """D-030's job file: jobs/<set>.jsonl, the set defaulting to c1r-<a9> — so `--set S` without `--out` writes
+    jobs/S.jsonl and never overwrites the committed jobs/c1r-<a9>.jsonl (whose sha256 D-030 records)."""
+    return f"jobs/{set_ or C1R_SET_PREFIX + a9}.jsonl"
 
 
 def c1_rerun(a9: str = "ld0", seeds=C1R_SEEDS, budget: float = C1R_BUDGET, set_: str | None = None,
@@ -1269,7 +1270,8 @@ def main(argv=None) -> int:
                      help="the candidate: ld0 (D-026's adopted default) or ysync-ld0 (ld0 + D-029's ysync; only if "
                           "D-029 adopts it and Berk approves the combination)")
     c1r.add_argument("--set", dest="set_", default=None, help="default c1r-<a9>")
-    c1r.add_argument("--out", type=Path, default=None, help="default jobs/c1r-<a9>.jsonl")
+    c1r.add_argument("--out", type=Path, default=None, help="default jobs/<set>.jsonl (jobs/c1r-<a9>.jsonl without "
+                                                            "--set)")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "screen1":
@@ -1332,7 +1334,7 @@ def main(argv=None) -> int:
             jobs = r3_diag()
         elif a.cmd == "c1r-rerun":
             jobs = c1_rerun(a.a9, set_=a.set_)
-            a.out = a.out or paths.ROOT / c1r_out(a.a9)
+            a.out = a.out or paths.ROOT / c1r_out(a.a9, a.set_)
         else:
             jobs = smoke(a.instance, tuple(a.arms.split(",")), budget=a.budget, config=a.config)
     except (JobError, OSError, KeyError, ValueError) as e:

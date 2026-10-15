@@ -806,3 +806,15 @@ def test_c1_rerun_cli_default_path_and_set(tmp_path):
     assert all(j["block"].endswith("__c1r-ysync-ld0-2") for j in jobs)
     with pytest.raises(SystemExit):                                   # argparse refuses another candidate
         mj.main(["c1r-rerun", "--a9", "bsync", "--out", str(out)])
+
+
+def test_c1_rerun_set_without_out_never_overwrites_the_committed_file(monkeypatch):
+    """`make-jobs c1r-rerun --a9 ld0 --set c1r-ld0-2` without --out writes jobs/c1r-ld0-2.jsonl: the default path
+    follows the set, so the committed jobs/c1r-ld0.jsonl (sha256 in D-030) is never overwritten by another set."""
+    assert mj.c1r_out("ld0", "c1r-ld0-2") == "jobs/c1r-ld0-2.jsonl" and mj.c1r_out("ld0", None) == "jobs/c1r-ld0.jsonl"
+    written = []
+    monkeypatch.setattr(mj, "write_jobs", lambda jobs, out: written.append((out, {j["set"] for j in jobs}, len(jobs))))
+    assert mj.main(["c1r-rerun", "--a9", "ld0", "--set", "c1r-ld0-2"]) == 0
+    assert mj.main(["c1r-rerun", "--a9", "ysync-ld0"]) == 0
+    assert written == [(paths.ROOT / "jobs" / "c1r-ld0-2.jsonl", {"c1r-ld0-2"}, 68),
+                       (paths.ROOT / "jobs" / "c1r-ysync-ld0.jsonl", {"c1r-ysync-ld0"}, 68)]

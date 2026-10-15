@@ -113,6 +113,30 @@ def test_every_configuration_hash_is_pinned():
     assert {p.name: EAConfig.from_yaml(p).hash() for p in sorted(CONFIGS.glob("*.yaml"))} == ALL_CONFIG_HASHES
 
 
+C1R_CANDIDATES = {"ld0": ("a05af2c732dc", "341267810eed"), "ysync-ld0": ("835c7c5a249c", "f345de0ab936")}
+
+
+def test_frozen_v2_is_a_configuration_c1_was_re_read_on():
+    """D-030 (amendment 2026-10-15, before any run): the C1 re-read describes frozen-v2 only if configs/frozen-v2.yaml's
+    EA hash AND A9 run hash under ext equal those of a re-read candidate (ld0: a05af2c732dc / 341267810eed; ysync-ld0:
+    835c7c5a249c / f345de0ab936; `Cfg.hash()` drops `name`, so a copy matches). Skipped while the file does not exist
+    (it is written for C1). A failure means the go / no-go would not describe what is frozen: tell Berk and record it in
+    D-030 before touching this test. Which candidate ran is the journal's and D-030's Result's; this pins the pair."""
+    from itrea.experiments import make_jobs as mj
+    from itrea.experiments import pair
+    assert {a: (EAConfig.from_yaml(CONFIGS / Path(f).name).hash(), h) for a, (f, h) in mj.C1R_A9.items()} \
+        == C1R_CANDIDATES
+    p = CONFIGS / "frozen-v2.yaml"
+    if not p.exists():
+        pytest.skip("configs/frozen-v2.yaml not written yet (C1)")
+    j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A9", seed=0, budget=120,
+             config="configs/frozen-v2.yaml", harness="ext")
+    got = (EAConfig.from_yaml(p).hash(), pair.run_hash(j))
+    assert got in C1R_CANDIDATES.values(), (
+        f"configs/frozen-v2.yaml hashes to EA {got[0]} / A9 run {got[1]}: not a configuration C1 was re-read on "
+        f"{C1R_CANDIDATES} — tell Berk and record it in D-030")
+
+
 def test_ysync_ld0_is_ld0_plus_yield_only():
     """D-030's second frozen-v2 candidate: configs/itrea2-dev-rc-3way-ysync-ld0.yaml = D-026's adopted ld0 + D-029's
     `host.cuda_sched: yield` and nothing else — in the YAML files (only `name` and `host` differ, `host` holding only
