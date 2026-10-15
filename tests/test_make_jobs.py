@@ -683,3 +683,123 @@ def test_r3_diag_layout_and_memory_under_ext(tmp_path):
     lines = p.memory_arm_lines()
     assert len(lines) == 3 and all(" on g0 (harness \"ext\"): " in x for x in lines)
     assert any(x.startswith("memory per run: A2@r3 ") and x.endswith("= 78.0 GB") for x in lines)
+
+
+# ================================================================== D-030: the C1 re-read on the frozen-v2 candidate
+_C1R_FILES = tuple(mj.c1r_out(a).rsplit("/", 1)[1] for a in mj.C1R_A9)
+
+
+def _r13x_c1_jobs() -> dict:
+    """D-022's C1 runs as they ran on 2026-10-13: the A9@r13x / A6F@r13x lines of the committed jobs/itx-r13.jsonl (the
+    first amendment's 58) and jobs/itx-r13b.jsonl (the guard's 16), keyed (name, arm, seed). Not `mj.itx_r13()`, which
+    still writes 102 (the _R13_STALE xfail)."""
+    from itrea.experiments import pair
+    return {(j["name"], j["arm"], j["seed"]): j for f in ("itx-r13.jsonl", "itx-r13b.jsonl")
+            for j in map(json.loads, (paths.ROOT / "jobs" / f).read_text().splitlines())
+            if pair.arm_label(j) in ("A9@r13x", "A6F@r13x")}
+
+
+@pytest.mark.parametrize("a9", sorted(mj.C1R_A9))
+def test_c1_rerun_jobs(a9):
+    """D-030: the 17 development + class-probe instances x {A9@c1r, A6F@c1r} x seeds 0-1, 120 s, ext, split dev, set
+    c1r-<a9>, one block per instance x seed (68 runs, 34 blocks); A9 on the candidate's file, A6F with no config; both
+    arms of every block carry explicit positions, A6F first at even seeds and A9 first at odd ones; pinned run
+    hashes."""
+    from itrea.experiments import pair
+    jobs = mj.c1_rerun(a9)
+    assert len(jobs) == 68 and len(make_blocks(jobs)) == 34
+    assert Counter(j["name"] for j in jobs) == {n: 4 for n in mj.development_names()}
+    assert len(mj.development_names()) == 17
+    assert Counter(pair.arm_label(j) for j in jobs) == {"A9@c1r": 34, "A6F@c1r": 34}
+    assert {j["set"] for j in jobs} == {j["stratum"] for j in jobs} == {f"c1r-{a9}"}
+    assert {j["seed"] for j in jobs} == {0, 1} and {j["budget"] for j in jobs} == {120.0}
+    assert {j["harness"] for j in jobs} == {"ext"} and {j["split"] for j in jobs} == {"dev"}
+    assert all(j["block"] == f"{j['name']}__s{j['seed']}__c1r-{a9}" for j in jobs)
+    assert {j["config"] for j in jobs if j["arm"] == "A9"} == {f"configs/itrea2-dev-rc-3way-{a9}.yaml"}
+    assert {j["config"] for j in jobs if j["arm"] == "A6F"} == {None}
+    assert all(j["overrides"] == {} for j in jobs)
+    for b in make_blocks(jobs):
+        order = [r.label for r in sorted(b.runs, key=lambda r: r.job["position"])]
+        assert sorted(r.job["position"] for r in b.runs) == [0, 1], b.id
+        assert order == (["A6F@c1r", "A9@c1r"] if b.seed % 2 == 0 else ["A9@c1r", "A6F@c1r"]), (b.id, order)
+    want = {"A9": mj.C1R_A9[a9][1], "A6F": mj.C1R_A6F_HASH}
+    assert {(j["arm"], pair.run_hash(j)) for j in jobs} == set(want.items())
+    assert len({pair.run_id_for(j) for j in jobs}) == 68
+    for j in jobs:
+        pair.job_budget(j)                                         # the runner plans both arms
+
+
+@pytest.mark.parametrize("a9", sorted(mj.C1R_A9))
+def test_c1_rerun_is_d022s_c1_set(a9):
+    """"Exactly as itx-r13 + itx-r13b's C1 rows": the same (instance, arm, seed) keys as the committed files' A9@r13x /
+    A6F@r13x lines (68), each job equal to its 10-13 counterpart on every field but set / stratum / block / variant /
+    position — and, for A9, config (the candidate's file instead of -3way.yaml). A6F@c1r is A6F@r13x's job under
+    another label: the same run hash 82a371305f88, another run id."""
+    from itrea.experiments import pair
+    old = _r13x_c1_jobs()
+    jobs = mj.c1_rerun(a9)
+    assert len(old) == 68 and {(j["name"], j["arm"], j["seed"]) for j in jobs} == set(old)
+    differ = {"set", "stratum", "block", "variant", "position"}
+    for j in jobs:
+        o = old[(j["name"], j["arm"], j["seed"])]
+        d = differ | ({"config"} if j["arm"] == "A9" else set())
+        assert {k: v for k, v in j.items() if k not in d} == {k: v for k, v in o.items() if k not in d}, j
+        assert set(j) - {"position"} == set(o), j                 # no field added or dropped but the position
+        assert pair.run_id_for(j) != pair.run_id_for(o)
+        if j["arm"] == "A6F":
+            assert pair.run_hash(j) == pair.run_hash(o) == "82a371305f88"
+        else:
+            assert o["config"] == "configs/itrea2-dev-rc-3way.yaml" and pair.run_hash(o) == "28e5a5e9c725"
+
+
+@pytest.mark.parametrize("a9", sorted(mj.C1R_A9))
+def test_c1_rerun_files_are_the_writers_output(tmp_path, a9):
+    """jobs/c1r-<a9>.jsonl are exactly what `make-jobs c1r-rerun --a9 <a9>` writes (the instance tables only)."""
+    out = tmp_path / f"{a9}.jsonl"
+    assert mj.main(["c1r-rerun", "--a9", a9, "--out", str(out)]) == 0
+    assert out.read_bytes() == (paths.ROOT / mj.c1r_out(a9)).read_bytes()
+
+
+def test_c1_rerun_run_ids_are_new():
+    """No run id of either c1r file is the id of a job in any other committed job file, nor of a run in the run table
+    (when this checkout has one); the two candidates' A9 ids are disjoint, their A6F ids the same on purpose (the same
+    job: only one of the two files runs, D-030)."""
+    from itrea.experiments import pair
+    ids = {a: {pair.run_id_for(j) for j in mj.c1_rerun(a)} for a in mj.C1R_A9}
+    a9 = {a: {i for i in v if "__A9@c1r__" in i} for a, v in ids.items()}
+    a6f = {a: {i for i in v if "__A6F@c1r__" in i} for a, v in ids.items()}
+    assert all(len(a9[a]) == len(a6f[a]) == 34 for a in ids)
+    assert not a9["ld0"] & a9["ysync-ld0"] and a6f["ld0"] == a6f["ysync-ld0"]
+    every = set().union(*ids.values())
+    assert not every & _committed_ids(skip=_C1R_FILES)
+    runs = paths.DATASETS / "runs.parquet"
+    if runs.exists():
+        import pandas as pd
+        assert not every & {str(x).split("#")[0] for x in pd.read_parquet(runs, columns=["run_id"])["run_id"]}
+
+
+def test_c1_rerun_refuses_unknown_candidates_and_moved_hashes(monkeypatch):
+    with pytest.raises(mj.JobError, match="--a9"):
+        mj.c1_rerun("ysync")
+    with pytest.raises(mj.JobError, match="--a9"):
+        mj.c1_rerun("bsync-ld0")
+    monkeypatch.setitem(mj.C1R_A9, "ld0", (mj.C1R_A9["ld0"][0], "000000000000"))
+    with pytest.raises(mj.JobError, match="pinned"):
+        mj.c1_rerun("ld0")
+    monkeypatch.setitem(mj.C1R_A9, "ld0", ("configs/itrea2-dev-rc-3way.yaml", "341267810eed"))
+    with pytest.raises(mj.JobError, match="pinned"):                  # the old default under the new pin
+        mj.c1_rerun("ld0")
+    monkeypatch.setattr(mj, "C1R_A6F_HASH", "000000000000")
+    with pytest.raises(mj.JobError, match="pinned"):
+        mj.c1_rerun("ysync-ld0")
+
+
+def test_c1_rerun_cli_default_path_and_set(tmp_path):
+    assert mj.c1r_out("ld0") == "jobs/c1r-ld0.jsonl" and mj.c1r_out("ysync-ld0") == "jobs/c1r-ysync-ld0.jsonl"
+    out = tmp_path / "c.jsonl"
+    assert mj.main(["c1r-rerun", "--a9", "ysync-ld0", "--set", "c1r-ysync-ld0-2", "--out", str(out)]) == 0
+    jobs = [json.loads(x) for x in out.read_text().splitlines()]
+    assert len(jobs) == 68 and {j["set"] for j in jobs} == {"c1r-ysync-ld0-2"}
+    assert all(j["block"].endswith("__c1r-ysync-ld0-2") for j in jobs)
+    with pytest.raises(SystemExit):                                   # argparse refuses another candidate
+        mj.main(["c1r-rerun", "--a9", "bsync", "--out", str(out)])

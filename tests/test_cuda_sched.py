@@ -88,6 +88,56 @@ def test_recorded_hashes_stand():
     assert EAConfig.from_yaml(CONFIGS / "itrea2-default.yaml").hash() == "9ac4a93bf93b"
 
 
+# Every configuration file's EA hash as of 2026-10-15 (D-030's build, commit after 75bbe12): a change to any file, or a
+# new file not entered here, fails — "existing hashes unchanged" tested literally.
+ALL_CONFIG_HASHES = {
+    "itrea1-faithful.yaml": "b517bfc675d4", "itrea2-adaptive-lps-rc.yaml": "26481ba0c675",
+    "itrea2-adaptive-lps.yaml": "a2ad94e9188d", "itrea2-adaptive.yaml": "584ddee83747",
+    "itrea2-default.yaml": "9ac4a93bf93b", "itrea2-dev-rc-3way-bnice.yaml": "96a299330981",
+    "itrea2-dev-rc-3way-bo0.yaml": "b7ab026b8a5d", "itrea2-dev-rc-3way-bo1.yaml": "c5b5e01856eb",
+    "itrea2-dev-rc-3way-bo1s.yaml": "198e0d2ca540", "itrea2-dev-rc-3way-boY-bnice.yaml": "5b1c4779c74b",
+    "itrea2-dev-rc-3way-boY-bsync-ld.yaml": "c296898cddc4", "itrea2-dev-rc-3way-boY-bsync-ld0.yaml": "2b6baa898edf",
+    "itrea2-dev-rc-3way-boY-bsync.yaml": "29e61aa41619", "itrea2-dev-rc-3way-boY-ld0.yaml": "aabac30b5056",
+    "itrea2-dev-rc-3way-boY-ysync.yaml": "666865eac174", "itrea2-dev-rc-3way-boY.yaml": "5c8b535fb245",
+    "itrea2-dev-rc-3way-bof12.yaml": "edca6f71f266", "itrea2-dev-rc-3way-bof25.yaml": "9a8d7e711bf9",
+    "itrea2-dev-rc-3way-bof50.yaml": "7427bf6ca4d7", "itrea2-dev-rc-3way-bsync-ld.yaml": "119c6e17f830",
+    "itrea2-dev-rc-3way-bsync-ld0.yaml": "b7af15f4b62a", "itrea2-dev-rc-3way-bsync.yaml": "305c8902d763",
+    "itrea2-dev-rc-3way-ld0.yaml": "a05af2c732dc", "itrea2-dev-rc-3way-ysync.yaml": "f81d6b6209f0",
+    "itrea2-dev-rc-3way.yaml": "1d12ad490dd0", "itrea2-dev-rc-ld.yaml": "f030e23909ad",
+    "itrea2-dev-rc-3way-ysync-ld0.yaml": "835c7c5a249c",          # D-030's second candidate (new)
+}
+
+
+def test_every_configuration_hash_is_pinned():
+    assert {p.name: EAConfig.from_yaml(p).hash() for p in sorted(CONFIGS.glob("*.yaml"))} == ALL_CONFIG_HASHES
+
+
+def test_ysync_ld0_is_ld0_plus_yield_only():
+    """D-030's second frozen-v2 candidate: configs/itrea2-dev-rc-3way-ysync-ld0.yaml = D-026's adopted ld0 + D-029's
+    `host.cuda_sched: yield` and nothing else — in the YAML files (only `name` and `host` differ, `host` holding only
+    `cuda_sched: yield`) and in the effective configuration (the flattened diff); ysync-ld0 is also ysync + ld0's three
+    decode fields; hashes pinned (EA 835c7c5a249c, A9 run hash under ext f345de0ab936), ld0's and ysync's unchanged."""
+    import yaml
+    from itrea.experiments import pair
+    ld0, ysync, both = (yaml.safe_load((CONFIGS / f"itrea2-dev-rc-3way-{n}.yaml").read_text())
+                        for n in ("ld0", "ysync", "ysync-ld0"))
+    assert {k for k in set(ld0) | set(both) if ld0.get(k) != both.get(k)} == {"name", "host"}
+    assert "host" not in ld0 and both["host"] == {"cuda_sched": "yield"}
+    assert both["name"] == "itrea2-dev-rc-3way-ysync-ld0"
+    assert _diff(_cfg("ld0"), _cfg("ysync-ld0")) == {"host.cuda_sched": "yield"}
+    assert _diff(_cfg("ysync"), _cfg("ysync-ld0")) == {"repair.continuous": "lp_decode",
+                                                       "repair.lp_decode_gate": "lp_worker",
+                                                       "repair.lp_decode_nice": 0}
+    hashes = {}
+    for n in ("ld0", "ysync", "ysync-ld0"):
+        j = dict(instance="data/miplib/inst/glass4.mps.gz", set="x", arm="A9", seed=0, budget=120,
+                 config=f"configs/itrea2-dev-rc-3way-{n}.yaml", harness="ext")
+        hashes[n] = (_cfg(n).hash(), pair.run_hash(j))
+        pair.job_budget(j)                                       # the runner plans it (gated lp_decode in A9)
+    assert hashes == {"ld0": ("a05af2c732dc", "341267810eed"), "ysync": ("f81d6b6209f0", "a08221cca653"),
+                      "ysync-ld0": ("835c7c5a249c", "f345de0ab936")}
+
+
 @pytest.mark.parametrize("over, what", [
     ({"host.cuda_sched": "spin"}, "cuda_sched"),
     ({"host.cuda_sched": "blocking"}, "cuda_sched"),

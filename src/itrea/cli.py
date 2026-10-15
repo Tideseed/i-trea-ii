@@ -18,7 +18,7 @@ the only place the mapping lives.
                                backoff2 | mipfeas-cal | itx-m1 | itx-m2 | itx-m3 | itx-m4 | itx-m5 | itx-r13 (D-021
                                phase 1) | itx-v1 --tier T1..T5 | itx-a0 [--select all|d024|stage1] | itx-m6 | itx-m6a
                                (D-021 phase 2; itx-a0 --select d024 = D-024 (f)'s 81, the v1 stage-1 25 first) |
-                               r3-diag (C1 diagnosis R3, 22 runs)
+                               r3-diag (C1 diagnosis R3, 22 runs) | c1r-rerun --a9 ld0|ysync-ld0 (D-030, 68 runs)
     itrea screen-candidates …  hard pool: the screening candidates          (itrea.benchmarks.hardset candidates)
     itrea screen-stage2 …      hard pool: the stage-2 list (seed 901)        (itrea.benchmarks.hardset stage2)
     itrea pool-freeze …        hard pool: strata, split, freeze              (itrea.benchmarks.hardset select)
@@ -45,6 +45,11 @@ the only place the mapping lives.
     itrea d027-report …        D-027 (the C1 diagnosis's R3: thread count and SCIP beside cuOpt, set r3-diag): its
                                validity and four reading rules (rule 4: cuOpt's first incumbent on chromaticindex;
                                tools/d027_report.py; jobs: itrea make-jobs r3-diag)
+    itrea c1r-report …         D-030 (the C1 re-read on the frozen-v2 candidate, set c1r-<a9>): validity (68 of 68,
+                               ext, configs as the job file, no compile on the clock, blocks in one window), D-022's
+                               C1 hint and guard, D-025 amendment 3's harm leg vs A9@r13x (cross-day), D-013 terms vs
+                               A6F and A0 and the 10-13 reading beside (tools/c1r_report.py; jobs: itrea make-jobs
+                               c1r-rerun --a9 ld0|ysync-ld0)
     itrea gams-trc …           GAMS .trc export of our runs, per run and clock (D-021 R16)
     itrea itx-report …         D-021 (ITX-1): the v1 external analysis (R17–R22, D-019 literal beside); --m6
     itrea exchange up|down|status|flush RUN_ID   the itrea-redis container (D-006)
@@ -68,7 +73,7 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "pool": ("itrea.experiments.pool", (), "run a job file under the D-002 / D-003 controls"),
     "make-jobs": ("itrea.experiments.make_jobs", (), "write job files (screen1, screen2, e1, e4, confirm, smoke, "
                   "backoff0, backoff1, backoff2, mipfeas-cal, itx-m1 … itx-m5, itx-r13, itx-r13f, itx-v1, itx-a0, "
-                  "itx-m6, itx-m6a, r3-diag)"),
+                  "itx-m6, itx-m6a, r1-bsync, r2-ld, r3-diag, c1r-rerun)"),
     "screen-candidates": ("itrea.benchmarks.hardset", ("candidates",), "hard pool: screening candidates"),
     "screen-stage2": ("itrea.benchmarks.hardset", ("stage2",), "hard pool: stage-2 screening list"),
     "pool-freeze": ("itrea.benchmarks.hardset", ("select",), "hard pool: strata, split, freeze"),
@@ -90,6 +95,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "d027-report": ("path:tools/d027_report.py", (), "D-027 (C1 diagnosis R3): thread count (A6 vs A6F) and SCIP "
                     "beside cuOpt (A2), cuOpt's first incumbent on chromaticindex (rule 4) on set r3-diag — "
                     "validity, four reading rules, what goes to Berk"),
+    "c1r-report": ("path:tools/c1r_report.py", (), "D-030: the C1 re-read on the frozen-v2 candidate (set c1r-<a9>) "
+                   "— validity, D-022's hint and guard, D-025 amendment 3's harm leg vs A9@r13x, what goes to Berk"),
     "gams-trc": ("itrea.analysis.gams_trc", (), "GAMS .trc export of our runs, per run and clock (D-021 R16)"),
     "itx-report": ("itrea.analysis.itx_report", (), "D-021 (ITX-1) v1 analysis: target, minimum, stratified estimates, "
                    "race and A0 secondaries, geo-means, D-019 literal, published rows; --m6 lanes"),

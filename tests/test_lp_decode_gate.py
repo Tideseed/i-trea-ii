@@ -461,12 +461,14 @@ def test_cupy_concat_of_more_than_eight_parts_is_warmed(tmp_path):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("variant, nice", [("bsync-ld", 10), ("bsync-ld0", 0), ("ld0", 0)])
+@pytest.mark.parametrize("variant, nice", [("bsync-ld", 10), ("bsync-ld0", 0), ("ld0", 0), ("ysync-ld0", 0)])
 def test_cupy_cold_cache_r2_variant_in_the_a9_layout(tmp_path, variant, nice):
     """GPU check (R2, before its first timed run): with an EMPTY CuPy cache, the variant in A9's layout (the EA alone on
     one core with `exchange.from_cuopt` and a file mailbox) compiles nothing after t0 — and reached the decoded copies
     AFTER the gate: the LP worker finished, the gate opened on it, the decoder (on the EA's one core, at the host's
-    nice + `nice`) was ready after the gate and its copies entered the population."""
+    nice + `nice`) was ready after the gate and its copies entered the population. `ysync-ld0` (D-030's second C1
+    candidate, never run): the same, with yield set, verified before t0 and held to the end — the check D-030 requires
+    before its first timed run."""
     if not _gpu_ok():
         pytest.skip("no CuPy device")
     from test_cuda_sched import _one_core, a9_layout_run
@@ -486,6 +488,10 @@ def test_cupy_cold_cache_r2_variant_in_the_a9_layout(tmp_path, variant, nice):
     assert s["exchange_from_cuopt"] is True and s["cuopt_inject_msgs"] >= 1
     if variant.startswith("bsync"):
         assert s["cuda_sched"]["sched_at_end"] == "blocking_sync"
+    if variant.startswith("ysync"):
+        st = s["startup"]["cuda_sched"]
+        assert st["state"] == "verified" and st["active_before"] is False and st["sched_active"] == "yield", st
+        assert s["cuda_sched"]["sched_at_end"] == "yield" and s["phase_events_block"] is False
     # D-026 check 1 is met by this run (decoded copies entered, nothing compiled after t0) together with the concat
     # probe above (the > 8-part kernels are warm by construction): a toy run need not reach 9 parts, so it is printed
     print(f"\n[{variant}] concat_parts_max {s['concat_parts_max']} gate lag {ld['gate_t'] - s['lp']['worker_done_t']:.3f} s"
