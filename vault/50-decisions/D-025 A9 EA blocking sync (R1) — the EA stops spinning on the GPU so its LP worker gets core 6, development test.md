@@ -1,6 +1,6 @@
 # D-025 A9 EA blocking sync (R1) — the EA stops spinning on the GPU so its LP worker gets core 6, development test (2026-10-14, AgentRA)
 
-**Status:** amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
+**Status:** bsync RESULT 2026-10-15 08:1x: NOT ADOPTED (hint present 0.765; generation guard and comp21 P failed) → fallback (b) ysync queued (§ Result). amended / confirmed 2026-10-14 18:3x before any run (see the end). decided for development by AgentRA (Claude Code, Anthropic Claude Opus 5.5) before any run; open to a
 superseding decision on evidence. **Not run; no code merged** (branch `r1-bsync`, worktree `../i-trea-ii-r1`).
 **Clarified and amended 2026-10-14 17:4x, before any run** (the section at the end: names as built, the control's own
 label, bnice without the flag, the control's flag read back, the P band on the hint instances and a generation guard
@@ -300,3 +300,23 @@ fire fallback (b) on noise; the cost — a control spread of 20 % lets a 15 % lo
 A9@r13x** (`make-jobs r1-bsync --control r13x`): D-023 did not adopt boY (its Result, 18:1x). Noted, not a rule change:
 item_placement's P moves a lot between days with the same EA behaviour (A9@bo1s 0.218 on 10-14, A9@r13x 0.364 on 10-13);
 D-025 reads item against its same-window control (A9@r1ctl), which is why the control is re-run rather than borrowed.
+
+## Result of the bsync test (2026-10-15 08:1x, AgentRA): NOT ADOPTED — fallback (b) ysync fires
+Set `r1-bsync`, pool `20261015-071709-2205151` (07:17–08:06): **20 of 20 completed**, 0 failed / void; control A9@r1ctl
+(= A9@r13x's configuration, run hash 28e5a5e9c725), treatment A9@bsync (330a10a77556). GPU checks before the pool (07:08–07:17):
+`bsync_check` host self-CPU per wall-second auto 0.9998 → blocking_sync 0.0083, the core's competitor 0.5187 → 0.9989.
+`itrea build-runs`, `itrea d025-report` (VALID, 20 of 20):
+- **Mechanism (reported):** EA self-CPU per wall-second 0.017–0.041 under bsync on ca / sing44 / 960392 / comp21 (control
+  0.82–1.00); item_placement 0.19 / 0.24. The LP worker's CPU share 0.93–0.96 (control 0.50); its finish time ca 35.0 / 35.1 s →
+  18.9 / 19.3 s, sing44 12.9 / 12.2 → 6.2 / 6.1 s, neos-960392 4.7 / 4.7 → 2.5 / 2.5 s.
+- **Hint PRESENT:** ΣP(T) / ΣP(C) over ca, sing44, neos-960392 = 1.3563 / 1.7729 = **0.765** (≤ 0.95); per instance ca 0.633
+  (P 0.393 → 0.248), sing44 0.882 (0.436 → 0.385), neos-960392 0.777 (0.058 → 0.045). Hint-instance bands hold.
+- **No-harm FAILS:** generations on seed means item_placement 0.824 (threshold 0.921), comp21 0.818 (0.950; seed 1 153 vs 272);
+  P on comp21 +0.060 (band 0.050); item_placement P −0.014 (holds).
+- **Verdict: NOT ADOPTED** (failing: the generation guard and P no-harm on item_placement / comp21). Fallback triggers: (a) no
+  (ca's LP share 0.945 / 0.943 ≥ 0.8); **(b) fires** (the generation guard — wake latency, the risk this record named).
+- **Next, as fixed above:** fallback (b) `ysync` (CU_CTX_SCHED_YIELD) tested the same way: `itrea make-jobs r1-bsync --control
+  r13x --variant ysync` → `jobs/r1-ysync.jsonl` (20 runs, set `r1-ysync`, labels A9@ysync / A9@r1ctl-ysync; sha256
+  `52e86e06fd0c8258f2e02ca25ce2dfef7b6c38262675fa69ffd8f79b8bbc042c`), queued 08:1x in the same window. Its GPU check (07:1x): the
+  host spins (0.99 per wall-second) but its core's competitor gets 0.9989; an A9-layout ysync run gave the LP worker 0.933. No
+  chaining after (b). D-026 waits for (b)'s outcome.
