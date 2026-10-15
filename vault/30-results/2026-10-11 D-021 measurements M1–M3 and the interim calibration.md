@@ -283,3 +283,11 @@ Both directions of a tolerance mismatch between our checker and the solvers turn
   integral, the clock); journal 2026-10-11 ("15:12–15:35", "15:35–18:17"), 2026-10-12 ("12:05", "12:3x–12:44"),
   2026-10-13 ("12:2x–12:32", "14:4x–14:5x", "15:1x"); [[Experiment index]] rows ITX-M1 … ITX-M4; [[Development log]]
   § "D-021 measurements M1–M3 and the interim calibration".
+
+## Addendum 2026-10-15 — M4 complete (30 of 30): OUTSIDE
+The last 11 runs ran 2026-10-14 21:48–23:09 and 2026-10-15 09:3x–10:00 (sets `mipfeas`, A6F, ext, 600 s). `itrea mipfeas-report
+--arm A6F`: **R 1.313 [1.091, 1.618]** on the call clock (launch clock 1.963 [1.606, 2.408]); feasible 27 vs GAMS 27; late-clock
+check passed (median first incumbent ours − GAMS over strata 0–1 −0.119 s, n 10); configuration hash 82a371305f88 on all 30.
+**Verdict OUTSIDE** the band [0.870, 1.150]: with the clock checked, the difference is the footprint F (5 threads + the GPU against
+GAMS's 24-thread whole box) and the machine, as D-021 expected; v1's targets are anchored on our own A6F. The interim R 1.416 on 19
+runs above is superseded. The heat ladder (R9) could now be asked for; not asked (D-021 R9: Berk's yes, not needed for v1).
