@@ -1,24 +1,51 @@
 # Phase 1 — development until C1 (2026-10-06 to 2026-10-17) — DRAFT until D-031 is read
 
-**Status: DRAFT**, written 2026-10-16 by AgentRA (Claude Code (Anthropic Claude Opus 5.5)), **until D-031 is read**: set
-`c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68 runs) has been running since 2026-10-16 08:57:43 and its numbers are not known.
-The section "Four-seed result (D-031) — filled in after the run" stays empty until `tools/d031_report.py` has read it.
-Every A9 result here is development data ([[D-010 Develop the algorithm first on a small development set]]); § 5's harness
-measurements are calibration runs on D-020's MIPfeas sample and validity counts on unseen instances, not results of the
-method. The A9 results are descriptive and **INTERIM**: n = 2 seeds on 17 development and class-probe instances that
-were chosen and tuned on, and 4 seeds once D-031 is read. "HINT present" is futility-only
-([[D-024 Targeted first, wider only on a hint — staged testing for development and v1]] rule 2). It gates widening and
-declares nothing. Nothing in this note says that A9 "beats", "improves on" or "matches" anything beyond the numbers
-printed. **The go / no-go on C1 is Berk's** ([[D-019 v1 — deadline and performance target]], addendum 2026-10-15).
-`configs/frozen-v2.yaml` has not been written yet (the D-030 report records it as absent). By the rule of [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]]
-(fixed before its runs) it will hold yield + lp_decode; D-031's four-seed harm reading may still put which configuration
-freezes to Berk (D-031 § What goes to Berk).
+## Summary
 
-Terms. P = P(120), the primal integral at 120 s on the call clock; lower is better. d = bounded d on seed means; + means
-A9 is better than its comparator. A9 = SCIP ↔ EA ← cuOpt. A6F = cuOpt alone on A9's footprint F. A0 = SCIP alone.
-"Fixed 11" = the 11 cuOpt-weak development instances of D-022's hint.
+- **Result (interim, 2 seeds, D-030):** on the 11 instances where cuOpt alone is weak (the fixed 11), A9 lowers mean P(120) from 0.677 to 0.548 (−19 %) against cuOpt alone on the same footprint, 7 better / 3 worse, d +0.235 [+0.052, +0.433]. C1's hint is present (0.809 ≤ 0.95) and its guard holds (+0.050 ≥ −0.05); on the old default (10-13) they read 0.827 and +0.063. The four-seed reading (D-031) is running (§ 4, § 7).
+- **Against SCIP alone (A0 from earlier days, not the same window or footprint):** on the fixed 11, 8 improved / 0 worse, mean P −38 %; on SCIP's weak set among the 17 (15), 12 / 0, 0.889 → 0.447 (−50 %), d +0.502 [+0.329, +0.675], a set selected on the compared runs (§ 4).
+- **Adopted into A9:** harness ext (D-022), lp_decode (ld0, D-026), yield (ysync, D-029) → `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (§ 2). glass4's harm flag on the candidate (D-030) read as DRIFT (D-032): yield + lp_decode freezes for phase 1 (§ 4). Not adopted: the back-off (D-018, D-023), blocking sync (D-025).
+- **Tested:** developing the coupling (first A3, then A9 = SCIP ↔ EA ← cuOpt) on 9 development + 8 class-probe instances at 120 s, toward D-013's aim: lift each solver's weak set, the mean as a guard (§ 1, § 3).
+- **Known loss:** chromaticindex1024-7. Inside A9 cuOpt's first incumbent comes at about 65 s; without the EA it comes in 6.5–11 s (§ 6).
+- **Harness calibration (M4):** our cuOpt-alone runs (A6F) on D-020's 30 MIPfeas instances give a footprint ratio R = 1.313 [1.091, 1.618] against GAMS's published runs, OUTSIDE the band [0.870, 1.150]. With the clock checked, the gap is the footprint (5 threads + the GPU, against GAMS's 24-thread whole box) and the machine, so v1's external targets are anchored on our own A6F (§ 5).
+- **Pending:** D-031's four-seed reading (seeds 2–3, 68 runs, running; § 7), `configs/frozen-v2.yaml`, and Berk's go / no-go.
+- **To phase 2:** #26; #35 and CUDA MPS (v1.1). Due before prereg-v2: #36 and #32's test-set size (§ 8, § 9).
+- **Every A9 number is interim and descriptive:** n = 2 seeds on instances that were chosen and tuned on.
+
+## Status of this note
+
+- **DRAFT until D-031 is read.** § 7 stays a placeholder until `tools/d031_report.py` has read it.
+- **INTERIM and descriptive:** development data on instances chosen and tuned on (n = 2 seeds; 4 once D-031 is read).
+- **The go / no-go on C1 is Berk's** ([[D-019 v1 — deadline and performance target]], addendum 2026-10-15).
+
+Author, the futility-only hint, the no-claim rule and the freeze file: "About this note" at the end.
+
+## Terms
+
+| term | meaning |
+|---|---|
+| P | P(120), the primal integral at 120 s on the call clock; lower is better |
+| d | bounded d on seed means; + means A9 is better than its comparator |
+| A9 | SCIP ↔ EA ← cuOpt |
+| A6F | cuOpt alone on A9's footprint F |
+| A0 | SCIP alone |
+| fixed 11 | the 11 cuOpt-weak development instances of D-022's hint |
+| the 17 / class probe | the 9 development instances (D-010) + the 8 class-probe instances, added 2026-10-07 with predictions fixed before the runs (D-014) |
+| weak set W_B | instances where solver B alone has P ≥ 0.5, on seeds not used for the evaluation (D-013) |
+| C1 | the checkpoint that closes phase 1, Sat 2026-10-17 (D-019) |
+| hint | ratio of means, A9 / A6F, over the fixed 11; present iff ≤ 0.95. Futility-only: it gates widening and declares nothing (D-022, D-024 rule 2) |
+| guard | mean bounded d over the 17, A9 vs A6F; holds iff ≥ −0.05 (D-022) |
+| harm leg / DRIFT | per instance, the new A9 against 10-13's A9@r13x; harm iff d_i < −band_i, band_i = max(0.05, 10-13's seed spread) (D-025 amendment 3). DRIFT = D-032's reading that glass4's flag is day-to-day variation |
+| F | footprint: A9's cores and GPU (X925 5–6, A725 1–3, the GPU); every compared GPU arm gets it (D-021) |
+| harness ext | cuOpt's MIP gaps 0, its thread variables unset, its own RMM limit 24 GB (D-022) |
+| ld0 / ysync | lp_decode on the EA's core, gated after its LP worker (D-026) / `host.cuda_sched: yield` on the EA's CUDA context (D-029) |
+| M4 / R / OUTSIDE | the harness calibration (D-021): footprint ratio R = (SGM_ours + 0.001) / (SGM_GAMS + 0.001) on the call clock; OUTSIDE = R outside the band [0.870, 1.150] |
 
 ## 1. What phase 1 set out to do
+
+**Takeaway: every C1 item is settled — done, or carried to phase 2 (#26) — except the four-seed reading (D-031,
+running), Saturday's `configs/frozen-v2.yaml` and Berk's go / no-go.** Phase 1 developed the coupling toward D-013's
+aim and had to end in C1: an interim A9 result, a calibrated external harness and a configuration to freeze.
 
 **The aim** ([[D-013 Aim — lift each solver's weakest cases]], Berk, 2026-10-07): *"I don't aim our coupling to be
 generally better but to help both SCIP, cuOpt (and Highs if possible) in some of the hardest problems where they are the
@@ -30,23 +57,25 @@ degree."* The metric, for each solver B, has three parts:
   interval, the Wilcoxon test, and the worst P after coupling.
 - **Guard.** Mean d ≥ −0.05 over all instances.
 
-**What C1 had to contain** (D-019 addendum 2026-10-10; date moved by the addendum of 2026-10-15 13:4x, Berk: *"Assume we
-are wrapping up phase 1 on Saturday."*). Development on cuOpt 26.08 closes; D-018 stage 1 decided; #26 decided;
-lp_decode inside A9 (#30); the MIPfeas harness built and calibrated; an interim A9 result on the 17 instances × 2 seeds
-against SCIP alone and cuOpt alone in D-013 terms; then Berk's go / no-go. The 10-15 addendum keeps that content, adds
-`configs/frozen-v2.yaml`, moves C1 from Fri 10-23 to **Sat 10-17**, and moves #26, #35 and CUDA MPS to phase 2.
+**What C1 had to contain** (D-019 addendum 2026-10-10): development on cuOpt 26.08 closes with the items in the table.
+The addendum of 2026-10-15 13:4x (Berk: *"Assume we are wrapping up phase 1 on Saturday."*) keeps that content, adds
+`configs/frozen-v2.yaml` and moves C1 from Fri 10-23 to **Sat 10-17**.
 
 | C1 item | state on 2026-10-16 | record |
 |---|---|---|
 | D-018 stage 1 (GPU back-off) | NOT ADOPTED 10-11; its follow-up D-023 (phase Y only) NOT ADOPTED 10-14 | D-018, D-023 |
-| #26 (recombine a partner incumbent with the elite) | not built; carried to phase 2 | D-019 addendum 10-15 |
+| #26 decided (recombine a partner incumbent with the elite) | not built; carried to phase 2 | D-019 addendum 10-15 |
 | lp_decode inside A9 (#30) | ADOPT (ld0) 10-15 | D-026 |
 | external harness built and calibrated | M1–M3 done 10-11; M4 complete 10-15, **OUTSIDE** (the footprint) | D-020, D-021, § 5 |
-| interim A9 result, 17 × 2 seeds, D-013 terms | 10-13 on the old default (D-022); 10-16 on the candidate (D-030); **4 seeds pending (D-031)** | § 4, § 7 |
+| interim A9 result, 17 × 2 seeds, against SCIP alone and cuOpt alone in D-013 terms | 10-13 on the old default (D-022); 10-16 on the candidate (D-030); **4 seeds pending (D-031)** | § 4, § 7 |
 | configuration to freeze | yield + lp_decode (`configs/itrea2-dev-rc-3way-ysync-ld0.yaml`), by D-032's rule | D-029, D-030, D-032 |
 | `configs/frozen-v2.yaml`, go / no-go | Saturday; the go / no-go is Berk's | D-019 addendum |
+| moved to phase 2 | #26, #35, CUDA MPS | D-019 addendum 10-15 |
 
 ## 2. The method to be frozen for phase 1 (`configs/frozen-v2.yaml` not yet written; the go / no-go is Berk's)
+
+**Takeaway: the candidate is A9's old default plus two changes, ld0 and ysync, each tested alone before they ran
+together.**
 
 **A9** ([[D-015 Use cuOpt's feasible solutions — three-way arm A9]]) runs three processes on one GB10, on footprint F
 (D-021):
@@ -104,11 +133,20 @@ A6F@c1r = A6F@r13x's job (run hash `82a371305f88`). A0 = SCIP alone (run hash `2
 
 ## 3. The development record, D-010 to D-032
 
-Kind: **F** = framework or aim (not a test), **T** = development test with rules fixed before any of its runs was read,
-with two qualifications: D-022's second amendment came with 7 of 58 runs done, none read; D-029's thresholds were fixed
-before its new runs but with seeds 0–1 (8 of its 28 read runs, D-025's) already known (its amendment B1–B2). **D** =
-diagnostic (no adoption), **R** = the C1 reading. Each row's numbers come from that record's Result or Status line. The
-D-011, D-012 and D-014 rows also use the [[Development log]].
+**Takeaway: 23 records; three tests changed A9 itself (ext D-022, ld0 D-026, ysync D-029); the back-off, blocking
+sync and Rank 1 by clearing (on A3) were not adopted.**
+
+How to read the "kind" column:
+- **F** = framework or aim (not a test).
+- **T** = development test with rules fixed before any of its runs was read, with two qualifications:
+  - D-022's second amendment came with 7 of 58 runs done, none read;
+  - D-029's thresholds were fixed before its new runs but with seeds 0–1 (8 of its 28 read runs, D-025's) already known
+    (its amendment B1–B2).
+- **D** = diagnostic (no adoption).
+- **R** = the C1 reading.
+
+Each row's numbers come from that record's Result or Status line. The D-011, D-012 and D-014 rows also use the
+[[Development log]].
 
 | record | kind | question | test | verdict | key numbers |
 |---|---|---|---|---|---|
@@ -136,13 +174,20 @@ D-011, D-012 and D-014 rows also use the [[Development log]].
 | [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]] | R | the phase-1 interim result on four seeds | c1r-ysync-ld0-s23, 68 runs | **running; not read** | § 7 (placeholder) |
 | [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]] | T (targeted) | is glass4's harm flag real or day-to-day drift? | d032, glass4 × 3 configurations × seeds 0–3, 12 runs | **DRIFT** → yield + lp_decode freezes | means old 0.2176, yield + ld 0.2233, ld 0.2177; d(candidate) −0.025 ≥ −0.057 |
 
-Built and not adopted for A9: the back-off (D-018, D-023), blocking sync (D-025 bsync), and Rank 1 by clearing
-(D-016, on A3). The ysync line was NOT ADOPTED in D-025 (whose Result said "no fallback of a fallback — the R1 line ends
-for C1") and then ADOPTED by a new record, D-029, written on Berk's choice after that failure. Its rules were fixed before
-its runs, but its item generation bar was loosened after the failure was seen (0.921 → 0.90), and D-029 states that the
-follow-up adds about 12–19 points to the overall chance of adopting a harmful ysync (D-029 § Forking paths).
+- **Built and not adopted for A9:** the back-off (D-018, D-023), blocking sync (D-025 bsync), and Rank 1 by clearing
+  (D-016, on A3).
+- **The ysync line took a forking path.** It was NOT ADOPTED in D-025 (whose Result said "no fallback of a fallback — the
+  R1 line ends for C1") and then ADOPTED by a new record, D-029, written on Berk's choice after that failure.
+  - Its rules were fixed before its runs, but its item generation bar was loosened after the failure was seen
+    (0.921 → 0.90).
+  - D-029 states that the follow-up adds about 12–19 points to the overall chance of adopting a harmful ysync (D-029
+    § Forking paths).
 
 ## 4. The C1 readings
+
+**Takeaway: in both readings the hint is present and the guard holds; on the candidate, glass4's harm flag read as
+day-to-day drift (D-032). D-030 keeps comp21's two crashed cuOpt-alone runs as outcomes; by the letter (failed runs
+excluded) it reads INCOMPLETE.**
 
 Two readings exist, each 17 instances × {A9, A6F} × seeds 0–1, 120 s, under harness ext, with both arms of each block
 in one window:
@@ -186,9 +231,9 @@ Seed means. "(floor)" marks instances where both arms are at P ≤ 0.011, so a t
   ca__Scenario400_reserves_1: 0.587 / +0.328 here, 0.586 / +0.329 there. ca's reference is provisional
   (`best_of_study`) and re-scores every ca run when a better ca solution is found (D-031 § Rules).
 
-Read from the rows (counts, no new statistics). Over the 17, A9@c1r's seed mean is lower than A6F@c1r's on 8 instances
-and higher on 8, with 1 tie. A9 finds no incumbent in 120 s on doon, rail01 and cryptanalysiskb128n5obj16 in either
-reading.
+Read from the rows (counts, no new statistics):
+- Over the 17, A9@c1r's seed mean is lower than A6F@c1r's on 8 instances and higher on 8, with 1 tie.
+- A9 finds no incumbent in 120 s on doon, rail01 and cryptanalysiskb128n5obj16 in either reading.
 
 **C1's rules (D-022 second amendment, fixed before any reading, with 7 of 58 itx-r13 runs already done; D-030's fixed
 before any c1r run):**
@@ -235,20 +280,21 @@ Guard vs cuOpt alone over the 17: +0.063 (10-13), +0.050 (D-030).
 | SCIP's weak set among the 17 (A0 P ≥ 0.5), 10-13 (saved report, `then`) | 15 | 12 / 0 | 0.889 → 0.473 (−47 %) | +0.465 [+0.293, +0.641] | 0.0005 |
 | SCIP's weak set among the 17, D-030 (D-030 Result) | 15 | 12 / 0 | 0.889 → 0.447 (−50 %) | +0.502 [+0.329, +0.675] | 0.0005 |
 
-The worst P after coupling is 1.000 in every row: doon, rail01 and cryptanalysis, where neither A9 nor A0 finds an
-incumbent. These ties at 1.000 are counted at d = 0 in the mean P and the mean d, and dropped from the Wilcoxon test,
-whose zeros are dropped (`tools/d022_report.py` `_weak_block`, which both reports use).
-
-No report computes D-013's guard against SCIP alone (mean d over all 17 vs A0), and this note does not compute one.
-Read from the rows, A9's seed mean is not above A0's on any of the 17 in either reading.
+- **The worst P after coupling is 1.000 in every row:** doon, rail01 and cryptanalysis, where neither A9 nor A0 finds
+  an incumbent. These ties at 1.000 are counted at d = 0 in the mean P and the mean d, and dropped from the Wilcoxon
+  test, whose zeros are dropped (`tools/d022_report.py` `_weak_block`, which both reports use).
+- **No guard against SCIP alone is computed.** No report computes D-013's guard against SCIP alone (mean d over all 17 vs
+  A0), and this note does not compute one. Read from the rows, A9's seed mean is not above A0's on any of the 17 in
+  either reading.
 
 **D-019's confirmatory targets, for scale only — not a test.** For the unseen hard instances, D-019 sets:
 - **vs SCIP alone on W_SCIP:** minimum mean d > 0 with its 95 % CI > 0; target mean P −40 % and ≥ 70 % of W improved.
 - **vs cuOpt alone on W_cuOpt:** the same minimum; target −25 % and ≥ 60 % improved.
 
-The development numbers above come from instances that were chosen and tuned on. The class probe already measured how
-much weaker the coupling was out of sample (D-014: vs cuOpt alone 1 better / 5 worse, mean d −0.51 [−0.84, −0.12],
-with the older A3).
+Why for scale only:
+- The development numbers above come from instances that were chosen and tuned on.
+- The class probe already measured how much weaker the coupling was out of sample (D-014: vs cuOpt alone 1 better /
+  5 worse, mean d −0.51 [−0.84, −0.12], with the older A3).
 
 **Caveats of the C1 readings.**
 - n = 2 seeds; development instances chosen and tuned on (D-010).
@@ -285,6 +331,9 @@ with the older A3).
 
 ## 5. What the external harness calibration showed (M1–M4)
 
+**Takeaway: M1 and M2 passed and M3 dropped three instances; M4 reads OUTSIDE its band (R 1.313 against [0.870,
+1.150]), and with the clock checked the difference is the footprint and the machine.**
+
 These measurements test the harness, not the method
 ([[2026-10-11 D-021 measurements M1–M3 and the interim calibration]]).
 - **M1 smoke: gate passed** (12 / 12). Every harness setting acts as specified. R14 (cuOpt's thread variables unset)
@@ -311,6 +360,9 @@ These measurements test the harness, not the method
   - D-020: GAMS's integral is ported exactly (equal to GAMS's own function on all 3,495 traces).
 
 ## 6. Known losses
+
+**Takeaway: the largest loss, chromaticindex1024-7, comes from the EA's presence slowing cuOpt; doon sits at cuOpt
+alone's edge; four more instances are worse than cuOpt alone in both readings.**
 
 - **chromaticindex1024-7: the EA's presence slows cuOpt.** Inside A9, cuOpt's first incumbent comes at about 65 s;
   without the EA it comes in 6.5–11 s.
@@ -360,6 +412,7 @@ These measurements test the harness, not the method
   governor's rests.
 - **Read with:** `itrea build-runs`, then
   `OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .venv/bin/python tools/d031_report.py --d030-json logs/d030-reading.json`.
+- **Every place to fill in** is listed in `AGENTS.md` § "D-031 fill-in checklist".
 
 | field (D-031 § "The reading") | value |
 |---|---|
@@ -386,6 +439,8 @@ Stated now, before the reading (D-031 § Rules):
 
 ## 8. What moves to phase 2, and why
 
+**Takeaway: #26, #35, CUDA MPS and chromaticindex's known loss move to phase 2; v1's own work follows C1.**
+
 (D-019 addendum 2026-10-15 13:4x.)
 - **#26 — recombine each new partner incumbent with the whole elite.** "Not built" (D-019 addendum 2026-10-15); it has
   no decision record yet ([[Roadmap]]). D-019 had listed it as decided by C1; the 10-15 addendum carries it to phase 2
@@ -402,6 +457,8 @@ Stated now, before the reading (D-031 § Rules):
 
 ## 9. Due before prereg-v2 (not before Saturday)
 
+**Takeaway: three items are due before prereg-v2, none before Saturday.**
+
 - **#36 — one checker rule for every arm.**
   - Our exact checker accepted incumbents below MIPLIB's proven optimum on glass4 (cuOpt rejects that point) and on
     mas74.
@@ -412,6 +469,9 @@ Stated now, before the reading (D-031 § Rules):
 - **The prereg-v2 tag itself.** It gates only external A9 runs, which wait for cuOpt 26.10 (D-019).
 
 ## 10. Lessons (box and operations)
+
+**Takeaway: window time was lost to a refused lease, to heat and to the fan governor's rests; the fixes and planning
+rules are below.**
 
 - **A lease longer than 12 h is refused.**
   - What happened (10-14): the scheduled chain claimed `--until 20:15` (13 h 10 min) at 07:05. Every claim was refused
@@ -433,17 +493,43 @@ Stated now, before the reading (D-031 § Rules):
     show`).
   - Both arms of every block share their window, so the comparisons stay paired, but noise rises (journal 10-15 17:30,
     19:0x).
-- **The fan governor's rests take about 25 % of window time** (the journal's estimate). By 14:57 on 10-15 there had been
-    four rests of 30 min (the fourth 14:27–14:57), about every 1.5–2 h under load (journal 10-15 13:4x–14:4x). A fifth
-    followed at 16:44–17:14 (journal 10-15 17:30). Plan 120-s run sets at 3.44–3.83 min per run with the rests
-    included (D-030, D-031 cost sections).
-- **Stage named files, not `vault/`, while an agent edits the vault.** A 13:43 commit (`git add vault`) on 10-15 swept
-  in D-030 while its build agent was still writing it (placeholders COMMIT_SHA, TEST_COUNTS). No run read that version,
-  and the final text (d50c03c) was committed before any c1r run (journal 10-15 13:4x–14:4x).
+- **The fan governor's rests take about 25 % of window time** (the journal's estimate).
+  - By 14:57 on 10-15 there had been four rests of 30 min (the fourth 14:27–14:57), about every 1.5–2 h under load
+    (journal 10-15 13:4x–14:4x). A fifth followed at 16:44–17:14 (journal 10-15 17:30).
+  - Plan 120-s run sets at 3.44–3.83 min per run with the rests included (D-030, D-031 cost sections).
+- **Stage named files, not `vault/`, while an agent edits the vault.**
+  - A 13:43 commit (`git add vault`) on 10-15 swept in D-030 while its build agent was still writing it (placeholders
+    COMMIT_SHA, TEST_COUNTS).
+  - No run read that version, and the final text (d50c03c) was committed before any c1r run (journal 10-15
+    13:4x–14:4x).
 - Earlier the same week ([[Mistakes and incidents]], 10-13):
   - A chain whose tail is the restore left the box idle for 2 h 17 min of a daytime window. A chain's tail should be
     the next performance run set.
   - The pool enforces R26's breaker but not its opening gate (#38; stopgap `tools/r26-gate.sh`).
+
+## About this note
+
+The full status of this note, moved here from the top on 2026-10-16:
+
+- **DRAFT until D-031 is read.** Written 2026-10-16 by AgentRA (Claude Code (Anthropic Claude Opus 5.5)).
+- **D-031 is running.** Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68 runs) has been running since 2026-10-16 08:57:43
+  and its numbers are not known. The section "Four-seed result (D-031) — filled in after the run" stays empty until
+  `tools/d031_report.py` has read it.
+- **What kind of data.** Every A9 result here is development data
+  ([[D-010 Develop the algorithm first on a small development set]]). § 5's harness measurements are calibration runs on
+  D-020's MIPfeas sample and validity counts on unseen instances, not results of the method.
+- **INTERIM and descriptive.** The A9 results rest on n = 2 seeds on 17 development and class-probe instances that were
+  chosen and tuned on, and on 4 seeds once D-031 is read.
+- **"HINT present" is futility-only**
+  ([[D-024 Targeted first, wider only on a hint — staged testing for development and v1]] rule 2). It gates widening and
+  declares nothing.
+- **No claim beyond the numbers.** Nothing in this note says that A9 "beats", "improves on" or "matches" anything beyond
+  the numbers printed.
+- **The go / no-go on C1 is Berk's** ([[D-019 v1 — deadline and performance target]], addendum 2026-10-15).
+- **The freeze file.** `configs/frozen-v2.yaml` has not been written yet (the D-030 report records it as absent). By the
+  rule of [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]]
+  (fixed before its runs) it will hold yield + lp_decode; D-031's four-seed harm reading may still put which
+  configuration freezes to Berk (D-031 § What goes to Berk).
 
 ## Sources
 
