@@ -1,6 +1,6 @@
 # D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg (2026-10-15, AgentRA on Berk's choice)
 
-**Status:** decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) on Berk's choice of 2026-10-14 (question panel,
+**Status:** RESULT 2026-10-16 08:2x: HINT present 0.809, GUARD +0.050, HARM glass4 (+ krka at floor) → Berk → D-032 (§ Result). decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) on Berk's choice of 2026-10-14 (question panel,
 below) — **before any run of set `c1r-ld0` or `c1r-ysync-ld0`**; open to a superseding decision on evidence. **Not run.**
 **Amended 2026-10-15 14:3x, before any run** (the section at the end: the harm leg's band read as the D-023 `band_i` its
 rule cites — A9@r13x or A6F@r13x, never the new A9 —, so every threshold is fixed now; harm cannot fire on 4 of the 17;
@@ -286,3 +286,22 @@ without harm (what freezes stays his). GPU check before the first timed run (ins
 cold-cache test for ysync-ld0 **passed** (decoder gate lag 0.135 s, `concat_parts_max` 2, nothing compiled after t0). `c1-rerun`
 merged d3fe14f; affected non-GPU tests 256 passed. **`jobs/c1r-ysync-ld0.jsonl` (sha256 50108596…5588) started 15:09:55** in
 W-1015 (queue item 5, `--layout pair --deadline 18:35`); unfinished blocks continue in Friday's window (whole blocks).
+
+## Result (2026-10-16 08:2x, AgentRA): HINT present 0.809, GUARD holds +0.050, HARM on glass4 (and krka at floor) → Berk → D-032
+Set `c1r-ysync-ld0`, pools `20261015-150955-187322` (10-15 15:09–17:30, halted by R26's breaker: 2 gpu_cap voids, heat) and
+`20261016-070810-4125812` (10-16 07:08–08:17, the 16 remaining blocks incl. the voided item_placement s1 block rerun whole): **68 runs
+present, VALID** (verdict reading: failed runs kept). Failures: **comp21-2idx A6F@c1r seeds 0 and 1, cuOpt rc −11 (SIGSEGV)** on both days —
+cuOpt alone crashed; kept as A6F outcomes (D-002 §6). `itrea build-runs`; `itrea c1r-report --a9 ysync-ld0 --json logs/d030-reading.json`
+(saved for D-031's `--d030-json`):
+- **HINT present: 0.809** (P̄ 0.548 / 0.677 over the fixed 11; 10-13: 0.827). **GUARD holds: +0.050** over the 17 (10-13: +0.063).
+- **HARM (D-025 amendment 3) on glass4:** d_i −0.088 < −0.057 (P 0.216 → 0.237, ΔP +0.021; seeds 0.221 / 0.211 → 0.254 / 0.220); beside:
+  the unchanged configuration's replicate A9@r2ctl (10-15) d −0.061, cuOpt alone 10-13 → this window −0.035. **On neos-3004026-krka:**
+  ΔP +0.0010 (below D-022's 0.005 floor, marked). Harm cannot fire on rail01, cryptanalysis, crna, doon (thresholds > 1).
+- **The exclude reading** (the two crashed A6F runs left out): INCOMPLETE — HINT and GUARD unread (comp21's A6F missing on both seeds);
+  vs cuOpt alone on the 10 with both arms: improved 6, worse 3, P 0.667 → 0.546 (−18 %). The kept reading gains from comp21's crashes
+  (A6F P 1 on both seeds): stated beside the go / no-go.
+- Reported (D-013 terms): vs cuOpt alone (same window) on the fixed 11: improved 7, worse 3, P 0.677 → 0.548 (−19 %), d +0.235
+  [+0.052, +0.433], Wilcoxon p 0.049; vs SCIP alone (A0, earlier days): fixed 11 improved 8, worse 0, 0.880 → 0.548 (−38 %); SCIP's weak
+  set among the 17 (15): improved 12, worse 0, 0.889 → 0.447 (−50 %), d +0.502 [+0.329, +0.675], p 0.0005 (10-13's default: −47 %).
+- **Consequence:** D-031 condition 4 → Berk. Berk (08:2x): **"Targeted glass4 check (Recommended)"** → [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]]
+  (12 runs, queued 08:27). The go / no-go and what freezes stay Berk's.
