@@ -1,28 +1,129 @@
+% Development tests are numbered in the row order of the development-record table (Appendix app:devrecord,
+% generated/table_devrecord.tex): 1 = D-011, 2 = D-012, 3 = D-014, 4 = D-015, 5 = D-016, 6 = D-017, 7 = D-018,
+% 8 = D-022, 9 = D-023, 10 = D-025 (blocking), 11 = D-025 (yield), 12 = D-026, 13 = D-027, 14 = D-028, 15 = D-029,
+% 16 = D-030, 17 = D-031, 18 = D-032.
+% Sources: vault/30-results/2026-10-17 Phase 1 -- development until C1.md (Summary, sections 3, 4, 6); the records'
+% Result lines (D-031 Result 2026-10-16 13:1x; D-033, the C1 go); logs/d030-reading.json, logs/d031-reading.json;
+% generated/table_readings.tex, table_d031.tex, table_chromatic.tex (run table). Review fixes 2026-10-16: one name per
+% set ("hard set"), the checkpoint result on four seeds only (the halves in the text), drift beside glass4 (D-023 Result:
+% item_placement 0.218 vs 0.364 on 10-13), test 14 ran with R13/R14 reverted (runs.parquet set d028, harness flags false).
 \section{Results}\label{sec:results}
-\textbf{Pre-registered; no confirmatory results yet.} Only the screening and the open development runs have been run. This section will report, in the order fixed in
-Section~\ref{sec:design}, every pre-registered comparison with its estimate, interval and verdict, including
-comparisons that are negative or inconclusive.
+All numbers are descriptive, interim development data (17 instances, 120-s runs, 6--16 October).
 
-\subsection{Screening and the instance pool}
-\pending{Screening pass, strata, the frozen pool and references.}
+\subsection{What phase~1 changed, and what helped}\label{sec:res-dev}
+Phase~1 kept six of the ten changes it tested (Table~\ref{tab:changes}). The largest change was structural. On eight
+new instances, the two-process coupling of SCIP and the EA had a higher $P$ than cuOpt alone on five and a lower one
+on one (mean $d$ $-0.51$ $[-0.84, -0.12]$; test~3). So cuOpt joined as a third process instead of re-implementing
+cuOpt's heuristics inside the EA (test~4).
 
-\subsection{Calibration and gates}
-\pending{CPU/GPU interference, exchange transport overhead, the first-feasible gate against cuOpt, local-search
-throughput against the CPU reference.}
+\begin{table}[t]\centering\footnotesize
+\caption{What phase~1 changed. Tests are numbered as in Appendix~\ref{app:devrecord}; diagnostics and checkpoint
+readings (tests 3, 13, 14, 16--18) appear only there. Two-process: SCIP and the EA without cuOpt. $d$: mean bounded
+difference [95\,\% interval], positive in favour of the change.}\label{tab:changes}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l>{\raggedright}p{6.3cm}>{\raggedright}p{7.2cm}l}
+\toprule
+test & change & effect & kept? \\
+\midrule
+1 & SCIP streams LP solutions of its tree nodes to the EA (two-process) & $d$ $+0.05$; 3 better, 1 worse & yes$^{a}$ \\
+2 & repair clock: repair depth set per generation (two-process) & \texttt{item\_placement} better on 4 of 4 seeds, $d$ $+0.50$
+  & yes$^{b}$ \\
+4 & cuOpt feeds its solutions to the EA (pilot: 7 instances, one seed) & against SCIP alone 7 better, 0 worse; against
+  cuOpt alone 3 better, 4 worse & yes \\
+5 & Rank~1 chosen by cuOpt's diversity rule (two-process) & $d$ $-0.033$ $[-0.122, +0.050]$ & no \\
+6, 12 & LP decoding & two-process $d$ $+0.219$ $[+0.041, +0.429]$; three-process: $P$ ratio 0.758 on 2 targets
+  & yes \\
+7 & the EA backs off the GPU while it adds nothing & \texttt{chromaticindex1024-7} $P$ 0.545 $\to$ 0.091, but three
+  checks that it worked as intended failed & no \\
+8 & the final harness's two cuOpt settings (Appendix~\ref{app:harness}) & no harm on the 3 instances where they can
+  act & yes \\
+9 & the EA backs off only until cuOpt's first solution & \texttt{chromaticindex1024-7} $d$ $+0.030$ (needed $\ge
+  +0.30$) & no \\
+10 & blocking wait on the GPU & the EA's generations fell to 0.82 of the control & no \\
+11, 15 & yielding wait on the GPU & first test fell short of the minimum number of EA generations; a follow-up
+  passed & yes$^{c}$ \\
+\bottomrule
+\multicolumn{4}{p{15.8cm}}{$^{a}$Kept on without a rule fixed before its runs; not credited with a gain.
+$^{b}$With two stated deviations from its own rules. $^{c}$The follow-up loosened one bar after the failure was
+known.}
+\end{tabular}
+\end{table}
 
-\subsection{Main claim: the coupling against either method alone}
-\pending{H1a (A3 vs A0) and H1b (A3 vs A5).}
+The last two changes kept, LP decoding and the yielding wait, were tested apart and first ran together in the
+checkpoint runs. LP decoding lowered $P$ on both of its target instances on all four seeds: \texttt{item\_placement}
+from 0.330 to 0.198 and \texttt{sing44} from 0.473 to 0.411 (test~12). The yielding wait let the LP relaxation on the
+EA's core finish about twice as early on \texttt{ca} (20.0 and 20.2\,s instead of 37.3 and 38.3\,s). It was adopted
+only after a follow-up, chosen once its first test had failed (test~11), lowered the bar on EA generations from 0.921 to
+0.90 of the control's (test~15); its record estimates that this adds 12--19 percentage points to the chance of adopting
+a harmful change.
 
-\subsection{Secondary comparisons}
-\pending{H2 (uncoupled portfolio, with the live A3r check), H3 (SCIP $\parallel$ cuOpt), H4 (SCIP $\parallel$ SCIP),
-H5 (tuned SCIP).}
+\subsection{The checkpoint result}\label{sec:res-c1}
+On four seeds, the coupled system had a lower $P$ than cuOpt alone on 7 of the 11 instances of cuOpt's hard set and a
+higher one on 3 (Wilcoxon $p = 0.027$); the hint and the guard both passed their bars (Table~\ref{tab:readings}). Over
+all 17 instances, $P$ was lower on 8, higher on 8 and equal on 1. Figure~\ref{fig:pi} shows a typical instance.
 
-\subsection{Good infeasible solutions}
-\pending{H6 (x = 10\,\% vs 0 on the EA alone) and the descriptive lineage analysis.}
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{fig_pi.pdf}
+\caption{Gap of the best solution over time on \texttt{neos-3024952-loue}, seeds 0 and 1 of the checkpoint runs.
+$P$: coupled system 0.539 and 0.538, cuOpt alone 0.740 and 0.779, SCIP alone 1 (no solution in 120\,s; 6 October).
+Chosen by a rule fixed before plotting (coupled-system $P$ closest to the hard set's mean). Reference: MIPLIB's
+optimum, 26{,}756.}\label{fig:pi}
+\end{figure}
 
-\subsection{Integrity}
-\pending{Checker coverage, post accounting, crashes and voided blocks per arm.}
+\begin{table}[t]\centering\footnotesize
+\caption{The checkpoint result. Lower / higher: instances where the coupled system's mean $P$ is lower / higher than
+the solver alone's; the rest are ties at $P = 1$ (no solution on either side). Mean $P$: solver alone $\to$ coupled
+system. Per instance: Appendix~\ref{app:c1}.}\label{tab:readings}
+\gentable{table_readings}
+\end{table}
 
-\subsection{Exploratory}
-\pending{Protected elite ($y = 0$), CPU vs GPU EA, cuOpt alone, exchange direction and other ablations, HiGHS as the
-partner, 1{,}800\,s, strata, the frontier.}
+The two halves agree: seeds 0--1 read 0.809 and $+0.050$, seeds 2--3 0.787 and $+0.034$. Seeds 2--3 ran only because
+seeds 0--1 passed the 0.95 bar, so they alone are the check against that selection.
+
+Against SCIP alone, most of the drop on SCIP's hard set (0.889 to 0.448) is what cuOpt alone also reaches on the same
+cores and GPU (0.517); on these 15, the coupled system had a lower $P$ than cuOpt alone on 7, an equal one on 1 and a
+higher one on 7.
+
+cuOpt alone's crashes favour the result: it ended with a segmentation fault on 3 of the 4 seeds of
+\texttt{comp21-2idx} (not on 13 October), and these runs count with $P$ up to the crash (its one complete seed scored
+0.520; seed mean 0.692, coupled 0.577), so that instance's gain rests on them. Without them that instance is incomplete, and the fixed rules read the hint and
+the guard only on complete sets; on the other 10 hard instances, $P$ is lower on 6 and higher on 3 ($p = 0.055$).
+
+The harm check (Table~\ref{tab:terms}) flagged two instances. On \texttt{glass4} (its $d_i$ $-0.114$, band 0.057), a
+later four-seed check in one window put three configurations level (mean $P$ 0.218--0.223), so by a rule fixed
+beforehand the flag reads as day-to-day drift (test~18). Such drift can far exceed a band: \texttt{item\_placement}'s
+$P$ was 0.364 and 0.218 on two days with the same EA. On \texttt{comp21-2idx}, $d_i$ was $-0.051$ against a band of
+0.050, at the edge.
+
+\subsection{Where the system loses}\label{sec:res-loss}
+The largest loss is \texttt{chromaticindex1024-7} ($d$ $-0.847$ on four seeds), the largest negative term in the
+guard. Without the EA, cuOpt finds its first solution after 6.5--12.2\,s; inside the coupled system, only after about 65\,s
+(Table~\ref{tab:loss}). There the EA's first generation is a 48-s GPU repair of about 1{,}300 back-to-back kernel
+launches, and neither SCIP's presence nor cuOpt's thread count explains the delay (test~13). Some ways of backing the EA
+off the GPU brought cuOpt back early, others did not (Table~\ref{tab:loss}; tests 7, 9 and 14); why is not yet known.
+
+\begin{table}[htbp]\centering\footnotesize
+\caption{cuOpt's first solution on \texttt{chromaticindex1024-7} in every 120-s run that includes cuOpt, by what
+shares the GPU with it (7--16 October). Earlier harness: cuOpt's settings before the final harness's were adopted on
+13 October (test~8). Per run: Appendix~\ref{app:harness}.}\label{tab:loss}
+\begin{tabular}{>{\raggedright}p{10.5cm}rcc}
+\toprule
+what shares the GPU with cuOpt & runs & first (s) & $P$ \\
+\midrule
+nothing, or SCIP only (no EA) & 22 & 6.5--12.2 & 0.054--0.102 \\
+the EA using the GPU freely (the coupled system, any configuration) & 12 & 65.2--65.5 & 0.544--0.546 \\
+the EA on the GPU $\frac14$ or $\frac12$ of the time, or backing off while it adds nothing (earlier harness) & 4 &
+  8.3--12.3 & 0.069--0.103 \\
+the EA backing off until cuOpt's first solution (final harness, with or without its two cuOpt settings) & 4 &
+  63.2--63.5 & 0.527--0.529 \\
+the EA on the GPU $\frac18$ of the time (earlier harness) & 1 & 62.3 & 0.519 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The other seven losses to cuOpt alone are smaller (Appendix~\ref{app:c1}). On \texttt{doon} and \texttt{rail01},
+cuOpt alone found a solution on 2 and 1 of 4 seeds (after 24--114\,s), the coupled system on none. On \texttt{doon}, where cuOpt
+alone also found none in two runs of 15 October, a two-seed diagnostic ruled out cuOpt's three-core share and SCIP's
+presence (test~13); \texttt{rail01} has not been
+diagnosed. No arm found a solution on \texttt{cryptanalysiskb128n5obj16}.
+\FloatBarrier

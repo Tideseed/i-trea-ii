@@ -1,19 +1,75 @@
+% Appendix D (rewritten 2026-10-16 by the appendix writer, <= 1 page). Sources: the previous reproducibility appendix
+% (fact-checked); counts re-counted by the appendix writer on the run table of 2026-10-16 13:01 (1,497 rows, 18
+% synthetic, 1,469 completed, 10 failed; 192,602 incumbents, 28 rejected in 13 runs; C1 sets 222 runs, 18,098 of
+% 18,100 passed); SHA-256 of configs/frozen-v2.yaml and the job files re-computed; EA hash 835c7c5a249c re-computed
+% with itrea.config.EAConfig.from_yaml; parameter values from configs/frozen-v2.yaml and src/itrea/config.py defaults.
 \section{Reproducibility}\label{sec:repro}
-\pending{To be completed with the release.} The project repository holds the code (the Python package
-\texttt{itrea}), the configurations with their hashes, the job files that define every run (instance, arm, seed,
-budget, configuration), the pre-registration and every later decision, a research journal, and the derived tables.
-The raw run trajectories and every stored incumbent vector will be published as a versioned archive with checksums and
-the code revision they belong to, as for the predecessor study~\citep{orbay2026optopt}.
+Every number here comes from the code, configurations and job files in the project repository (to be made public
+with the final version). The chain, with analysis steps pinned (\texttt{OMP\_NUM\_THREADS=1 nice -n 19 taskset -c
+10-14}); each test's job file and reading command are in its decision record and the experiment index:
+\begin{enumerate}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item \texttt{itrea make-jobs} (or a test's tool) writes \path{jobs/*.jsonl}: instance, arm, seed, budget,
+  configuration, harness, set, block.
+\item \texttt{itrea pool jobs/<file>.jsonl} writes \path{traces/raw/<set>/<run-id>/}: run record, logs, every
+  incumbent.
+\item \texttt{itrea build-runs} checks every incumbent and writes \path{datasets/runs.parquet} and
+  \path{datasets/incumbents_checked.parquet}.
+\item The C1 readings are saved by \texttt{itrea c1r-report -{}-a9 ysync-ld0 -{}-json logs/d030-reading.json}, then
+  \texttt{tools/d031\_report.py -{}-d030-json logs/d030-reading.json -{}-json logs/d031-reading.json}.
+\item \texttt{tools/paper\_tables.py} writes \path{paper/generated/} and \path{paper/figures/}; \texttt{-{}-check}
+  compares byte for byte.
+\end{enumerate}
 
-\paragraph{Re-analysis and replication.} Re-deriving every table from the archived trajectories must reproduce the
-published tables exactly. Re-running the jobs tests whether the conclusions hold on another machine; the numbers will
-differ, because every metric is a wall-clock measurement on one DGX Spark and GPU arithmetic is not bit-reproducible.
+\paragraph{Runs and the checker.} A run record holds the configuration hashes, harness, cores, caps, versions,
+revision, a clean-tree flag and temperatures. The checker re-reads the model with another library, decides bounds,
+integrality and objective exactly, and re-checks rows exactly where floating point could be wrong (tolerance
+$10^{-6}$, all arms); only passing incumbents enter $P$. Run table of 16 October, 13:01: 1{,}479 runs (1{,}469 completed, 10 failed and scored up to the failure);
+28 of 192{,}602 incumbents, in 13 runs, failed. In the four C1 run sets (222 runs, all from a clean tree), 18{,}098 of
+18{,}100 passed.
 
-\paragraph{Checked solutions.} No reported objective rests on a solver's own feasibility check: every incumbent is
-re-read and checked by an independent checker with another library, in exact rational arithmetic for bounds,
-integrality and the objective and with an exact re-check of any row near the tolerance.
+\paragraph{The final configuration} (frozen at the checkpoint). \path{configs/frozen-v2.yaml}, a byte copy of
+\path{configs/itrea2-dev-rc-3way-ysync-ld0.yaml} (SHA-256 \texttt{d5907fc3\ldots}): EA hash \texttt{835c7c5a249c}, A9
+run hash \texttt{f345de0ab936} (the last field of every A9 run id). Run hashes of cuOpt alone and SCIP alone:
+\texttt{82a371305f88}, \texttt{27f3171fac78}. A repository test fails if the frozen file carries another hash pair.
+Table~\ref{tab:params} lists its parameters.
 
-\paragraph{Environment.} Python 3.12; NumPy 2.4.6, SciPy 1.18.1, CuPy 14.2.0 (CUDA 13), HiGHS 1.15.1, SCIP 10 through
-PySCIPOpt 6.2.1, NVIDIA cuOpt 26.08, Redis 7 with redis-py 8.1.0; Ubuntu 24.04 with kernel 6.17 and NVIDIA driver
-580.173.02. Instances are public: MIPLIB 2017~\citep{gleixner2021miplib}, PGLib-UC~\citep{pglibuc2019} built with
-its own formulation~\citep{knueven2020uc}, and ML4CO~\citep{gasse2022ml4co}.
+\begin{table}[!tb]\centering\scriptsize
+\caption{Parameters of the final configuration: (f) set in the file, others code defaults
+(\texttt{src/itrea/config.py}).}\label{tab:params}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{>{\raggedright}p{1.7cm}>{\raggedright}p{6.05cm}>{\raggedright}p{1.7cm}>{\raggedright\arraybackslash}p{6.05cm}}
+\toprule
+part & value & part & value \\
+\midrule
+population & 256 (fewer if it exceeds the GPU pool); 256 children per generation & ranks & Rank~0 at most 10\,\% of
+  the population; Rank~1 the best 10\,\% of the feasible \\
+selection & binary tournament: Rank~1, 0, 2, then objective, then violation & variation & crossover 0.9 (agreement
+  0.6, uniform 0.2, constraint block 0.2); mutation of Poisson(4) integers \\
+repair & feasibility jump, at most 20{,}000 moves, stop after 1{,}000 without gain (f) & repair clock & active (f);
+  horizons $2^7$--$2^{16}$ steps, or none \\
+strategies & four (row scale $\times$ LP guidance) (f); redraw 0.1; each at least 5\,\% & stagnation & after 50
+  generations, 25\,\% of Rank~2 replaced by immigrants \\
+EA's LP & HiGHS on the EA's core (f), 60-s limit & LP stream & on (f); at most 2\,\% of SCIP's time; 16 points,
+  2 per tick, 4 children each \\
+LP decoding & on (f), after the EA's LP and at its priority (f); up to 4 LPs per batch, 2\,s (infeasible 1\,s, first
+  10\,s) & exchange & mailbox polled every 0.25\,s; up to 8 SCIP pool solutions within 1\,\%; cuOpt's incumbents \\
+GPU wait & CUDA yield flag (f) & other & frontier of 32 (output only); feasibility tolerance $10^{-6}$; GPU pool
+  12\,GiB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Re-analysis and replication.} A re-analysis must match exactly (\texttt{itrea reproduce} covers the
+pre-registered chain, not yet the per-test reports or this table writer); a replication will differ (wall-clock
+metrics, GPU arithmetic, thermal rests). Provisional references: the study's best on the unit-commitment instance (it
+re-scores those runs) and the screening's best on the item-placement instance.
+
+\paragraph{Environment.} Ubuntu 24.04, kernel 6.17.0-1031-nvidia, driver 580.173.02, CUDA 13.0; Python 3.12.3,
+NumPy 2.4.6, SciPy 1.18.1, CuPy 14.2.0, HiGHS 1.15.1, PySCIPOpt 6.2.1 (SCIP 10.0), cuOpt 26.08, pandas 3.0.3, PyArrow
+23.0.1 (pinned in \path{pyproject.toml}; each run record stores its versions).
+
+\paragraph{Not yet public.} The repository is private until the final version. Raw runs (\path{traces/raw/}, about
+3.5\,GB) and run tables are to be published as a versioned archive, as for the predecessor
+study~\citep{orbay2026optopt}; step~4 regenerates the readings in \path{logs/}. Instances and GAMS's archive are
+third-party data. Open (issue~\#36): the checker accepted incumbents below MIPLIB's optimum on \texttt{glass4} (11
+runs, two in the C1 sets) and \texttt{mas74}; one rule for all arms is due before the second pre-registration.

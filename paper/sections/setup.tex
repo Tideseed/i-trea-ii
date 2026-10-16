@@ -1,0 +1,59 @@
+\section{Experimental setup}\label{sec:setup}
+Phase~1 is development: the method was changed and judged openly on a small set of instances, so every number in
+Section~\ref{sec:results} is descriptive. Table~\ref{tab:terms} defines the terms used from here on.
+
+\begin{table}[t]\centering\footnotesize
+\caption{Terms used in this report.}\label{tab:terms}
+\begin{tabular}{>{\raggedright}p{2.6cm}>{\raggedright\arraybackslash}p{13.0cm}}
+\toprule
+term & meaning \\
+\midrule
+primal integral $P$ & $P(120)$: the gap $|v-r|/\max(|v|,|r|)$ of the best checked solution value $v$ to the reference
+  $r$ (1 before the first solution or if the signs differ), averaged over the 120-s budget. \\
+coupled system & the method of Section~\ref{sec:method}; its $P$ is that of the best solution held by any of its
+  processes. \\
+cuOpt alone & cuOpt~26.08 on the coupled system's share of the machine (5 of its 20 CPU cores and the GPU), run in
+  the same window. \\
+SCIP alone & SCIP~10 on one CPU core, two seeds, run on 6--7 October. \\
+bounded difference $d$ & per instance, on seed means: $(P_\text{alone} - P_\text{coupled}) / \max(P_\text{alone},
+  P_\text{coupled}, 0.001)$, in $[-1, 1]$; positive when the coupled system has the lower $P$. \\
+hard set & the instances where a solver alone has $P \ge 0.5$: 11 for cuOpt, fixed on earlier runs of cuOpt alone
+  with three cores; 15 for SCIP, on the compared runs (Section~\ref{sec:limits}). \\
+hint & mean $P$ of the coupled system over that of cuOpt alone, on cuOpt's hard set; present if at most 0.95. It only
+  decides whether testing continues. \\
+guard & mean $d$ against cuOpt alone over all 17 instances; holds if at least $-0.05$. \\
+harm check & per instance, the final configuration against the one before LP decoding and the yielding wait (13
+  October); flags if their $d_i$ (as $d$) is below minus the instance's seed-to-seed band (at least 0.05). \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Machine.} One NVIDIA DGX Spark: a GB10 with 10 Cortex-X925 and 10 Cortex-A725 CPU cores, a Blackwell GPU and
+121\,GiB of memory shared by CPU and GPU. The software is SCIP~10 through PySCIPOpt 6.2.1, HiGHS 1.15.1, cuOpt~26.08
+and CuPy 14.2.0 on CUDA~13. No other GPU process ran beside the coupled system. Runs start only below temperature
+gates, and a run whose GPU clock drops is voided and repeated (Appendix~\ref{app:harness}).
+
+\paragraph{Instances.} We used 17 public instances (Appendix~\ref{app:c1}). Nine were chosen after a screening run of
+SCIP alone. Seven are MIPLIB 2017 instances~\citep{gleixner2021miplib} on which SCIP held a large gap or found no
+solution; one is a PGLib-UC unit-commitment case~\citep{pglibuc2019,knueven2020uc} and one an ML4CO item-placement
+instance~\citep{gasse2022ml4co}. Eight MIPLIB instances from other families were added later. All 17 were chosen by
+looking at results, the method was tuned on them, and they are excluded from later test sets. References are MIPLIB's
+optimal values and provisional best known values for the other two.
+
+\paragraph{Arms.} Several processes can do better than one simply by being several. cuOpt alone therefore gets the
+coupled system's whole machine share: two Cortex-X925 cores, three Cortex-A725 cores and the GPU. Both arms of each
+instance and seed ran back to back in one window, under the same memory caps. SCIP alone had fewer resources: one core,
+no GPU, run on 6--7 October. Only solutions that pass an independent exact checker count in $P$.
+
+\paragraph{Statistics.} We report mean $d$ with a 95\,\% percentile bootstrap interval over instances (10{,}000
+resamples)~\citep{dicicco1996bootstrap} and the Wilcoxon signed-rank test on $d$ (ties dropped). The checkpoint
+result uses seeds 0--3 (SCIP alone: 0--1); development tests used one to six seeds.
+
+\paragraph{How changes were judged.} Each change was tested against the unchanged configuration in the same window,
+under a dated record with a written reading rule. It was kept only if its checks all passed: validity, the intended
+mechanism, no harm per instance, and the hint. Most rules were fixed before any run was read; Appendix~\ref{app:devrecord} lists the
+exceptions. A crashed run counts for its arm, scored up to the crash.
+
+\paragraph{The checkpoint.} At the end of phase~1 the author decides whether to go on to unseen instances, reading the
+hint, guard and harm check under rules fixed before any checkpoint run was read.
+\FloatBarrier

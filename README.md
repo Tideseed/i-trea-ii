@@ -1,43 +1,52 @@
 # I-TREA II
 
-**A GPU evolutionary algorithm (EA) that runs beside exact MIP solvers and trades solutions with them while they run.**
+**A GPU evolutionary algorithm (EA) that runs beside exact MIP solvers while they run: it trades solutions with SCIP both
+ways and takes NVIDIA cuOpt's.**
 The aim: good feasible solutions sooner than SCIP alone or NVIDIA cuOpt alone, on each solver's hardest instances.
 
 ## What this means for SCIP and cuOpt users
 
 **Short answer: yes, there is a real chance of a large gain on hard instances, but not on every one.** On instances where a
 solver alone struggles to find good solutions in two minutes, running it inside I-TREA II found good solutions much sooner
-in our interim tests: about **half** the primal integral of SCIP alone and **a fifth less** than cuOpt alone on identical
-hardware. Where cuOpt alone already finds a good solution within seconds, I-TREA II can be slower.
+in our interim tests: about **half** the primal integral of SCIP alone and **a fifth less** than cuOpt alone on the same
+share of the machine (5 of its 20 cores and the GPU). cuOpt on the whole machine, which is stronger, has not been
+compared yet. Over all 17 instances, I-TREA II was better than cuOpt alone on 8 and worse on 8; where cuOpt alone already
+finds a good solution within seconds, I-TREA II can be slower.
 
-| If you use … | on its hard instances¹ | change in P(120)² with I-TREA II | largest gains | losses |
+| If you use … | its hard instances¹ | change in mean P(120)² with I-TREA II | largest gains | losses |
 |---|---|---|---|---|
-| **SCIP** (one CPU core, its default) | 15 of our 17 | **−50 %** on average; better on 12, worse on 0 | ca 1.00 → 0.26 (SCIP alone found no solution), neos-960392 1.00 → 0.04 (SCIP alone stayed at a trivial solution) | none |
-| **cuOpt** (same 5 cores + GPU as I-TREA II) | 11 of our 17 | **−20 %** on average; better on 7, worse on 3 (p = 0.03) | neos-960392 0.58 → 0.04, item_placement 0.49 → 0.22, ca 0.56 → 0.26 | doon 0.86 → 1.00, rail01 0.98 → 1.00, toguru 0.55 → 0.61 |
+| **SCIP** (one CPU core, its default; 6–7 October) | 15 of our 17 | **−50 %** (cuOpt alone on the same share: −42 %); better on 12, worse on 0 (p = 0.0005) | neos-960392 1.00 → 0.04 (SCIP alone stayed at a trivial solution), ca 1.00 → 0.26 (SCIP alone found no solution)³ | none |
+| **cuOpt** (same 5 of 20 cores + GPU as I-TREA II) | 11 of our 17 | **−20 %**; better on 7, worse on 3 (p = 0.03) | neos-960392 0.58 → 0.04, ca 0.56 → 0.26, item_placement 0.49 → 0.22 | doon 0.86 → 1.00, toguru 0.55 → 0.61, rail01 0.98 → 1.00 |
 
-¹ Hard = the solver alone has P(120) ≥ 0.5. ² P(120) = the average gap to the best known solution over a 2-minute run:
-1 = no solution, 0 = optimal from the first second; lower is better. Four seeds per instance.
+¹ Hard = the solver alone had P(120) ≥ 0.5 (for cuOpt, on earlier runs of cuOpt alone on three cores; item_placement and
+sing44 now sit just below). ² P(120) = the average gap to the best known solution over a 2-minute run: 1 = no solution, or only one with a gap
+of 1 (e.g. a trivial all-zero solution); 0 = optimal from the first second; lower is better. Four seeds per instance for
+I-TREA II and cuOpt alone, two for SCIP alone. p: Wilcoxon signed-rank. ³ For SCIP: the largest gains among the
+instances where I-TREA II also beats cuOpt alone. Short names: ca = ca__Scenario400_reserves_1 (unit commitment),
+item_placement = item_placement_9903, doon = neos-2746589-doon, toguru = neos-4763324-toguru.
 
-- **Why it helps:** I-TREA II runs SCIP, cuOpt and a GPU evolutionary algorithm (EA) side by side and passes each one's
-  best solutions to the others. SCIP's hard cases gain from cuOpt's GPU heuristics and the EA's LP-based repair;
-  cuOpt's hard cases gain from SCIP's incumbents and the EA's repair.
+- **Why it may help:** I-TREA II runs SCIP, cuOpt and a GPU EA side by side and passes the best solutions on. How much of
+  the gain comes from each part is not yet measured; in development tests, LP decoding (an LP-based repair of the EA's
+  candidates) helped on its two target instances (item_placement 0.330 → 0.198, sing44 0.473 → 0.411).
 - **What the SCIP comparison measures:** adopting I-TREA II on a GPU machine — SCIP alone uses one core, I-TREA II five
-  cores and the GPU. Much of that gain comes from having a GPU solver at all; the cuOpt row, on identical hardware, shows
-  what I-TREA II adds beyond cuOpt.
-- **When not to expect it:** if cuOpt alone already finds a good solution within seconds, the EA's GPU work slows cuOpt
-  down (chromaticindex: 0.08 → 0.54, outside cuOpt's hard set). Where cuOpt alone finds a solution only late and on some
-  seeds (doon, rail01), I-TREA II missed it. Where no solver finds one (cryptanalysis), neither does I-TREA II.
-- **For the cuOpt and SCIP developers:** partner solutions and LP-based repair lift each solver's weakest cases. cuOpt
-  would gain more if it could take outside solutions mid-solve (its `SetSolutionCallback`, fixed for presolve in 26.10 on
-  our report) and if two processes could share the GPU without slowing cuOpt (CUDA MPS, planned).
+  cores and the GPU. Most of that gain is what cuOpt alone also reaches on the same five cores and GPU (mean P 0.517 on
+  SCIP's 15, against 0.448 for I-TREA II and 0.889 for SCIP alone); the cuOpt row shows what I-TREA II adds beyond cuOpt.
+- **When not to expect it:** outside cuOpt's hard set (6 of the 17), I-TREA II was worse on 5, by at most 0.022
+  in P except on chromaticindex1024-7: 0.08 → 0.54, because the EA's GPU work delays cuOpt's first solution from
+  6.5–12.2 s to 65 s. Where cuOpt alone finds a solution only on some seeds (doon 2 of 4, rail01 1 of 4), I-TREA II found none;
+  the cause is not yet known (on doon, cuOpt's three-core share and SCIP's presence were ruled out at two seeds; rail01
+  is undiagnosed). Where no solver finds one (cryptanalysis), neither does I-TREA II.
+- **For cuOpt developers:** cuOpt might gain more if it could take outside solutions mid-solve (its
+  `SetSolutionCallback`, fixed for presolve in 26.10 after our bug report; untested here, planned for v1.1, after 26.10
+  is released) and if two processes could share the GPU without slowing cuOpt (CUDA MPS, planned for v1.1).
 - **How sure:** interim development results — 17 instances that we tuned on, 2-minute runs, one DGX Spark (GB10), cuOpt
-  26.08; SCIP alone ran on earlier days; cuOpt alone crashed on comp21 on 3 of 4 seeds (counted as its result). The test
+  26.08; SCIP alone ran on 6–7 October; cuOpt alone crashed on comp21 on 3 of 4 seeds (counted as its result). The test
   on unseen instances, with cuOpt 26.10, follows in November ([Roadmap]).
 
 ## Summary
 
 - **Stage:** phase 1 (development, on cuOpt 26.08) closed on Fri 2026-10-16 with the author's (Berk Orbay's) go at
-  checkpoint C1 ([D-033]). No confirmatory run yet.
+  the phase-1 checkpoint ([decision record D-033][D-033]). No confirmatory run yet.
 - **C1 result (interim, four seeds):** A9 (SCIP + GPU EA + cuOpt) against cuOpt alone on the same hardware share: hint
   **0.798** (needs ≤ 0.95), guard **+0.045** (needs ≥ −0.05); 136 runs, all valid ([D-031]).
 - **Reported beside, not criteria:** mean P(120) (lower is better) 0.690 → 0.550 (−20 %) against cuOpt alone on its 11

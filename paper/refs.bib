@@ -512,7 +512,7 @@
   year         = {2026},
   url          = {https://github.com/NVIDIA/cuopt/tree/c2f3df54af31d51c106791812ad1829ab0ca5caa/cpp/src/mip_heuristics/diversity},
   urldate      = {2026-10-05},
-  note         = {Read at commit c2f3df54af31d51c106791812ad1829ab0ca5caa (5 October 2026); user guide version 26.08}
+  note         = {Read at commit c2f3df54af31d51c106791812ad1829ab0ca5caa (5 October 2026), and at commit dfbbcc5a7693968144531f5d6a3b7fe38102ebd5 (8 October 2026) for the population's add-solution and clearing rule; user guide version 26.08}
 }
 
 @article{kempke2025fixprop,
@@ -998,4 +998,49 @@
   doi    = {10.5281/zenodo.22947442},
   url    = {https://doi.org/10.5281/zenodo.22947442},
   note   = {Technical report; code at \url{https://github.com/berkorbay/optopt}}
+}
+
+% ===========================================================================
+% F. Solvers used (entries copied from optopt's refs.bib, 2026-10-16; each
+%    has a legally readable source: arXiv, open access CC BY 4.0, or the
+%    open-source repository)
+% ===========================================================================
+
+@misc{hojny2025scip10,
+  author = {Hojny, Christopher and Besan{\c{c}}on, Mathieu and Bestuzheva, Ksenia and Borst, Sander and Dion{\'\i}sio, Jo{\~a}o and others},
+  title  = {The {SCIP} Optimization Suite 10.0},
+  year   = {2025},
+  eprint = {2511.18580},
+  archivePrefix = {arXiv},
+  doi    = {10.48550/arXiv.2511.18580},
+  note = {Preprint: \url{https://arxiv.org/abs/2511.18580}}
+}
+
+@article{huangfu2018parallelizing,
+  author  = {Huangfu, Q. and Hall, J. A. J.},
+  title   = {Parallelizing the Dual Revised Simplex Method},
+  journal = {Mathematical Programming Computation},
+  volume  = {10},
+  number  = {1},
+  pages   = {119--142},
+  year    = {2018},
+  doi     = {10.1007/s12532-017-0130-5},
+  note    = {Open access (CC BY 4.0): \url{https://link.springer.com/article/10.1007/s12532-017-0130-5}}
+}
+
+% HiGHS: no journal paper describes the MIP solver; the release used is named in the text.
+@misc{highs,
+  author       = {{HiGHS development team}},
+  title        = {{HiGHS}: High-performance parallel linear optimization software ({LP}, {MIP}, {QP})},
+  howpublished = {\url{https://highs.dev/}},
+  note         = {MIT licence; release 1.15.1 used here. Source: \url{https://github.com/ERGO-Code/HiGHS}},
+  year         = {2026}
+}
+
+@misc{cuopt,
+  author       = {{NVIDIA}},
+  title        = {{NVIDIA cuOpt}: {GPU}-accelerated decision optimization ({LP}, {MILP}, routing)},
+  howpublished = {\url{https://github.com/NVIDIA/cuopt}},
+  note         = {Open source (Apache-2.0); release 26.08 used here},
+  year         = {2026}
 }

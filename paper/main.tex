@@ -1,7 +1,12 @@
-% I-TREA II -- paper source (skeleton). Working title; no confirmatory results yet (status 2026-10-10: screening and
-% development runs exist; the v1 targets are vault D-019; this draft is rewritten for v1, issue #12).
-% Build: latexmk -pdf main.tex   (bibliography: refs.bib, legally readable works only;
-% paywalled works are named only in Appendix~\ref{app:paywalled}, without bibliography entries).
+% I-TREA II -- interim report on development (phase 1), 17 October 2026.
+% Limits: abstract <= 150 words; main text (title page to the start of References) <= 8 pages; whole PDF <= 15 pages.
+% Main text: sections/{introduction,method,setup,results,related,limitations,conclusion}.tex. It uses no internal
+% codes (no decision-record ids, arm codes, set or variant names); those appear only in the appendices.
+% Results are development data on 17 instances (descriptive, interim). The phase-1 result is the four-seed reading
+% of the final configuration (D-031, logs/d031-reading.json); the author's go at checkpoint C1 is D-033.
+% Tables in generated/ and figures in figures/ are written by tools/paper_tables.py; never edit them by hand.
+% Bibliography: refs.bib, legally readable works only; paywalled works are named only in Appendix~\ref{app:paywalled}.
+% Build: cd paper && OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 latexmk -pdf -interaction=nonstopmode main.tex
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
@@ -12,48 +17,128 @@
 \usepackage{array}
 \usepackage{graphicx}
 \usepackage{xcolor}
+\usepackage{placeins}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
 \usepackage[numbers,sort&compress]{natbib}
+\usepackage{xurl}
 \usepackage[hidelinks]{hyperref}
 \graphicspath{{figures/}}
+% Long instance names in \texttt{} do not hyphenate; let TeX stretch lines instead of running into the margin.
+\setlength{\emergencystretch}{3em}
+% Let a page hold more float area, so tables and figures stay next to their text.
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.5}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.75}
 
 % A visible marker for text that still depends on results or decisions.
 \newcommand{\pending}[1]{\textcolor{gray}{[\emph{#1}]}}
+% A table written by the analysis code into generated/; a visible marker while the file does not exist yet.
+\newcommand{\gentable}[1]{\IfFileExists{generated/#1.tex}{\input{generated/#1}}{%
+  \begin{center}\pending{table \texttt{\detokenize{generated/#1.tex}} not yet written}\end{center}}}
 
-\title{I-TREA II: A GPU Evolutionary Algorithm Coupled with an Exact MIP Solver\\
-\large (working title)}
+\title{I-TREA II: a GPU evolutionary algorithm\\ coupled with MIP solvers ---\\
+interim report on development (phase~1)}
 \author{Berk Orbay\\ \small\texttt{berk.orbay@tideseed.com}\thanks{Designed and carried out with AgentRA (Agent
-Research Assistant; AgentRA is mainly Claude Opus 5.5, working through Claude Code), under the author's direction;
-see the AI assistance statement (Section~\ref{sec:ai}). Every number in a final version will be produced by the code,
-configurations and job definitions in the project repository.}}
-\date{Draft --- development stage, no confirmatory results (10 October 2026)}
+Research Assistant; mainly Claude Opus 5.5, working through Claude Code), under the author's direction; see
+Appendix~\ref{sec:ai}. Every result of this study was produced by the code, configurations and job definitions in the
+project repository (to be made public with the final version).}}
+\date{17 October 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-\pending{Abstract to be written after the confirmatory experiment.} Users of mixed-integer programming (MIP) solvers
-often need a good feasible solution within a fixed time rather than a proof of optimality. We study whether an
-evolutionary algorithm that runs on a GPU, coupled with an exact MIP solver so that the two exchange solutions in both
-directions while they run, finds good solutions sooner than either method alone. The population keeps a capped share
-of infeasible solutions whose objective is better than the best feasible one, an idea carried over from the
-interactive three-rank evolutionary algorithm I-TREA~\citep{orbay2011itrea}. The hypotheses, arms, instance-pool rules,
-metrics and analysis were fixed before any experiment. This draft describes the design; it contains no confirmatory
-results.
+On an NVIDIA DGX Spark, I-TREA~II couples a GPU evolutionary algorithm (EA) with SCIP, exchanging solutions both
+ways; the EA also takes NVIDIA cuOpt's solutions. Its population keeps a capped share of infeasible solutions whose
+objective beats the incumbent's. This report covers development on 17 public instances that were chosen and
+tuned on (120-s runs). On the 11 instances hard for cuOpt alone, I-TREA~II's primal integral (0: optimal at once; 1: no
+useful solution) was lower than with cuOpt alone (same cores and GPU) on 7 and higher on 3 (mean 0.690 to 0.550, four
+seeds). On the 15 hard for SCIP alone (one core, 6--7 October), it was lower on 12 and tied on 3 (0.889 to 0.448;
+cuOpt alone on these 15: 0.517). In the largest loss, the EA delays cuOpt's first solution from 6.5--12.2 to 65\,s.
+Unseen instances are tested next.
 \end{abstract}
 
+% Inserted directly after the abstract (Berk 2026-10-16: "clearly and concisely explain how these findings help NVIDIA cuOpt
+% and SCIP, at the almost top of the README and paper"). Sources: logs/d031-reading.json readings[0].four (table, vs_a6f,
+% vs_a0_17); cuOpt alone's mean P on SCIP's hard set (0.517) and the 8 / 8 count over the 17 computed from four.table;
+% the largest loss outside cuOpt's hard set other than chromaticindex: neos-3656078-kumeu 0.085 -> 0.107 (+0.022);
+% doon (2 of 4 seeds) and rail01 (1 of 4) from datasets/runs.parquet, sets c1r-ysync-ld0 and c1r-ysync-ld0-s23.
+% Review fix 2026-10-16: the numbers of the abstract and Table tab:users are not repeated here.
+\paragraph{What this means for SCIP and cuOpt users.}
+In short: on instances hard for a solver alone, there is a real chance of a large gain, but not on every instance
+(Table~\ref{tab:users}). Most of the gain over SCIP alone is what cuOpt alone also reaches on the same five cores and GPU
+(mean $P$ on SCIP's hard set: SCIP alone 0.889, cuOpt alone 0.517, I-TREA~II 0.448). cuOpt on the whole machine, which is stronger
+(Section~\ref{sec:limits}), has not yet been compared. Over all 17 instances, I-TREA~II was better than cuOpt alone on 8
+and worse on 8. On the 6 outside cuOpt's hard set it was worse on 5, by at most 0.022 in $P$ except on
+\texttt{chromaticindex1024-7} (0.08 to 0.54), where the EA delays cuOpt's first solution (Section~\ref{sec:res-loss}). On
+\texttt{doon} and \texttt{rail01}, cuOpt alone found a solution on 2 and 1 of 4 seeds, I-TREA~II on none. All runs
+lasted 2 minutes, on instances we tuned on.
+
+% Short instance names in the table and the main text: ca = ca__Scenario400_reserves_1, item_placement =
+% item_placement_9903, doon = neos-2746589-doon, toguru = neos-4763324-toguru (Appendix app:c1, Table tab:d031).
+% SCIP row, largest gains: among the instances where I-TREA II also beats cuOpt alone (neos-960392 0.584 -> 0.042,
+% ca 0.555 -> 0.261; four.table); cuOpt alone on SCIP's 15: 0.517 against SCIP alone's 0.889 (-42 %).
+\newcommand{\chg}[2]{\mbox{$#1\to#2$}}
+\begin{table}[t]\centering\small
+\caption{Change in the primal integral $P(120)$ (lower is better; 0 = optimal at once, 1 = no solution or a gap of 1
+throughout) when a solver runs inside I-TREA~II, on that solver's hard set: the instances where it alone had $P(120)\ge
+0.5$ (Table~\ref{tab:terms}). Seed means: four seeds for I-TREA~II and cuOpt alone, run back to back; two for SCIP
+alone. 2-minute runs on one DGX Spark; $p$: Wilcoxon signed-rank. In the SCIP row, the bracket gives the change from SCIP
+alone to cuOpt alone, and the largest gains are among the instances where I-TREA~II also beats cuOpt alone. ca: the unit-commitment case; full names in Appendix~\ref{app:c1}.}
+\label{tab:users}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}>{\raggedright}p{2.4cm}>{\raggedright}p{1.35cm}>{\raggedright}p{3.3cm}>{\raggedright}p{4.45cm}%
+>{\raggedright\arraybackslash}p{3.5cm}@{}}
+\toprule
+solver alone & hard set & change in mean $P$ & largest gains & losses \\
+\midrule
+SCIP (one core; 6--7 October) & 15 of 17 & $-50\,\%$ (cuOpt alone: $-42\,\%$); 12 better, 0 worse; $p=0.0005$ &
+  \mbox{neos-960392} \chg{1.00}{0.04}; ca \chg{1.00}{0.26} & none \\
+cuOpt (same 5 of 20 cores and GPU) & 11 of 17 & $-20\,\%$; 7 better, 3 worse; $p=0.03$ &
+  \mbox{neos-960392} \chg{0.58}{0.04}; ca \chg{0.56}{0.26}; \mbox{item\_placement} \chg{0.49}{0.22} &
+  doon \chg{0.86}{1.00}; toguru \chg{0.55}{0.61}; rail01 \chg{0.98}{1.00} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
 \input{sections/introduction}
-\input{sections/background}
 \input{sections/method}
-\input{sections/design}
+\input{sections/setup}
 \input{sections/results}
 \input{sections/related}
-\input{sections/reproducibility}
-\input{sections/ai-assistance}
+\input{sections/limitations}
+\input{sections/conclusion}
 
+% References and appendices are set smaller so that the whole PDF stays within 15 pages (2026-10-16).
+{\scriptsize\setlength{\bibsep}{0.5pt plus 0.3pt}
 \bibliographystyle{plainnat}
-\bibliography{refs}
+\bibliography{refs}}
 
 \appendix
-\input{sections/appendix}
+\footnotesize
+% Dense appendices (set here so the main text's layout is unchanged): more floats per page, tighter float,
+% caption and heading spacing; run-in paragraph headings in the body size.
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{5}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}\setlength{\floatsep}{6pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{3pt}\setlength{\belowcaptionskip}{2pt}
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}{-1.8ex \@plus -.4ex \@minus -.2ex}{0.8ex \@plus .2ex}%
+  {\normalfont\large\bfseries}}
+\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}{0.8ex \@plus .3ex \@minus .2ex}{-1em}%
+  {\normalfont\bfseries}}
+\makeatother
+% Appendices: A development record, B per-instance C1 table, C measurement harness and calibration,
+% D reproducibility, E AI assistance, F works without a legal free copy. They may use internal codes (D-NNN, arm
+% names); the main text refers to them only by label: app:devrecord, app:c1, app:harness, sec:repro, sec:ai,
+% app:paywalled. The full decision records and the dated corrections live in the repository (vault/50-decisions).
+\input{sections/app-devrecord}
+\input{sections/app-c1}
+\input{sections/app-harness}
+\input{sections/reproducibility}
+\input{sections/ai-assistance}
+\input{sections/app-paywalled}
 
 \end{document}

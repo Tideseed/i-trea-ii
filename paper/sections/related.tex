@@ -1,40 +1,33 @@
 \section{Related work}\label{sec:related}
-\pending{To be completed from the literature sweeps (vault: Prior art); every key below is in \texttt{refs.bib}.}
+Each part of I-TREA II has prior art. Our search ran on 5 October 2026, before the first experiment; works without a
+legally readable full text are listed in Appendix~\ref{app:paywalled}, not cited.
 
-\paragraph{Keeping infeasible solutions.} Deb's feasibility rules~\citep{deb2000efficient} made ``feasible beats
-infeasible'' the common default in constrained evolutionary optimisation; surveys cover the many
-alternatives~\citep{coello2002survey,mezuramontes2011survey}. Several methods keep infeasible solutions on purpose:
-ASCHEA steers the share of feasible individuals~\citep{hamida2000aschea}; FI-2Pop keeps a separate infeasible
-population~\citep{kimbrough2008fi2pop}; Farmani and Wright single out the infeasible solutions whose objective beats the
-best feasible one~\citep{farmani2003selfadaptive}; SMES copies the best infeasible solution into the next
-population~\citep{mezuramontes2005smes}; IDEA reserves a fixed share of the population for infeasible
-solutions~\citep{singh2011thesis}. I-TREA~\citep{orbay2011itrea} adds three ranks and an interactive decision maker.
+\paragraph{Keeping infeasible solutions.} Deb's feasibility rules made ``feasible first'' the common default in
+constrained evolutionary optimisation~\citep{deb2000efficient,coello2002survey,mezuramontes2011survey}. Several methods
+keep infeasible solutions on purpose: ASCHEA steers the feasible share~\citep{hamida2000aschea}, FI-2Pop keeps a
+separate infeasible population~\citep{kimbrough2008fi2pop}, and Farmani and Wright single out infeasible solutions
+better than the best feasible one~\citep{farmani2003selfadaptive}. SMES keeps the best infeasible
+solution~\citep{mezuramontes2005smes}, IDEA reserves a fixed share for infeasible solutions~\citep{singh2011thesis},
+and I-TREA added three ranks and an interactive decision maker~\citep{orbay2011itrea}.
 
-\paragraph{Heuristics cooperating with exact solvers.} Sequential hybrids pass solutions one way, for example a
-genetic algorithm's first integer solution as the starting incumbent of branch-and-bound~\citep{nieminen2003gamilp}. Two-way exchange of incumbents between a heuristic and a branch-and-bound
-solver running in parallel was shown for simulated annealing on MIPLIB 0-1 problems~\citep{nwana2005cooperative} and for
-a memetic algorithm beside a branch-and-cut solver on multidimensional knapsack
-problems~\citep{puchinger2005cooperating}; a classification of such combinations is in~\citep{puchinger2005combining},
-and later examples interleave memetic algorithms with branch-and-bound~\citep{gallardo2007mabnb}. Inside MIP solvers,
-combination and mutation heuristics recombine solutions from the solver's pool~\citep{berthold2006primal,hendel2022alns}.
-Among exact solvers, racing with shared incumbents is classified in~\citep{ralphs2018parallel} and measured, with
-modest gains, in~\citep{carvajal2014diversification,shinano2018fiberscip}, while commercial concurrent
-optimisation and some parallel portfolios race without exchanging solutions~\citep{gurobi2026concurrent,
-yilmaz2025parbalans}. ReXi runs local-search and large-neighbourhood workers beside SCIP workers over a shared
-solution pool~\citep{mexi2026rexi}. Matheuristics are surveyed in~\citep{boschetti2022matheuristics}.
+\paragraph{Heuristics working with exact solvers.} Two-way exchange of incumbents between a heuristic and a
+branch-and-bound solver running in parallel dates back two decades~\citep{nwana2005cooperative,puchinger2005cooperating,
+puchinger2005combining,gallardo2007mabnb}. MIP solvers recombine solutions from their own pool~\citep{berthold2006primal,
+hendel2022alns}, racing solvers that share incumbents gain modestly~\citep{ralphs2018parallel,
+carvajal2014diversification,shinano2018fiberscip}, and ReXi runs local-search workers beside SCIP workers over a shared
+pool~\citep{mexi2026rexi}.
 
-\paragraph{GPU primal heuristics and GPU evolutionary computation.} First-order LP solvers on the
-GPU~\citep{applegate2021pdlp,lu2023cupdlp}, GPU bound propagation~\citep{sofranac2022domainprop} and LP-free local
-search~\citep{luteberget2023feasibility,lin2024localmip} are the building blocks of current GPU MIP heuristics. NVIDIA
-cuOpt combines them into a GPU primal-heuristic stack~\citep{corduk2025gpuprimal} and, in its source, a GPU population
-with recombination that keeps infeasible members and protects the best feasible one, running beside cuOpt's own CPU
-branch-and-bound~\citep{corduk2025evoframework,nvidia2026cuoptsrc}. CHAP pools feasible and infeasible candidates of GPU
-and CPU heuristics~\citep{tjusila2026chap}; fix-and-propagate guided by GPU LP solutions has been applied to
-unit-commitment-scale models~\citep{kempke2025fixprop}; other recent work explores many subproblems or penalty-tempered chains in
-parallel on the GPU~\citep{pauphilet2026pangea,sim2026ptilp}. General GPU frameworks for evolutionary computation
-exist~\citep{huang2024evox,toklu2023evotorch,lange2022evosax}.
+\paragraph{GPU heuristics.} GPU LP solvers~\citep{applegate2021pdlp,lu2023cupdlp}, bound
+propagation~\citep{sofranac2022domainprop} and LP-free local search~\citep{luteberget2023feasibility,lin2024localmip}
+are the building blocks of current GPU MIP heuristics. cuOpt combines them~\citep{corduk2025gpuprimal} and runs a GPU
+population with recombination beside its own branch-and-bound~\citep{corduk2025evoframework,nvidia2026cuoptsrc}; its
+source prompted two of our tests (5 and 6). CHAP pools feasible and infeasible candidates of GPU and CPU
+heuristics~\citep{tjusila2026chap}; others fix and propagate from LP solutions~\citep{kempke2025fixprop} or
+search many subproblems at once~\citep{pauphilet2026pangea,sim2026ptilp}.
 
-\paragraph{Position.} We use these methods and claim no novelty for any of them. The combination studied here --- a
-GPU population with a capped, incumbent-relative share of infeasible solutions, coupled with an external general MIP
-solver through two-way exchange --- was not found in our search, which is a negative search result, not a priority
-claim. Works we could not read legally are listed separately in Appendix~\ref{app:paywalled}.
+\paragraph{Position.} The two closest works couple differently. cuOpt's population keeps infeasible members but ranks
+them behind the best feasible one, and works only with cuOpt's own branch-and-bound. ReXi shares a pool with SCIP on the
+CPU and keeps no infeasible solutions. Our search found no GPU population with a capped share of infeasible solutions
+better than the incumbent, coupled to an external MIP solver by two-way exchange. This is a negative search result, not
+a priority claim.
+\FloatBarrier

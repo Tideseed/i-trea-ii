@@ -1,16 +1,23 @@
+% Appendix E (rewritten 2026-10-16 by the appendix writer, <= 0.5 page). Sources: the previous AI assistance statement
+% (fact-checked 2026-10-16): who decided what (the decision records), the review counts (the repository's review
+% notes, vault/80-reviews), the two GPT-6.1 Sol consultations of 2026-10-06, the incidents log (vault/60-incidents).
+% The author's statements that set the direction, in his words, are quoted in the decision records D-007, D-010,
+% D-011, D-013, D-015, D-021, D-024 and the D-019 addendum.
 \section{AI assistance statement}\label{sec:ai}
-This study is designed and carried out with AgentRA (Agent Research Assistant), an AI agent working under the author's
-direction. AgentRA is mainly Anthropic's Claude Opus 5.5, working through Claude Code. It drafted the design, the
-pre-registration and the code, ran the literature searches (with sub-agents of the same kind), and will run the
-experiments and the analysis; the author set the research question and the main claim, made or approved the decisions
-recorded in the repository, and is responsible for the content.
+\paragraph{Who did what.} The author set the question and the direction and took the decisions that changed the
+study, among them the go at checkpoint C1 (D-033). AgentRA (Agent Research Assistant: Claude Code with Anthropic's
+Claude Opus~5.5) did the rest under his direction: design and pre-registration, the \texttt{itrea} package and tests,
+job files, every timed run, report tools and analyses, decision records, the journal and this report's text. Each
+record names who decided it and quotes the author's directing statements. The author is responsible for the content.
+Large tasks ran as Claude Code workflows (a main session and subagents of the same model on disjoint files: builders,
+adversarial reviewers, refuters and fixers; editors and fact-checkers). Twice, with the author's permission, AgentRA
+asked OpenAI's GPT-6.1 Sol, through the Hermes Agent harness, a design question, sharing only the design, public
+instance names and our measurements.
 
-Before any experiment, the design and the core code were reviewed by three independent reviewer agents in a Claude
-Code workflow, each with one lens (algorithm, methodology, systems). All 53 findings, the response to each and the
-resulting changes are recorded in the repository. \pending{External reviews of the finished study, if any, will be
-named here.}
-
-Every reference was checked for a legally readable full text; works that could not be read are listed only in
-Appendix~\ref{app:paywalled}. Every number in a final version will come from the code, configurations and job
-definitions in the repository and can be re-derived from the archived runs. Mistakes made during the study, including
-those made by the AI agent, are recorded in the repository's incident log.
+\paragraph{Limits.} The reviewers are instances of the agent's own model and can share its blind spots. No person or
+model of another family has reviewed this report or its results. The final version will add the counts of this report's
+own checks and any external review. Errors were caught by the author (three operational
+failures), adversarial checks (test-rule defects before any run was read), run records (a block with kernels compiled
+on the clock was voided) and fact-checks (D-030's crashed runs first reported at $P = 1$ score 0.776 and 0.782). A
+subagent once sent the author's e-mail address to an outside service unasked; prompts now forbid it. Corrections and
+incidents are recorded, dated, in the repository.

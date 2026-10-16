@@ -1,0 +1,27 @@
+% Review fixes 2026-10-16: each caveat has one home. The crashes, the two harm flags and day-to-day drift are stated with
+% their numbers in Section sec:res-c1; the combined configuration and its loosened rule in sec:res-dev. Concentration
+% recomputed on the four-seed result (logs/d031-reading.json readings[0].four.table, fixed 11): neos-960392 carries
+% 0.542 of the summed P reduction 1.535 (35 %); the ratio without it is 0.858. crna: D-031's note and the 2026-10-14
+% diagnosis note (at two seeds about +-0.04). sing44 0.471 and item_placement 0.488: four.table p_a6f.
+\section{Limitations}\label{sec:limits}
+The results describe the development instances; they do not show how the method does elsewhere.
+\begin{itemize}
+\item \textbf{Development data.} The 17 instances were chosen and tuned on (Section~\ref{sec:res-dev}: on eight new
+  ones an earlier version lost to cuOpt alone); the result rests on four seeds (SCIP alone: two).
+\item \textbf{The gain over SCIP alone is not attributed.} The coupled system contains a full cuOpt run, and the
+  checkpoint has no SCIP--cuOpt pair without the EA.
+\item \textbf{Selection.} cuOpt's hard set was fixed on earlier runs of cuOpt alone on three cores
+  (\texttt{item\_placement}, 0.488, and \texttt{sing44}, 0.471, now sit just below 0.5); SCIP's, on the compared runs.
+\item \textbf{Concentration.} \texttt{neos-960392} carries 35\,\% of the summed $P$ reduction on cuOpt's hard set
+  (the ratio without it: 0.858). \texttt{neos-2657525-crna} is bimodal ($\pm 0.04$ on the ratio at two seeds).
+\item \textbf{Checker tolerance.} Our exact checker accepted some \texttt{glass4} solutions better than MIPLIB's proven
+  optimum (one of them in the 13 October run the harm check compares against) and rejected 15 cuOpt solutions in 5 of
+  the 30 calibration runs. A single acceptance rule for all arms is pending; its effect on $P$ and on the 1.31 ratio
+  below is not yet known.
+\item \textbf{One machine, a small share.} On five cores and the GPU, cuOpt alone's primal integral is 1.31 times
+  that of GAMS's published cuOpt~26.08 run on a whole GB10 (MIPfeas
+  scoring~\citep{bussieck2026mipfeas,mittelmann2026mipfeas}, 30 instances; Appendix~\ref{app:harness}), so our
+  cuOpt-alone baseline is weaker than cuOpt on the whole GB10.
+\item \textbf{Not measured:} HiGHS as a partner.
+\end{itemize}
+\FloatBarrier
