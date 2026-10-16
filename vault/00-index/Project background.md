@@ -7,6 +7,12 @@ performance claim). Living sources take precedence over § 6: [[Home]], [[Roadma
 [[2026-10-17 Phase 1 — development until C1]]. Other snapshots of the same day: [[Home — long form]],
 [[Agent companion — detail and history]]. Records are cited as D-NNN; § 15 links each one.
 
+**Since this snapshot (2026-10-16 afternoon):** D-031 was read at 12:55 — four seeds, 136 runs VALID: hint 0.798,
+guard +0.045, the phase-1 interim result. Berk's C1 go at 13:1x closed phase 1 and wrote `configs/frozen-v2.yaml`
+([[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]]). Lines below that say `frozen-v2.yaml` is written on Saturday, that D-031
+is running or that its harm reading may still put the choice to Berk are superseded; the current state is in [[Home]]
+and `AGENTS.md`.
+
 ## 1. What I-TREA II is
 
 **A GPU evolutionary algorithm (EA) coupled with exact MIP solvers.** I-TREA II (Interactive Three Ranks Evolutionary
@@ -249,7 +255,7 @@ amendment came with 7 of the 58 runs of its first pool done, none read; D-029's 
   P old default 0.2176, candidate 0.2233, LP decode alone 0.2177, d −0.025 ≥ −0.057 → **DRIFT**. So the candidate
   freezes for phase 1 by D-032's rule (fixed before its runs). D-031's four-seed harm reading may still put which
   configuration freezes to Berk.
-- **Four seeds:** D-031 is running (§ 7). **The go / no-go on C1 is Berk's.**
+- **Four seeds:** D-031 was read 2026-10-16 12:55 (§ 7). **The go / no-go on C1 was Berk's: go** (D-033).
 
 Full tables and caveats: [[2026-10-17 Phase 1 — development until C1]].
 
@@ -279,17 +285,21 @@ Full tables and caveats: [[2026-10-17 Phase 1 — development until C1]].
   #1 (pool freeze), #31 (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper).
 - Plan: [[Roadmap]].
 
-## 7. D-031, the four-seed reading (placeholder)
+## 7. D-031, the four-seed reading (filled in 2026-10-16 after its reading)
 
-**No number of D-031 exists yet.**
-- Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`): D-030's 68 C1 runs at seeds 2–3 on the same candidate, started
-  2026-10-16 08:57.
-- Read together with D-030's seeds 0–1 by `tools/d031_report.py --d030-json logs/d030-reading.json`.
-- Its `PHASE-1 INTERIM RESULT` line goes into the README once the 136 runs are read.
-  - It carries the four-seed hint and guard, with seeds 2–3 alone beside as the selection check, only if all 136 read
-    VALID.
-  - Otherwise it carries D-030's two-seed reading and names why (INCOMPLETE or INVALID, n of 136).
-- Until then the phase-1 interim reading is D-030's two-seed one (§ 6.6).
+**The phase-1 interim result: hint present 0.798, guard holds +0.045 on four seeds** (D-031 § Result).
+- Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`): D-030's 68 C1 runs at seeds 2–3 on the same candidate, 2026-10-16
+  08:57–12:55; 67 completed, 1 failed (comp21-2idx A6F seed 2, cuOpt SIGSEGV).
+- Read together with D-030's seeds 0–1 by `tools/d031_report.py --d030-json logs/d030-reading.json` (saved
+  `logs/d031-reading.json`): **VALID, 136 of 136** (failed runs kept).
+  - Hint 0.798 (P̄ 0.550 / 0.690 over the fixed 11); guard +0.045 over the 17. Selection check: seeds 2–3 alone
+    0.787 / +0.034; seeds 0–1 (= D-030) 0.809 / +0.050.
+  - Harm flags beside: glass4 (d_i −0.114; drift per D-032) and comp21-2idx (d_i −0.051 vs band 0.050, edge). The
+    exclude reading (the three crashed cuOpt-alone runs on comp21 left out) is INCOMPLETE.
+  - vs cuOpt alone on the fixed 11: 7 better / 3 worse, P 0.690 → 0.550 (−20 %), d +0.249 [+0.078, +0.441],
+    Wilcoxon p 0.027. vs SCIP alone (earlier days): fixed 11 8 / 0, −38 %; SCIP's 15 weak 12 / 0, 0.889 → 0.448
+    (−50 %), d +0.499 [+0.323, +0.676], p 0.0005.
+- Berk's C1 go followed at 13:1x: `configs/frozen-v2.yaml` = yield + lp_decode, phase 1 closed (D-033).
 
 ## 8. Getting started, in full
 
@@ -504,3 +514,4 @@ third-party files keep their own terms.
 | D-030 | [[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg]] |
 | D-031 | [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]] |
 | D-032 | [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]] |
+| D-033 | [[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]] |

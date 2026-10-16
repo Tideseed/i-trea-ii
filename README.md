@@ -3,17 +3,50 @@
 **A GPU evolutionary algorithm (EA) that runs beside exact MIP solvers and trades solutions with them while they run.**
 The aim: good feasible solutions sooner than SCIP alone or NVIDIA cuOpt alone, on each solver's hardest instances.
 
+## What this means for SCIP and cuOpt users
+
+**Short answer: yes, there is a real chance of a large gain on hard instances, but not on every one.** On instances where a
+solver alone struggles to find good solutions in two minutes, running it inside I-TREA II found good solutions much sooner
+in our interim tests: about **half** the primal integral of SCIP alone and **a fifth less** than cuOpt alone on identical
+hardware. Where cuOpt alone already finds a good solution within seconds, I-TREA II can be slower.
+
+| If you use … | on its hard instances¹ | change in P(120)² with I-TREA II | largest gains | losses |
+|---|---|---|---|---|
+| **SCIP** (one CPU core, its default) | 15 of our 17 | **−50 %** on average; better on 12, worse on 0 | ca 1.00 → 0.26 (SCIP alone found no solution), neos-960392 1.00 → 0.04 (SCIP alone stayed at a trivial solution) | none |
+| **cuOpt** (same 5 cores + GPU as I-TREA II) | 11 of our 17 | **−20 %** on average; better on 7, worse on 3 (p = 0.03) | neos-960392 0.58 → 0.04, item_placement 0.49 → 0.22, ca 0.56 → 0.26 | doon 0.86 → 1.00, rail01 0.98 → 1.00, toguru 0.55 → 0.61 |
+
+¹ Hard = the solver alone has P(120) ≥ 0.5. ² P(120) = the average gap to the best known solution over a 2-minute run:
+1 = no solution, 0 = optimal from the first second; lower is better. Four seeds per instance.
+
+- **Why it helps:** I-TREA II runs SCIP, cuOpt and a GPU evolutionary algorithm (EA) side by side and passes each one's
+  best solutions to the others. SCIP's hard cases gain from cuOpt's GPU heuristics and the EA's LP-based repair;
+  cuOpt's hard cases gain from SCIP's incumbents and the EA's repair.
+- **What the SCIP comparison measures:** adopting I-TREA II on a GPU machine — SCIP alone uses one core, I-TREA II five
+  cores and the GPU. Much of that gain comes from having a GPU solver at all; the cuOpt row, on identical hardware, shows
+  what I-TREA II adds beyond cuOpt.
+- **When not to expect it:** if cuOpt alone already finds a good solution within seconds, the EA's GPU work slows cuOpt
+  down (chromaticindex: 0.08 → 0.54, outside cuOpt's hard set). Where cuOpt alone finds a solution only late and on some
+  seeds (doon, rail01), I-TREA II missed it. Where no solver finds one (cryptanalysis), neither does I-TREA II.
+- **For the cuOpt and SCIP developers:** partner solutions and LP-based repair lift each solver's weakest cases. cuOpt
+  would gain more if it could take outside solutions mid-solve (its `SetSolutionCallback`, fixed for presolve in 26.10 on
+  our report) and if two processes could share the GPU without slowing cuOpt (CUDA MPS, planned).
+- **How sure:** interim development results — 17 instances that we tuned on, 2-minute runs, one DGX Spark (GB10), cuOpt
+  26.08; SCIP alone ran on earlier days; cuOpt alone crashed on comp21 on 3 of 4 seeds (counted as its result). The test
+  on unseen instances, with cuOpt 26.10, follows in November ([Roadmap]).
+
 ## Summary
 
-- **Stage:** phase 1 (development, on cuOpt 26.08) ends at checkpoint C1, Sat 2026-10-17 ([D-019]). No confirmatory
-  run yet.
-- **C1 (interim, 2 seeds):** A9 (SCIP + GPU EA + cuOpt) against cuOpt alone on the same hardware share: hint
-  **0.809** (needs ≤ 0.95), guard **+0.050** (needs ≥ −0.05).
-- **Reported beside, not criteria:** mean P(120) (lower is better) 0.677 → 0.548 (−19 %) against cuOpt alone on its 11
-  weak instances (7 better / 3 worse; over all 17, 8 / 8, 1 tie). Against SCIP alone (earlier days, not
-  hardware-matched): −38 % on the same 11 (8 / 0); −50 % on SCIP's 15 weak (12 / 0), a set selected on the compared runs.
-- **Caveat:** 17 development and class-probe instances, chosen and tuned on. Descriptive only.
-- **Running:** the four-seed reading ([D-031]); then the author's (Berk Orbay's) go / no-go, possibly on what freezes.
+- **Stage:** phase 1 (development, on cuOpt 26.08) closed on Fri 2026-10-16 with the author's (Berk Orbay's) go at
+  checkpoint C1 ([D-033]). No confirmatory run yet.
+- **C1 result (interim, four seeds):** A9 (SCIP + GPU EA + cuOpt) against cuOpt alone on the same hardware share: hint
+  **0.798** (needs ≤ 0.95), guard **+0.045** (needs ≥ −0.05); 136 runs, all valid ([D-031]).
+- **Reported beside, not criteria:** mean P(120) (lower is better) 0.690 → 0.550 (−20 %) against cuOpt alone on its 11
+  weak instances (7 better / 3 worse). Against SCIP alone (earlier days, not hardware-matched): −38 % on the same 11
+  (8 / 0); −50 % on SCIP's 15 weak (12 / 0), a set selected on the compared runs.
+- **Frozen:** `configs/frozen-v2.yaml` — A9 with LP decode and `yield` (below).
+- **Caveats:** 17 development and class-probe instances, chosen and tuned on; descriptive only. Two harm flags (glass4,
+  comp21-2idx) and cuOpt alone's crashes on comp21-2idx are carried into phase 2 (footnote 1).
+- **Paper:** [the interim report on phase 1](paper/main.pdf) (PDF, in progress).
 - **Next:** v1 by Mon 2026-11-30 (aim Fri 11-27): unseen instances, cuOpt 26.10, ITX-1 ([Roadmap]).
 
 ## Terms
@@ -36,29 +69,32 @@ The aim: good feasible solutions sooner than SCIP alone or NVIDIA cuOpt alone, o
 
 | | |
 |---|---|
-| **Freezes** | `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA `835c7c5a249c`, A9 run `f345de0ab936`), copied to `configs/frozen-v2.yaml` on Saturday ([D-032]) |
+| **Frozen** | `configs/frozen-v2.yaml` = a byte copy of `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA `835c7c5a249c`, A9 run `f345de0ab936`), written after the C1 go ([D-033]) |
 | **Adds** | to the old default `configs/itrea2-dev-rc-3way.yaml`: LP decode after the EA's LP worker ([D-026]); CUDA context at `yield` ([D-029]) |
-| **Running** | [D-031]: C1 at seeds 2–3 (68 runs), pooled with [D-030]'s seeds 0–1 |
+| **Before prereg-v2** | one checker rule for every arm (#36), the test-set size (#32), the prereg-v2 tag ([D-033]) |
 | **Phase 2** | #26 (recombine a partner incumbent with the elite), #35 (two-way A9 through cuOpt 26.10's SET callback), CUDA MPS ([Roadmap]) |
 
 ## Results so far (interim, development data)
 
 **C1 readings:** A9 against cuOpt alone (A6F), both arms of each instance and seed run in the same session; 120 s,
-the 17 × seeds 0–1.
+the 17 instances.
 
 | reading | result | source |
 |---|---|---|
-| C1, old default (10-13) | hint 0.827 · guard +0.063 | [D-022] |
-| C1, candidate | hint **0.809** (needs ≤ 0.95) · guard **+0.050** (needs ≥ −0.05) ¹ | [D-030] |
-| vs cuOpt alone, fixed 11 | 7 lower / 3 higher; P 0.677 → 0.548 (−19 %); d +0.235 [+0.052, +0.433]; Wilcoxon p 0.049 | [D-030] |
-| vs SCIP alone, fixed 11 ² | 8 lower / 0 higher; P 0.880 → 0.548 (−38 %) | [D-030] |
-| vs SCIP alone, its 15 weak ² | 12 lower / 0 higher; P 0.889 → 0.447 (−50 %); d +0.502 [+0.329, +0.675]; p 0.0005 | [D-030] |
+| C1, old default (10-13), seeds 0–1 | hint 0.827 · guard +0.063 | [D-022] |
+| C1, frozen configuration, seeds 0–1 | hint 0.809 · guard +0.050 | [D-030] |
+| **C1, frozen configuration, seeds 0–3: the phase-1 interim result** | hint **0.798** (needs ≤ 0.95) · guard **+0.045** (needs ≥ −0.05); seeds 2–3 alone 0.787 · +0.034 ¹ | [D-031] |
+| vs cuOpt alone, fixed 11, seeds 0–3 | 7 lower / 3 higher; P 0.690 → 0.550 (−20 %); d +0.249 [+0.078, +0.441]; Wilcoxon p 0.027 | [D-031] |
+| vs SCIP alone, fixed 11 ² | 8 lower / 0 higher; −38 % | [D-031] |
+| vs SCIP alone, its 15 weak ² | 12 lower / 0 higher; P 0.889 → 0.448 (−50 %); d +0.499 [+0.323, +0.676]; p 0.0005 | [D-031] |
 
-1. cuOpt alone's two crashes on comp21-2idx are kept as outcomes (P 0.776 / 0.782, against 0.511 / 0.496 on 10-13),
-   which favours A9; without them the reading is INCOMPLETE. glass4's harm flag was re-read as DRIFT ([D-032]).
+1. Harm flags beside, not criteria: glass4 (d_i −0.114; read in one window as day-to-day drift, [D-032]) and
+   comp21-2idx (d_i −0.051 against its band 0.050). cuOpt alone crashed on comp21-2idx on 3 of 4 seeds; those runs are
+   kept as outcomes, which favours A9 there; without them the reading is INCOMPLETE.
 2. SCIP alone ran on earlier days on SCIP's own harness, not in the same window, so this comparison is not
-   hardware-matched (A9 also runs cuOpt and the GPU). Contrary to D-013's rule (see Terms), SCIP's weak set was
-   selected on the runs it is compared with; the fixed 11 were not. No guard against SCIP alone is computed.
+   hardware-matched (A9 also runs cuOpt and the GPU), and on seeds 0–1 only. Contrary to D-013's rule (see Terms),
+   SCIP's weak set was selected on the runs it is compared with; the fixed 11 were not. No guard against SCIP alone is
+   computed.
 
 **Adopted changes** (not C1 readings: each tested alone against the old default, on its own instances and seeds):
 
@@ -72,12 +108,10 @@ the 17 × seeds 0–1.
 Titles of D-029 and D-030 state the pre-run framing: D-029 was adopted; D-030 ran ysync-ld0 (D-030 § Which candidate
 runs). Known loss: chromaticindex1024-7 to cuOpt alone ([D-027]). Every number and caveat: [Phase 1 note].
 
-### Four-seed result (D-031) — filled in after the run
-**Placeholder: no number of D-031 exists yet.** Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, started 2026-10-16 08:57)
-= D-030's 68 runs at seeds 2–3. `tools/d031_report.py --d030-json logs/d030-reading.json` reads all 136; its
-`PHASE-1 INTERIM RESULT` line goes here: the four-seed hint and guard, with seeds 2–3 alone beside as the selection
-check, if all 136 read VALID; otherwise D-030's reading and why (INCOMPLETE or INVALID, n of 136). Until then the
-phase-1 interim reading is D-030's two-seed one. Every place to fill in: [AGENTS.md] § "D-031 fill-in checklist".
+### The C1 decision
+**Go** (Berk Orbay, 2026-10-16): freeze yield + LP decode as `configs/frozen-v2.yaml` and close phase 1 on these
+numbers. The two harm flags, cuOpt alone's crashes on comp21-2idx and the loss on chromaticindex1024-7 are carried
+into phase 2 and v1 as stated caveats ([D-033]).
 
 ## How it works
 
@@ -132,7 +166,7 @@ itrea c1r-report --a9 ysync-ld0 --set c1r-ysync-ld0-2                # C1's hint
 | `tools/` | decision reports, `serving-window.sh`, probes |
 | `tests/` | toy-scale tests |
 | `data/` | instances (not in git) |
-| `paper/` | the interim paper (LaTeX, in progress) |
+| `paper/` | the interim report on phase 1 (LaTeX, in progress; built as `paper/main.pdf`) |
 | `vault/` | research record: journal, decisions, results, literature |
 | `.claude/skills/` | skills for AI agents |
 
@@ -140,8 +174,9 @@ itrea c1r-report --a9 ysync-ld0 --set c1r-ysync-ld0-2                # C1's hint
 
 - [AGENTS.md] — rules for AI agents and the code map. **Agents read it first.**
 - [Home] — the vault's start page.
-- [Phase 1 note] — phase 1's results (draft until D-031 is read).
-- [Decisions] — D-001 … D-032.
+- [Paper] — the interim report on phase 1 (PDF, in progress).
+- [Phase 1 note] — phase 1's results, every number and caveat.
+- [Decisions] — D-001 … D-033.
 - [Roadmap] — what is next.
 - [Background] — lineage (I-TREA part I, optopt), claim, pre-registration, v1 targets, status detail, layout, safety.
 
@@ -160,6 +195,7 @@ adapted from the predecessor carries the line "adapted from berkorbay/optopt@4dd
 [Roadmap]: vault/00-index/Roadmap.md
 [Background]: <vault/00-index/Project background.md>
 [Phase 1 note]: <vault/30-results/2026-10-17 Phase 1 — development until C1.md>
+[Paper]: paper/main.pdf
 [Decisions]: vault/50-decisions/
 [algorithm]: <vault/10-design/I-TREA II algorithm.md>
 [process]: <vault/10-design/Process interface.md>
@@ -182,3 +218,4 @@ adapted from the predecessor carries the line "adapted from berkorbay/optopt@4dd
 [D-030]: <vault/50-decisions/D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg.md>
 [D-031]: <vault/50-decisions/D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1.md>
 [D-032]: <vault/50-decisions/D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds.md>
+[D-033]: <vault/50-decisions/D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode.md>

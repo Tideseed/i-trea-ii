@@ -12,19 +12,19 @@
 `vault/00-index/Agent companion — detail and history.md` (called "the detail note" below).
 
 **Contents:** At a glance · Read first · Terms · State, readings and decisions (pointers) · Four-seed result (D-031)
-and its fill-in checklist · Commands · Setting · The question, the aim, the v1 targets · The three ranks · Map (code,
+and the C1 go · Commands · Setting · The question, the aim, the v1 targets · The three ranks · Map (code,
 tools, configurations, job writers) · Rules for new experiments · Writing rules · Where things are · Changelog
 (pointer).
 
-## At a glance (2026-10-16)
+## At a glance (2026-10-16, 13:1x)
 
 | | |
 |---|---|
-| **Phase** | development (phase 1). It ends at checkpoint **C1 on Sat 2026-10-17**. No confirmatory run yet. |
-| **Method to freeze** | arm **A9** (SCIP ↔ EA ← cuOpt) on `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (lp_decode + yield; EA hash `835c7c5a249c`). By D-032's rule it is copied to `configs/frozen-v2.yaml` on Saturday; D-031's harm reading may still put the choice to Berk. |
-| **Interim result** — development, descriptive, 2 seeds (D-030) | A9 against cuOpt alone on the same footprint: mean P(120) 0.677 → 0.548 (−19 %) on the fixed 11; **HINT 0.809** (needs ≤ 0.95), **GUARD +0.050** (needs ≥ −0.05). |
-| **Running now** | D-031: C1's 68 runs again at seeds 2–3 on the candidate, started 2026-10-16 08:57. Its result is a placeholder below; never guess it. |
-| **Next** | Saturday: `configs/frozen-v2.yaml`, the phase-1 results note, the go / no-go (Berk's). v1: end of November 2026 on cuOpt 26.10. |
+| **Phase** | development (phase 1) **closed** Fri 2026-10-16 13:1x at checkpoint C1, on Berk's go (D-033). No confirmatory run yet. |
+| **Frozen method** | arm **A9** (SCIP ↔ EA ← cuOpt) on **`configs/frozen-v2.yaml`** = a byte copy of `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (lp_decode + yield; EA hash `835c7c5a249c`, A9 run hash under ext `f345de0ab936`). Byte-identical until the prereg-v2 tag (D-021 R33). |
+| **Interim result** — development, descriptive, 4 seeds (D-031) | A9 against cuOpt alone on the same footprint: mean P(120) 0.690 → 0.550 (−20 %) on the fixed 11; **HINT 0.798** (needs ≤ 0.95), **GUARD +0.045** (needs ≥ −0.05); 136 runs VALID. Harm flags beside: glass4 (drift, D-032), comp21-2idx (edge). |
+| **Running now** | nothing. D-031's pool ended 12:55; both LLM servers restored and verified 13:06. |
+| **Next** | the interim report (`paper/`), the checkpoint, the issues. Before prereg-v2: #36, #32's test-set size, the tag. v1: end of November 2026 on cuOpt 26.10. |
 
 **Never write**, in any file, that I-TREA II "beats", "improves on" or "matches" anything until the corresponding
 experiment note in `vault/30-results/` says so with its numbers. Every hypothesis and target in this file is
@@ -56,10 +56,11 @@ defined in "Terms" right after this block.
   noreply), no Claude trailer (`vault/90-checkpoints/2026-10-06-0300.md`). Berk's standing permission (2026-10-06
   18:5x): commits, pushes and issue management in this repository without asking (`vault/90-checkpoints/2026-10-06-1700.md`).
 - **New GPU code:** the GPU cold-cache tests run inside the window before the first timed run, and must reach the new code.
-- **Trap: stale job-writer default.** `make_jobs.ITX_A9_CONFIG` still names `configs/itrea2-dev-rc-3way.yaml` (the old
-  default) until a `src/` change after the running pool. A writer that uses it writes the old default: A9 in `itx-m1` …
-  `itx-m5`, `itx-r13`, `itx-r13f`; the `r13x` control of `r1-bsync` and `r2-ld`. `itx-v1` takes
-  `configs/frozen-v2.yaml`; `c1r-rerun` takes its pinned files (`src/itrea/experiments/make_jobs.py`).
+- **Trap: the old job-writer default.** `make_jobs.ITX_A9_CONFIG` keeps naming `configs/itrea2-dev-rc-3way.yaml` (the
+  old default) on purpose: it is the historical baseline the committed job files were written with (D-033). A writer
+  that uses it writes the old default: A9 in `itx-m1` … `itx-m5`, `itx-r13`, `itx-r13f`; the `r13x` control of
+  `r1-bsync` and `r2-ld`. **New A9 jobs use `FROZEN_V2_CONFIG`** (`configs/frozen-v2.yaml`): `itx-v1` takes it;
+  `c1r-rerun` takes its pinned files (`src/itrea/experiments/make_jobs.py`).
 - **Toy models only in tests.**
 - **Redis:** only the project's own container `itrea-redis` on 127.0.0.1:6390.
 
@@ -102,11 +103,11 @@ defined in "Terms" right after this block.
 | **A2F** | SCIP on X925 5 + cuOpt on F's other four cores, no exchange | D-021 |
 | `<arm>@<label>` | an arm under a run set's label, e.g. `A9@r13x` (the old default under ext, 2026-10-13), `A9@c1r` (the candidate in D-030 / D-031) | the decision records |
 | decision titles | a record's title states its pre-run framing, not its outcome: D-029 ("… NOT ADOPTED ends R1 for v1") was **ADOPTED**; D-030 ("… frozen-v2 candidate (ld0)") ran **ysync-ld0** | D-029 § Result; D-030 § Which candidate runs |
-| `frozen-e2` / `configs/frozen-v2.yaml` | `frozen-e2` = D-002's pre-registered freeze tag for test-set runs (E2), written after the E4 tuning as `configs/frozen-e2.yaml` (`record_env.FROZEN_TAG`). `configs/frozen-v2.yaml` = the C1 freeze, registered with prereg-v2, required by external A9 jobs. How the two relate is for prereg-v2 to fix: it re-specifies E2, and the freeze "comes with prereg-v2 (#32)" | D-002; `vault/30-results/Experiment index.md` rows E4, E2; D-021 |
+| `frozen-e2` / `configs/frozen-v2.yaml` | `frozen-e2` = D-002's pre-registered freeze tag for test-set runs (E2), written after the E4 tuning as `configs/frozen-e2.yaml` (`record_env.FROZEN_TAG`). `configs/frozen-v2.yaml` = the C1 freeze (written 2026-10-16, D-033), registered with prereg-v2, required by external A9 jobs. How the two relate is for prereg-v2 to fix: it re-specifies E2, and the freeze "comes with prereg-v2 (#32)" | D-002; `vault/30-results/Experiment index.md` rows E4, E2; D-021 |
 | **F** (footprint) | A9's layout: X925 5–6, A725 1–3, the GPU. Every compared GPU arm gets it | D-021 |
 | **ITX-1** | our own external benchmark standard, accepted by Berk 2026-10-11 | D-021 |
 | **ext / itx1** | harness presets: `ext` = cuOpt MIP gaps 0, no thread variables, its own RMM 24 GB and host `MemoryMax` 24 GB, the project's CUDA JIT cache; `itx1` = ext + `ref_stop` + `cuopt_kill_on_end` + `scoped_hash` | D-021, "Rules for new experiments" |
-| **C1** | the checkpoint that ends phase 1: Sat 2026-10-17 | D-019 addendum 2026-10-15 |
+| **C1** | the checkpoint that ends phase 1: planned Sat 2026-10-17; reached Fri 2026-10-16 13:1x on Berk's go | D-019 addendum 2026-10-15; D-033 |
 | **hint** | C1: ratio of mean P(120), A9 / A6F, over the fixed 11 ≤ 0.95. Futility-only: a hint gates widening and never declares success | D-022, D-024 |
 | **guard** | C1: mean bounded d over the 17 ≥ −0.05 | D-022 |
 | **harm leg** | per instance, the new A9 against 10-13's `A9@r13x`; band_i = max(0.05, the seed spread of A9@r13x or of A6F@r13x), so each instance's threshold is fixed by 10-13's runs | D-025 amendment 3, D-030 |
@@ -124,33 +125,44 @@ form, and the living sources are kept current.
 | what | detail note | living source |
 |---|---|---|
 | current state (phase, defaults and hashes, running sets, external harness, due dates) and the open GitHub issues | § 7 | `vault/00-index/Home.md` § Status, `vault/00-index/Roadmap.md` |
-| interim readings (A9 pilot, both C1 readings, glass4, M4) and how to read them | § 8 | the phase-1 results note § 4–§ 5 |
-| development decisions D-011 … D-032: verdicts and key numbers | § 9 | the phase-1 results note § 3, `vault/30-results/Development log.md` |
+| interim readings (A9 pilot, the C1 readings, glass4, M4) and how to read them | § 8 (two-seed readings) | the phase-1 results note § 4–§ 5, § 7 (four seeds) |
+| development decisions D-011 … D-033: verdicts and key numbers | § 9 (to D-032) | the phase-1 results note § 3, `vault/30-results/Development log.md` |
 | changelog (dated milestones) | § 10 | `vault/30-results/Development log.md` § Changes, the journal |
 
-## Four-seed result (D-031) — filled in after the run
+## Four-seed result (D-031) and the C1 go
 
-**Four-seed result (D-031) — filled in after the run.** *Placeholder — no D-031 number exists yet.* Set
-`c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68 runs at seeds 2–3 on the candidate, started 2026-10-16 08:57) is read with
-D-030's seeds 0–1 by `tools/d031_report.py --d030-json logs/d030-reading.json`; its PHASE-1 INTERIM RESULT line goes
-here once the 136 runs are read. Until then the phase-1 interim reading is D-030's two-seed one.
+**The phase-1 interim result (D-031 § Result, read 2026-10-16 12:55).** Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68
+runs at seeds 2–3 on the candidate, 08:57–12:55: 67 completed, 1 failed — comp21-2idx A6F seed 2, cuOpt SIGSEGV) read
+with D-030's seeds 0–1 by `tools/d031_report.py --d030-json logs/d030-reading.json` (saved `logs/d031-reading.json`):
+**VALID, 136 of 136** (failed runs kept). **HINT present 0.798** (P̄ 0.550 / 0.690 over the fixed 11; futility-only),
+**GUARD holds +0.045** over the 17. Selection check: seeds 2–3 alone 0.787 / +0.034; seeds 0–1 (= D-030) 0.809 / +0.050.
+- **Beside, not criteria:** harm flags on glass4 (d_i −0.114; D-032 read it in one window as drift) and comp21-2idx
+  (d_i −0.051 vs band 0.050, at the edge). cuOpt alone crashed on comp21 on 3 of 4 seeds; the kept reading counts the
+  crashes against cuOpt alone; the exclude reading is INCOMPLETE.
+- **Reported (D-013 terms):** vs cuOpt alone on the fixed 11: 7 better / 3 worse, P −20 %, d +0.249 [+0.078, +0.441],
+  Wilcoxon p 0.027. vs SCIP alone (earlier days): fixed 11 8 / 0, −38 %; SCIP's 15 weak 12 / 0, 0.889 → 0.448 (−50 %),
+  d +0.499 [+0.323, +0.676], p 0.0005.
+- **C1 go** (Berk, 13:1x: "Go: freeze the candidate (Recommended)"; D-033): `configs/frozen-v2.yaml` = yield + lp_decode,
+  phase 1 closed; the harm flags, comp21's crashes and chromaticindex1024-7's loss are carried into phase 2 / v1 as
+  stated caveats.
 
-### D-031 fill-in checklist
+### D-031 fill-in checklist — done 2026-10-16
 
-When `tools/d031_report.py` has read the 136 runs, fill in every place below in one piece of work. Until then each
-stays a placeholder; never guess a number.
-- `AGENTS.md`: the paragraph above; "At a glance" (Interim result, Running now).
-- `README.md`: Summary (C1, Running); "Configuration and plan" (Running); § "Four-seed result (D-031) — filled in after
-  the run".
-- `vault/00-index/Home.md`: "Where it stands" (the C1 and Running bullets); Status (the "C1, 2 seeds" row); Decisions (the D-031 row).
-- `vault/30-results/2026-10-17 Phase 1 — development until C1.md`: the title ("DRAFT until D-031 is read"); Summary
-  (Result, Pending); "Status of this note" and "About this note"; § 1's table; § 3's D-031 row; § 7.
-- Files with their own placeholder or "running" line: `vault/00-index/Roadmap.md` (the D-019 row);
-  `vault/30-results/Experiment index.md` (the opening "Running now", DEV-31, C1-e); `vault/30-results/Development log.md`
-  § "Four-seed result (D-031) — filled in after the run"; `.claude/skills/itrea-window/SKILL.md` (the D-031 row of the
-  run-set table); the record D-031 itself (§ Result); the journal (skill `itrea-journal`); `paper/` (its own workflow).
-- Not updated: the three snapshot notes in `vault/00-index/` — `Agent companion — detail and history.md`,
-  `Home — long form.md` and `Project background.md` (§ 6–§ 7). They record 2026-10-16 as it stood.
+Filled in after D-031's reading and the C1 go, in one piece of work. The list is kept, under the sections' new names,
+so the places stay findable:
+- `AGENTS.md`: the section above; "At a glance"; the trap in "Read first"; "Configurations" (the `frozen-v2.yaml` row).
+- `README.md`: Summary; "Configuration and plan"; "Results so far" (the four-seed rows) and "The C1 decision".
+- `vault/00-index/Home.md`: "Where it stands"; Status (the frozen configuration and C1 rows); Decisions (D-031, D-033).
+- `vault/30-results/2026-10-17 Phase 1 — development until C1.md`: the title; Summary; "Status of this note" and "About
+  this note"; § 1's table; § 2; § 3's D-031 and D-033 rows; § 7; § 8's caveats.
+- `vault/00-index/Roadmap.md` (the C1 heading, the D-019 and #32 rows, Phase 2, § 3);
+  `vault/30-results/Experiment index.md` (the 13:1x state, DEV-31, C1-e); `vault/30-results/Development log.md`
+  (§ "Four-seed C1 reading: D-031 result", § "C1 go", the b0b08eb row of Changes).
+- Not part of the docs fill: `.claude/skills/itrea-window/SKILL.md` (the D-031 row of the run-set table) and `paper/`
+  (its own workflow). The record D-031 (§ Result), D-033 and the journal were written by the main session.
+- The three snapshot notes in `vault/00-index/` — `Agent companion — detail and history.md`, `Home — long form.md` and
+  `Project background.md` (§ 6–§ 7) — got only a banner and their D-031 placeholder or "running" lines filled; otherwise
+  they record 2026-10-16 morning as it stood.
 
 ## Commands
 
@@ -307,8 +319,8 @@ protocol. The targets enter prereg-v2 verbatim:
 | MIPfeas protocol (233 instances, 600 s) | A9's geo-mean ≤ our own cuOpt-26.10-alone geo-mean on the same GB10 | mean PI −25 % on the hard part (our cuOpt-alone PI ≥ 0.1 or no solution) and geo-mean −10 % | geo-mean ≤ 0.0274 (SCIPConc-11, published) |
 
 The external targets are anchored to our own same-version cuOpt run because Mittelmann publishes only cuOpt 26.08 and
-only aggregates (cuOpt-26.08 on GB10: 0.0393). Dates: C1 on Sat 2026-10-17 (was Fri 10-23; D-019 addendum 2026-10-15;
-development closes on cuOpt 26.08); v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10,
+only aggregates (cuOpt-26.08 on GB10: 0.0393). Dates: C1 planned Sat 2026-10-17 (was Fri 10-23; D-019 addendum 2026-10-15),
+reached Fri 2026-10-16 on Berk's go (D-033; development closed on cuOpt 26.08); v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10,
 daytime windows only.
 
 ### External benchmark: our own standard ITX-1 (D-021, accepted by Berk 2026-10-11)
@@ -341,7 +353,7 @@ GAMS's own function on all 3,495 of its traces) is narrowed by D-021, whose [Ber
 
 ### Milestones (GitHub)
 - **C1 checkpoint (2026-10-23)** — the milestone keeps this old name; the date moved to Sat 2026-10-17 (D-019 addendum
-  of 2026-10-15):
+  of 2026-10-15); C1 was reached Fri 2026-10-16 on Berk's go (D-033):
   - #23: D-018 stage 1 decided; D-023 NOT ADOPTED.
   - #26: recombine each new partner incumbent with the elite — carried to phase 2, not built.
   - #27: lp_decode.
@@ -494,7 +506,7 @@ Rows marked "detail § 4" have their full note in the detail note.
 | `tools/d029_report.py` | D-029's rules over `r1-ysync` (seeds 0–1) + `r1f-ysync` (seeds 2–5); no `itrea` entry; `--write-jobs` writes `jobs/d029.jsonl`; read 2026-10-15 15:0x: ADOPT — detail § 4 | built |
 | `tools/d029_oc.py` | D-029's operating characteristic: the pass rates its rules imply under a normal model fitted to the development default's same-window control pairs (a seeded simulation, no solver, no GPU; `--check` compares its data with the run table) — the source of the numbers in D-029's "Why these numbers" and its amendment | built |
 | `tools/c1r_report.py` | D-030's C1 re-read on set `c1r-<a9>` (`itrea c1r-report --a9 ld0\|ysync-ld0`): validity gate, C1's hint and guard, D-025 amendment 3's harm leg; read 2026-10-16 08:2x on `c1r-ysync-ld0` (68 of 68, VALID; `--json logs/d030-reading.json`, D-030's Result and § Correction 2026-10-16 10:0x) — detail § 4 | built |
-| `tools/d031_report.py` | D-031: C1 on the candidate read on four seeds (sets `c1r-ysync-ld0` + `c1r-ysync-ld0-s23`) as one reading, one `PHASE-1 INTERIM RESULT` line; no `itrea` entry; `--write-jobs jobs/d031.jsonl`. Its set runs since 2026-10-16 08:57, not read yet — detail § 4 | built |
+| `tools/d031_report.py` | D-031: C1 on the candidate read on four seeds (sets `c1r-ysync-ld0` + `c1r-ysync-ld0-s23`) as one reading, one `PHASE-1 INTERIM RESULT` line; no `itrea` entry; `--write-jobs jobs/d031.jsonl`. Its set ran 2026-10-16 08:57–12:55; read 12:55 (VALID 136 / 136; `--json logs/d031-reading.json`, D-031 § Result) — detail § 4 | built |
 | `tools/probe_lp_decode.py` | probes the LP decode worker on stored vectors (CPU, read-only; D-017's gates before a window) | built |
 | `tools/cuopt_verify_mipstart.py` | cuOpt 26.08 MIP-start and stopping check on glass4 (GPU: only inside a window; run 2026-10-07) | built |
 | `tools/probe_cuopt_setsol.py`, `tools/probe_cuopt_setsol_report.py` | cuopt#2073's check: `SetSolutionCallback` with presolve (modes none / noop / inject / bad / raw) under any interpreter with cuOpt (the 26.08 venv or `~/venvs/cuopt-2610n`), and its report (GPU: only inside a lease; run 2026-10-13: 31 solves, most on the 26.10 nightly, the injection also on 26.08) | built |
@@ -504,17 +516,18 @@ Rows marked "detail § 4" have their full note in the detail note.
 ### Configurations (`configs/`)
 
 Development defaults are never a confirmatory configuration (D-010). Every file's hash is pinned in
-`tests/test_cuda_sched.py` (`ALL_CONFIG_HASHES`); that test also checks, once `configs/frozen-v2.yaml` exists, that its
-hashes equal a configuration C1 was re-read on. Names below drop the prefix `itrea2-dev-rc` where they start with `-3way`.
+`tests/test_cuda_sched.py` (`ALL_CONFIG_HASHES`); that test also checks that `configs/frozen-v2.yaml` (since 2026-10-16)
+hashes to a configuration C1 was re-read on. Names below drop the prefix `itrea2-dev-rc` where they start with `-3way`.
 Full record: detail § 5.
 
 | file | what it is | EA hash | A9 run hash | record, status |
 |---|---|---|---|---|
 | `itrea2-default.yaml` | all defaults, generated from `EAConfig()`; `tests/test_configs.py` keeps it equal to the code | `9ac4a93bf93b` | — | core |
 | `itrea2-dev-rc-ld.yaml` | **A3 development default**: `itrea2-dev-rc-3way` + `repair.continuous: lp_decode` | `f030e23909ad` | — | D-017, adopted |
-| `-3way-ysync-ld0.yaml` | **A9 / A3x development default since 2026-10-15 15:0x and the freeze candidate**: `-3way-ld0` + `host.cuda_sched: yield`; its A9-layout cold-cache test passed 2026-10-15 15:07 | `835c7c5a249c` | `f345de0ab936` (ext) | D-026 + D-029; A9@c1r in D-030 (seeds 0–1) and D-031 (seeds 2–3, running); A9@g4yl in D-032 |
+| `frozen-v2.yaml` | **the C1 freeze** (Berk's go, 2026-10-16): a byte copy of `-3way-ysync-ld0.yaml`; byte-identical until the prereg-v2 tag (D-021 R33); `FROZEN_V2_CONFIG` | `835c7c5a249c` | `f345de0ab936` (ext) | D-033 |
+| `-3way-ysync-ld0.yaml` | **A9 / A3x development default since 2026-10-15 15:0x**, copied byte for byte to `frozen-v2.yaml`: `-3way-ld0` + `host.cuda_sched: yield`; its A9-layout cold-cache test passed 2026-10-15 15:07 | `835c7c5a249c` | `f345de0ab936` (ext) | D-026 + D-029; A9@c1r in D-030 (seeds 0–1) and D-031 (seeds 2–3); A9@g4yl in D-032 |
 | `-3way-ld0.yaml` | `-3way` + lp_decode gated after the LP worker on the EA's core, nice 0 | `a05af2c732dc` | `341267810eed` (ext) | D-026 ADOPT (13:2x); A9@g4ld in D-032 |
-| `-3way.yaml` | the **old** A9 default: repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair. The runner adds `exchange.from_cuopt` for A9 and refuses an ungated lp_decode there | `1d12ad490dd0` | `28e5a5e9c725` (= A9@r13x's) | kept as the record of the old default; A9@g4old in D-032; still `ITX_A9_CONFIG` |
+| `-3way.yaml` | the **old** A9 default: repair clock active, adaptive repair strategy, the EA's own HiGHS LP, LP stream, deep repair. The runner adds `exchange.from_cuopt` for A9 and refuses an ungated lp_decode there | `1d12ad490dd0` | `28e5a5e9c725` (= A9@r13x's) | kept as the record of the old default; A9@g4old in D-032; `ITX_A9_CONFIG` (the historical baseline, D-033) |
 | `-3way-bo1.yaml` | D-018 stage 1: back-off active with the stage-0 values (D_Y ½, floor ⅛, yield_until 30 s, patiences 40 / 40) | `c5b5e01856eb` | run hash `f67354be775d` | NOT ADOPTED |
 | `-3way-bo1s.yaml` | the same values in shadow mode = the control | `198e0d2ca540` | run hash `62bf82b236f6` | control of D-018 stage 1 and D-023 |
 | `-3way-boY.yaml` | D-023: phase Y only — bo1's values, active, patiences 100000 so the ladder never steps down | `5c8b535fb245` | — | NOT ADOPTED (2026-10-14) |
@@ -546,7 +559,7 @@ Full record of every writer and option: detail § 6.
 | `itx-m1` … `itx-m5`, `itx-r13` | D-021 phase 1 → `jobs/itx-*.jsonl` | D-021 |
 | `itx-r13f` | D-022's follow-up at seeds 2–3 | D-022 |
 | `backoff2 --harness ext\|r13-off [--instances amended\|stage1\|a,b]` | default the 11 of its 2026-10-13 amendment = 66 runs, `jobs/backoff2.jsonl`; `stage1` = D-018's 14 | D-023 |
-| `itx-v1 --tier T1..T5 [--cuopt 26.10] --out F` | the v1 tiers from `datasets/mipfeas_strata.csv`; A9 on `configs/frozen-v2.yaml`, refused while it does not exist; not written before 26.10 | D-021 phase 2 |
+| `itx-v1 --tier T1..T5 [--cuopt 26.10] --out F` | the v1 tiers from `datasets/mipfeas_strata.csv`; A9 on `configs/frozen-v2.yaml` (written 2026-10-16, D-033); the tiers' job files are not written before 26.10 | D-021 phase 2 |
 | `itx-a0 [--select all\|d024\|stage1]` | `jobs/itx-a0.jsonl` = all 230; `itx-a0-81.jsonl` = D-024 (f)'s 81 (the 25 v1 stage-1 instances at priority 0, the other 56 at 1); `stage1` = the 25 | D-024 (f) |
 | `itx-m6`, `itx-m6a` | `jobs/itx-m6.jsonl`, `jobs/itx-m6a.jsonl` | D-021 |
 | `r1-bsync --control r13x\|boY [--variant bsync\|bnice\|ysync] [--set S]` | 20 runs, set `r1-<variant>`, `jobs/r1-<variant>.jsonl` | D-025 |
@@ -557,7 +570,8 @@ Full record of every writer and option: detail § 6.
 - **Job files written outside `make-jobs`** (no `src/` edit while pools ran): `jobs/d028.jsonl` (D-028),
   `jobs/d029.jsonl` (`tools/d029_report.py --write-jobs`), `jobs/d031.jsonl` (`tools/d031_report.py --write-jobs`),
   `jobs/d032.jsonl` (D-032: from D-030's glass4 A9 job, 12 runs).
-- **The stale default:** `make_jobs.ITX_A9_CONFIG` still names the old A9 default (see "Read first", the trap).
+- **The old default:** `make_jobs.ITX_A9_CONFIG` keeps naming the old A9 default on purpose; new A9 jobs use
+  `FROZEN_V2_CONFIG` (see "Read first", the trap).
 
 ### Data, jobs, paper, vault, skills
 
@@ -783,11 +797,11 @@ His rules, 2026-10-06 / 10-08 / 10-11:
 | detail and history moved out of this file | `vault/00-index/Agent companion — detail and history.md` |
 | the vault's front page, the plan, the question | `vault/00-index/Home.md`, `vault/00-index/Roadmap.md`, `vault/00-index/Research question and spec.md` |
 | the newest session checkpoint (read it right after "At a glance" in a new session) | `vault/90-checkpoints/` — newest `2026-10-14-2350.md`; it predates the results of D-025–D-027 and everything from D-028 on |
-| decisions | `vault/50-decisions/D-001` … `D-032` (each with § Result where it ran) |
+| decisions | `vault/50-decisions/D-001` … `D-033` (each with § Result where it ran) |
 | journal (append-only) | `vault/20-journal/YYYY-MM-DD.md` |
 | every development run and reading | `vault/30-results/Development log.md` |
 | every experiment, failures included | `vault/30-results/Experiment index.md` |
-| the phase-1 results note (draft) | `vault/30-results/2026-10-17 Phase 1 — development until C1.md` |
+| the phase-1 results note (final) | `vault/30-results/2026-10-17 Phase 1 — development until C1.md` |
 | the external-harness measurements | `vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim calibration.md` |
 | the C1 diagnosis (R1–R3) | `vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` |
 | design: algorithm, processes, traces and metrics, pool, datasets, compute (window log) | `vault/10-design/` |
@@ -804,7 +818,7 @@ His rules, 2026-10-06 / 10-08 / 10-11:
 | instances | `data/` (MIPLIB 2017 benchmark, PGLib-UC, ML4CO); `data/miplib/benchmark-v2.test`; GAMS's archive `data/mipfeas/gams-2026-09-16/` |
 | pool logs and status | `logs/<job file>-<MMDD>.log` (from chains, e.g. `logs/d031-1016.log`; the pool's own default `logs/pool-<date>.log`), `logs/pool-status.json`, stop file `logs/pool.stop` |
 | window chains | `logs/chain-*.sh` and their `.out` |
-| saved readings | `logs/d030-reading.json` |
+| saved readings | `logs/d030-reading.json`, `logs/d031-reading.json` |
 | the paper | `paper/` (`main.tex`, `sections/`, `refs.bib`, `generated/`) |
 | skills | `.claude/skills/` |
 | the cuOpt 26.10 nightly venv | `~/venvs/cuopt-2610n` |

@@ -17,6 +17,12 @@ this note.
 **Other snapshots of the same day:** [[Home — long form]] (the old front page) and [[Project background]] (the old
 README). They have drifted once already (the comp21 figure, § 1.4). `AGENTS.md` and [[Home]] hold the current state.
 
+**Since this snapshot (2026-10-16 afternoon):** D-031 was read at 12:55 — four seeds, 136 runs VALID: hint 0.798,
+guard +0.045, the phase-1 interim result. Berk's C1 go at 13:1x closed phase 1 and wrote `configs/frozen-v2.yaml`
+([[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]]). Lines below that say `frozen-v2.yaml` is written on Saturday, that D-031
+is running or that its harm reading may still put the choice to Berk are superseded; the current state is in [[Home]]
+and `AGENTS.md`.
+
 | § | what | short form in `AGENTS.md` |
 |---|---|---|
 | 1 | status narrative as of 2026-10-16 morning | "At a glance" (the other short forms moved on to §§ 7–10) |
@@ -460,7 +466,7 @@ run at `priority` 0, then the 20 read runs; pinned configuration paths and run h
 | Development default, A9 and A3x | `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` since 2026-10-15: EA hash `835c7c5a249c`, A9 run hash under ext `f345de0ab936`. It is the old default `configs/itrea2-dev-rc-3way.yaml` + lp_decode gated after the EA's LP worker (D-026) + the EA's CUDA context at `yield` (D-029) | D-026, D-029 |
 | Freeze candidate | that same file. It freezes for phase 1 by D-032's rule (DRIFT, fixed before its runs). `configs/frozen-v2.yaml` is written on Saturday (not yet). D-031's four-seed harm reading may still put which configuration freezes to Berk | D-032, D-031 |
 | **Trap: stale job-writer default** | `make_jobs.ITX_A9_CONFIG` still names `configs/itrea2-dev-rc-3way.yaml` (the old default) until a `src/` change after the running pool. A writer that uses it writes the old default: A9 in `itx-m1` … `itx-m5`, `itx-r13`, `itx-r13f`; the `r13x` control of `r1-bsync` and `r2-ld`. `itx-v1` takes `configs/frozen-v2.yaml`; `c1r-rerun` takes its pinned files | `src/itrea/experiments/make_jobs.py` |
-| Running now | D-031: set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68 runs at seeds 2–3 on the candidate), started 2026-10-16 08:57; log `logs/d031-1016.log` | D-031 |
+| Running now | D-031: set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`, 68 runs at seeds 2–3 on the candidate), started 2026-10-16 08:57; log `logs/d031-1016.log`. *(Filled in after the snapshot: ended 12:55, read VALID 136 / 136; nothing runs since.)* | D-031 |
 | External benchmark | ITX-1 built (phases 1 and 2 merged); F accepted on M2's soak; M3's "does not fit F" list fixed; M4 calibration complete: **OUTSIDE** (the footprint and the machine) | D-021; `vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim calibration.md` |
 | A0 on the 81 | SCIP alone, `itx1`, 600 s, on the 81 instances v1's decisions read (D-024 (f)): 80 completed + 1 failed (s100: SCIP did not stop at 600 s, killed at 701 s; kept as an A0 failure) | journal 2026-10-14 21:48 |
 | cuOpt | 26.08 installed. NVIDIA/cuopt#2073 is fixed in 26.10 (PR #2098); A9 stays one-way until #35 (see "Setting") | `vault/70-upstream/` |
@@ -540,7 +546,7 @@ the 58 runs of its first pool done, none read). Development data, n = 2–6 seed
 | D-029 | `yield`, 21 runs, guards over seeds 0–5 with D-025's failing seed kept | **ADOPTED** | generations item_placement 1.020, comp21 1.152 (≥ 0.90); P +0.016 / +0.015 (≤ +0.05); ca at seeds 2–3 0.675 (≤ 0.95) |
 | D-030 | C1 re-read on the candidate, 68 runs | see "Interim readings" (§ 8 here) | HINT 0.809, GUARD +0.050 |
 | D-032 | glass4 in one window, 12 runs | DRIFT → the candidate freezes | see "Interim readings" (§ 8 here) |
-| D-031 | C1 at seeds 2–3, 68 runs | running | placeholder |
+| D-031 | C1 at seeds 2–3, 68 runs, read with D-030's seeds 0–1 | the phase-1 interim result (filled in after the snapshot) | VALID 136 / 136; HINT 0.798, GUARD +0.045; harm flags glass4 (drift), comp21 (edge) beside; then Berk's C1 go (D-033) |
 
 Notes:
 - **D-029's thresholds** were set with seeds 0–1 (8 of its 28 read runs) already known, and item_placement's generation

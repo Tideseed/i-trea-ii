@@ -8,26 +8,26 @@ exact MIP solvers (SCIP, NVIDIA cuOpt) on hard MIP instances and exchanges solut
 - **More:** [[Home — long form]] § Project description (the three ranks, the predecessors I-TREA 2011 and optopt) ·
   Berk's brief: [[Research question and spec]].
 
-## Where it stands (2026-10-16)
+## Where it stands (2026-10-16, 13:1x)
 
 Every number on this page is development data, interim and descriptive. No confirmatory experiment has run.
 
-- **Phase 1 (development) ends Sat 2026-10-17 at checkpoint C1** (moved from Fri 10-23;
-  [[D-019 v1 — deadline and performance target|D-019]] addendum 2026-10-15). The go / no-go is Berk's.
-- **Configuration to freeze:** A9 (SCIP ↔ EA ← cuOpt) with two adopted changes: LP re-optimisation of the continuous
-  variables (lp_decode, D-026) and a CUDA context that yields its core (yield, D-029). File
-  `configs/itrea2-dev-rc-3way-ysync-ld0.yaml`, by D-032's rule; D-031's four-seed harm reading may still put the choice
-  to Berk. `configs/frozen-v2.yaml` is not written yet.
-- **C1 on that configuration (D-030; 17 instances × 2 seeds, 120 s):** hint 0.809 (ratio of mean P, A9 / cuOpt alone,
-  on the fixed 11; needs ≤ 0.95), guard +0.050 (needs ≥ −0.05). Reported beside: vs cuOpt alone on the fixed 11,
-  7 improved / 3 worse, mean P −19 %; vs SCIP alone (A0 from earlier days), 8 / 0 and −38 % on the fixed 11, 12 / 0 and
-  −50 % on SCIP's 15 weak instances. glass4's harm flag read as drift (D-032).
-- **Running:** D-031, the same 68 runs at seeds 2–3 (set `c1r-ysync-ld0-s23`), since 2026-10-16 08:57:43. Its
-  four-seed reading becomes the phase-1 interim result. **No number exists yet.**
+- **Phase 1 (development) is closed:** Berk's C1 go, Fri 2026-10-16 13:1x ("Go: freeze the candidate"; [[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode|D-033]]),
+  a day before checkpoint C1's date ([[D-019 v1 — deadline and performance target|D-019]] addendum 2026-10-15).
+- **Frozen configuration:** A9 (SCIP ↔ EA ← cuOpt) with two adopted changes: LP re-optimisation of the continuous
+  variables (lp_decode, D-026) and a CUDA context that yields its core (yield, D-029). File `configs/frozen-v2.yaml`, a
+  byte copy of `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA hash `835c7c5a249c`).
+- **The phase-1 interim result, C1 on four seeds ([[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1|D-031]]; 17 instances × seeds 0–3, 120 s, 136 runs VALID):**
+  hint 0.798 (ratio of mean P, A9 / cuOpt alone, on the fixed 11; needs ≤ 0.95), guard +0.045 (needs ≥ −0.05); seeds 2–3
+  alone 0.787 / +0.034. Reported beside: vs cuOpt alone on the fixed 11, 7 improved / 3 worse, mean P −20 %; vs SCIP
+  alone (A0 from earlier days), 8 / 0 and −38 % on the fixed 11, 12 / 0 and −50 % on SCIP's 15 weak instances.
+- **Caveats carried into phase 2 / v1 (D-033):** harm flags on glass4 (drift, D-032) and comp21-2idx (d_i −0.051 against
+  its band 0.050); cuOpt alone crashed (SIGSEGV) on comp21 on 3 of 4 seeds, kept as outcomes — without them the reading
+  is INCOMPLETE. **Nothing is running.**
 - **Known loss and next:** chromaticindex1024-7 (the EA's presence slows cuOpt; CUDA MPS is "Not for v1"). After C1:
   cuOpt 26.10, prereg-v2, the staged external runs (ITX-1); v1 at the end of November 2026.
 
-Phase 1 in one note: [[2026-10-17 Phase 1 — development until C1]] (DRAFT until D-031 is read).
+Phase 1 in one note: [[2026-10-17 Phase 1 — development until C1]] (final; the four-seed result is its § 7).
 
 ## Terms
 
@@ -59,7 +59,7 @@ Phase 1 in one note: [[2026-10-17 Phase 1 — development until C1]] (DRAFT unti
 1. **Where it stands** (above); agents also read `AGENTS.md` "At a glance" and "Read first" at the repository root.
 2. **The newest checkpoint:** [[2026-10-14-2350]] (all checkpoints in `90-checkpoints/`). It predates the results of
    D-025–D-027 and everything from D-028 on, so read it after the state above.
-3. [[2026-10-17 Phase 1 — development until C1]] — phase 1's record: the method to freeze, D-010 to D-032, the C1 readings.
+3. [[2026-10-17 Phase 1 — development until C1]] — phase 1's record: the frozen method, D-010 to D-033, the C1 readings.
 4. [[Roadmap]] — the aim in Berk's words, v1 and C1, the stages and their GitHub issues: **what is next**.
 5. [[Development log]] — every development change and result since 2026-10-06, failures included.
 6. [[Experiment index]] — every experiment with its status and outcome, failures included.
@@ -69,26 +69,26 @@ Phase 1 in one note: [[2026-10-17 Phase 1 — development until C1]] (DRAFT unti
 
 ## Status
 
-| item | state (2026-10-16) | record |
+| item | state (2026-10-16, 13:1x) | record |
 |---|---|---|
 | confirmatory experiments | none run; pre-registration v3.1 binding since `prereg-v1`; prereg-v2 owed before any external A9 run | [[D-002 Pre-registration — hypotheses, arms, analysis\|D-002]], #32 |
-| A9 configuration to freeze | `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA hash `835c7c5a249c`, A9 run hash under ext `f345de0ab936`) | D-026, D-029, D-032 |
+| A9 frozen configuration | `configs/frozen-v2.yaml` = `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA hash `835c7c5a249c`, A9 run hash under ext `f345de0ab936`), written 10-16 after Berk's C1 go; byte-identical until the prereg-v2 tag | D-026, D-029, D-033 |
 | A3 development default | `configs/itrea2-dev-rc-ld.yaml` (`f030e23909ad`, with LP decode) | D-017 |
-| C1, 2 seeds | old default (10-13): hint 0.827, guard +0.063 · candidate (10-16): above, harm flag glass4 → DRIFT. comp21's two crashed cuOpt-alone runs are kept as outcomes (P 0.776 / 0.782, D-030 § Correction); with them excluded the letter reads INCOMPLETE | D-022, D-030, D-032 |
+| C1 | **four seeds (D-031, 136 runs VALID): hint 0.798, guard +0.045** — the phase-1 interim result; harm flags beside on glass4 (DRIFT, D-032) and comp21 (edge). Two-seed readings: old default (10-13) 0.827 / +0.063; candidate (D-030) 0.809 / +0.050. cuOpt alone's crashes on comp21 (3 of 4 seeds) are kept as outcomes; with them excluded the letter reads INCOMPLETE | D-022, D-030, D-031, D-032 |
 | external standard ITX-1 | built and merged; M4 calibration 30 of 30, **OUTSIDE**: R 1.313 [1.091, 1.618] on the call clock — the footprint and the machine | D-021; [[2026-10-11 D-021 measurements M1–M3 and the interim calibration\|M1–M4 note]] |
 | v1 external runs | ITX-1 in stages: stage 1 = the 20-instance panel + 5 instances where cuOpt finds no solution; the rest of the core only after a hint (ratio ≤ 0.95); a guard stage always | D-021, D-024 |
 | cuOpt 26.10 | our cuopt#2073 is fixed in 26.10; on release: venv, API check, re-baseline (#31) | [[Roadmap]] |
 | v1 | end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10; on 26.08 if 26.10 is not out by Fri 11-06 (to be confirmed with Berk then) | D-019 |
 | windows | daytime only (Berk: "No nights") | D-009, D-019 |
-| C1 milestone issues | #23, #26 (carried to phase 2), #27, #29, #30, #33, #36, #37; the C1 freeze `configs/frozen-v2.yaml` | [[Roadmap]] (status per issue) |
+| C1 milestone issues | #23, #26 (carried to phase 2), #27, #29, #30, #33, #36, #37; the C1 freeze `configs/frozen-v2.yaml` (written 10-16) | [[Roadmap]] (status per issue) |
 | v1 milestone issues | #1 pool freeze, #12 paper, #31 cuOpt 26.10, #32 prereg-v2; #35 (two-way through cuOpt's SET callback) is in no milestone | [[Roadmap]] |
 | questions for Berk | issues labelled `needs-berk`: #11 (decisions for Berk), #16 (islands), #9 (E5 long runs) | GitHub `Tideseed/i-trea-ii` |
 
 Full milestone lists and the staging paragraph: [[Home — long form]] § Milestones.
 
-## Decisions D-001 to D-032
+## Decisions D-001 to D-033
 
-One line each; the status is as of 2026-10-16. The full lines are in [[Home — long form]] § Decisions; the record itself
+One line each; the status is as of 2026-10-16 (13:1x). The full lines are in [[Home — long form]] § Decisions; the record itself
 is the source. A superseding decision says what changed and why. Titles of D-029 and D-030 state the pre-run framing:
 D-029 was ADOPTED; D-030 ran ysync-ld0 (D-030 § Which candidate runs).
 
@@ -124,14 +124,15 @@ D-029 was ADOPTED; D-030 ran ysync-ld0 (D-030 § Which candidate runs).
 | [[D-028 Does D-022's harness (R13 + R14) stop phase Y from restoring cuOpt on chromaticindex — a 4-run diagnostic\|D-028]] | do R13 + R14 stop phase Y from helping cuOpt on chromaticindex? | **RESULT** 10-15: not R13 + R14 |
 | [[D-029 ysync gets one follow-up at seeds 2–5, judged on all seeds 0–5 with the failing seed kept — NOT ADOPTED ends R1 for v1\|D-029]] | ysync once more at seeds 2–5, judged on seeds 0–5 | **ADOPT** 10-15: yield joins A9's default |
 | [[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg\|D-030]] | C1 re-read on the frozen-v2 candidate, A6F in the same window | **RESULT** 10-16: hint 0.809, guard +0.050, harm flag on glass4 → D-032 |
-| [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1\|D-031]] | C1 at seeds 2–3, read with D-030's seeds 0–1 | **RUNNING** since 10-16 08:57:43; no result yet |
+| [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1\|D-031]] | C1 at seeds 2–3, read with D-030's seeds 0–1 | **RESULT** 10-16 12:55: VALID 136 / 136; hint 0.798, guard +0.045 — the phase-1 interim result; harm flags glass4, comp21 beside |
 | [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds\|D-032]] | glass4's harm flag in one window, 4 seeds | **RESULT** 10-16: DRIFT → yield + lp_decode freezes |
+| [[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode|D-033]] | the C1 go / no-go | **go** (Berk 10-16 13:1x): phase 1 closes; `configs/frozen-v2.yaml` = yield + lp_decode; caveats carried |
 
 ## Results notes (`30-results/`; descriptive unless a note says otherwise)
 
 | note | what it holds |
 |---|---|
-| [[2026-10-17 Phase 1 — development until C1]] | phase 1 in one place: the method to freeze, D-010 to D-032, the C1 readings, known losses, what moves to phase 2. DRAFT until D-031 is read |
+| [[2026-10-17 Phase 1 — development until C1]] | phase 1 in one place: the frozen method, D-010 to D-033, the C1 readings (four seeds in § 7), known losses, what moves to phase 2. Final |
 | [[Development log]] | every development configuration, run set and reading since 2026-10-06, failures included |
 | [[Experiment index]] | every experiment with its status and outcome: the pre-registered plan (S1–S2, E0–E6), development, C1 / v1 |
 | [[2026-10-14 C1 diagnosis and improvement candidates]] | why A9 loses on C1 and the candidates for targeted tests (analysis, not a decision) |
@@ -151,7 +152,7 @@ Full descriptions: [[Home — long form]] § Results notes.
 | `20-journal/` | dated research journal, append-only, times in CEST (newest: [[2026-10-16]]) |
 | `30-results/` | see Results notes above |
 | `40-literature/` | [[Prior art]] (91 works, 78 legally readable; sweeps A–E in `prior-art/`); [[Paywalled research]] (the only home for paywalled works); part I: the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509) |
-| `50-decisions/` | D-001 … D-032 — see Decisions above |
+| `50-decisions/` | D-001 … D-033 — see Decisions above |
 | `60-incidents/` | [[Mistakes and incidents]] |
 | `70-upstream/` | upstream drafts and records — **filed only with Berk's per-post yes**; filed so far: NVIDIA/cuopt#2073 (fixed in cuOpt 26.10) |
 | `80-reviews/` | design critiques, consults and Claude Code workflow reviews |

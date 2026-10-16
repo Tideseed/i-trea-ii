@@ -35,6 +35,7 @@ SCIP-accepted posts. Change notes say what was changed and why, with the commit.
 | 2026-10-15 | 9e9e7de, c52d980, 17b21a3 → merge d3fe14f | `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (ld0 + yield only; EA 835c7c5a249c, A9 run hash f345de0ab936), `make-jobs c1r-rerun --a9 ld0\|ysync-ld0` → `jobs/c1r-ld0.jsonl` / `jobs/c1r-ysync-ld0.jsonl` (68 runs each), `tools/c1r_report.py` (`itrea c1r-report`); non-GPU suite on the branch 1,339 passed | [[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg]] (Berk 10-14: "Re-run C1 on frozen hash") |
 | 2026-10-15 | 967fd6a | `tools/d031_report.py` (the four-seed reading and `--write-jobs`), 31 tests; `jobs/d031.jsonl` (68 runs, set `c1r-ysync-ld0-s23`) | [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]] |
 | 2026-10-16 | 1f02eb6 | `jobs/d032.jsonl` (12 runs, set `d032`) | [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]] |
+| 2026-10-16 | b0b08eb | **`configs/frozen-v2.yaml`** = a byte copy of `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA 835c7c5a249c, A9 run hash under ext f345de0ab936); its hash pinned in `tests/test_cuda_sched.py` (`ALL_CONFIG_HASHES`), so `test_frozen_v2_is_a_configuration_c1_was_re_read_on` now runs and passes (287 affected tests passed); `make_jobs.ITX_A9_CONFIG` keeps naming `-3way.yaml`, now documented as the historical baseline the committed job files were written with — new A9 jobs use `FROZEN_V2_CONFIG`. The file stays byte-identical until the prereg-v2 tag (D-021 R33) | [[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]] (Berk 13:1x: "Go: freeze the candidate (Recommended)") |
 
 ## Results
 | date | cfg | instance | seed | P_SCIP | P_EA | P_port | ttf (s) | posts/acc | notes |
@@ -878,25 +879,52 @@ Set `d032`, pool 20261016-082749-317710: **12 of 12 completed**, 0 failed / void
   **−0.025 ≥ −0.057 → DRIFT**; d(g4ld) −0.0004. In one window the three configurations are level on glass4; D-030's flag
   (0.216 on 10-13 vs 0.237 on 10-15/16) was day-to-day drift.
 - **Consequence, as fixed before the runs:** yield + lp_decode (`configs/itrea2-dev-rc-3way-ysync-ld0.yaml`) is the
-  configuration that freezes for phase 1 per D-032's rule (`configs/frozen-v2.yaml` is written on Saturday); D-031's
-  four-seed harm reading may still put which configuration freezes to Berk (D-031 § What goes to Berk). D-031 queued and
-  started 08:57:43.
+  configuration that freezes for phase 1 per D-032's rule. D-031 queued and started 08:57:43; after its reading Berk's
+  C1 go froze it as `configs/frozen-v2.yaml` (D-033, below).
 
-## Four-seed result (D-031) — filled in after the run
-**PLACEHOLDER (D-031) — nothing below this line is a result; D-031 is running and no number from it exists in this note.**
-- Set `c1r-ysync-ld0-s23`, `jobs/d031.jsonl` (sha256 `f83e6888934ac3b2e243be880a8c823ae83b787462982c5d5f59b316dc9a3198`):
-  the 17 instances × {A9@c1r, A6F@c1r} × **seeds 2–3** = 68 runs in 34 blocks, the same jobs as D-030's file except seed,
-  set, stratum, block and position (D-031 § The runs). Started **2026-10-16 08:57:43** in window W-1016 from the main checkout (journal 2026-10-16 08:52);
-  expected to end about 13:30.
-- To be read with `itrea build-runs`, then `OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .venv/bin/python
-  tools/d031_report.py --d030-json logs/d030-reading.json` — rules fixed before any run in
-  [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]].
-- To fill in: validity (n of 136); THE line `PHASE-1 INTERIM RESULT` (four-seed HINT ratio and GUARD mean d if the 136 runs
-  read VALID, the seeds 2–3-alone ratio beside as the selection check — otherwise D-030's reading, with the reason); the
-  four-seed harm list with the replicates' and cuOpt alone's d beside; whether the halves (seeds 0–1, seeds 2–3) agree; the
-  D-013 lines vs cuOpt alone and vs SCIP alone; the comparison with the saved D-030 reading; the plain statement that the
-  four-seed ratio is slightly optimistic because D-031 ran only after D-030's hint, and that more seeds do not shrink the
-  10-13 reference's own error (D-031 § What goes to Berk). The go / no-go on C1 is Berk's.
+## Four-seed C1 reading: D-031 result (2026-10-16 08:57–12:55) — HINT 0.798, GUARD +0.045 (the phase-1 interim result)
+Set `c1r-ysync-ld0-s23`, `jobs/d031.jsonl` (sha256 `f83e6888934ac3b2e243be880a8c823ae83b787462982c5d5f59b316dc9a3198`):
+the 17 instances × {A9@c1r, A6F@c1r} × **seeds 2–3** = 68 runs in 34 blocks, the same jobs as D-030's file except seed,
+set, stratum, block and position (D-031 § The runs). Pool `20261016-085742-499378` in window W-1016, from the main checkout
+(journal 2026-10-16 08:52): **67 completed, 1 failed, 0 void**, 08:57:43–12:55:12. The failure: **comp21-2idx A6F@c1r seed 2,
+cuOpt rc −11 (SIGSEGV)** — the third cuOpt-alone crash on comp21 in four seeds; seed 3 completed. `itrea build-runs`, then
+`OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .venv/bin/python tools/d031_report.py --d030-json logs/d030-reading.json`
+(saved as `logs/d031-reading.json`): **VALID, 136 of 136** (D-030's 68 + D-031's 68; failed runs kept as outcomes, D-002 §6).
+Record: [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]] § Result.
+- **PHASE-1 INTERIM RESULT (seeds 0–3): HINT present 0.798** (P̄ 0.550 / 0.690 over the fixed 11; ≤ 0.95; futility-only,
+  it declares nothing) and **GUARD holds +0.045** over the 17 (≥ −0.05).
+- **Selection check and halves:** seeds 2–3 alone 0.787 / +0.034; seeds 0–1 alone (= D-030) 0.809 / +0.050. Both halves
+  have the hint present and the guard holding; the sign of d against A6F is the same in both halves on 15 of 17 instances,
+  opposite on none, zero in one half on 2 (rail01, doon). Seeds 0–1 equal the saved D-030 reading exactly (no difference).
+- **Harm leg** (cross-day, against A9@r13x's seeds 0–1 of 10-13; beside, not criteria): **glass4** d_i −0.114 (P̄ 0.216 →
+  0.244; band 0.057) — D-032 read glass4 in one window as drift; **comp21-2idx** d_i −0.051 (P̄ 0.548 → 0.577; band 0.050) —
+  at the edge. Beside them (`logs/d031-reading.json`, harm notes): on glass4 the same-configuration replicate A9@r2ctl
+  −0.061 and cuOpt alone −0.067 from 10-13 to this window; on comp21 the replicates A9@r1ctl +0.046 / A9@r1ctl-ysync
+  −0.046 and cuOpt alone −0.272.
+- **Reported (D-013 terms, not criteria):** vs cuOpt alone (same window per block) on the fixed 11: improved 7, worse 3,
+  P 0.690 → 0.550 (−20 %), d +0.249 [+0.078, +0.441], Wilcoxon p 0.027 (seeds 2–3 alone: 7 / 1, −21 %); vs SCIP alone (A0,
+  earlier days, seeds 0–1): fixed 11 improved 8, worse 0, −38 %; SCIP's weak set among the 17 (15 instances): 12 / 0,
+  0.889 → 0.448 (−50 %), d +0.499 [+0.323, +0.676], p 0.0005.
+- **The letter (the three crashed A6F runs excluded): INCOMPLETE** — comp21's A6F missing at seeds 0, 1 and 2; hint and
+  guard unread. The kept reading counts cuOpt alone's crashes on comp21 against cuOpt alone (its P̄ there 0.692, against
+  0.504 on 10-13), which favours A9 on comp21.
+- Stated before the reading (D-031 § What goes to Berk): the four-seed ratio is slightly optimistic, because D-031 ran only
+  after D-030's hint was present (hence the seeds 2–3-alone ratio beside); more seeds do not shrink the 10-13 reference's
+  own error.
+- Window: nothing else was queued for phase 1, so `logs/pool.stop` at 13:0x let the chain restore at once; restore
+  13:03–13:06 verified (both units active and enabled, health 200 / 200, lease released; journal 2026-10-16 12:55).
+
+## C1 go: phase 1 closes, `configs/frozen-v2.yaml` written (2026-10-16 13:1x) — D-033
+Berk (question panel): **"Go: freeze the candidate (Recommended)"** — yield + lp_decode freezes; phase 1 closes on the
+four-seed result above. Record: [[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]].
+- `configs/frozen-v2.yaml` = a byte copy of `-3way-ysync-ld0.yaml` (EA 835c7c5a249c, A9 run hash under ext f345de0ab936);
+  hash pinned in `tests/test_cuda_sched.py`; byte-identical until the prereg-v2 tag (D-021 R33). Changes table above (b0b08eb).
+- **Caveats carried into phase 2 / v1, as Berk chose:** the harm flags on glass4 (drift per D-032) and comp21-2idx (edge);
+  cuOpt alone's SIGSEGV on comp21 on 3 of 4 seeds (10-15 / 10-16, not 10-13), the exclude reading INCOMPLETE;
+  chromaticindex1024-7 a known loss to cuOpt alone (CUDA MPS is v1.1); development results on 17 tuned-on instances,
+  descriptive, SCIP alone from earlier days.
+- **Still due before prereg-v2 (not phase 1):** #36 (one checker rule for every arm; it reaches glass4), #32's test-set size
+  (Berk's), the prereg-v2 tag itself; v1 runs on cuOpt 26.10.
 
 ## Operations in phase 1's last week — what cost box time (journal 2026-10-13 to 2026-10-16; [[Mistakes and incidents]])
 - **12-h lease limit.** 10-14 07:05: the scheduled chain claimed `--until 20:15` (13 h 10 min); `box-window` refuses leases
