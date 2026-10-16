@@ -92,6 +92,7 @@ def test_recorded_hashes_stand():
 # new file not entered here, fails — "existing hashes unchanged" tested literally. A new file (e.g.
 # configs/frozen-v2.yaml at C1) enters this table in the commit that adds it.
 ALL_CONFIG_HASHES = {
+    "frozen-v2.yaml": "835c7c5a249c",   # the C1 freeze (Berk 2026-10-16: "Go: freeze the candidate"), = -3way-ysync-ld0
     "itrea1-faithful.yaml": "b517bfc675d4", "itrea2-adaptive-lps-rc.yaml": "26481ba0c675",
     "itrea2-adaptive-lps.yaml": "a2ad94e9188d", "itrea2-adaptive.yaml": "584ddee83747",
     "itrea2-default.yaml": "9ac4a93bf93b", "itrea2-dev-rc-3way-bnice.yaml": "96a299330981",

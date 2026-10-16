@@ -188,7 +188,9 @@ MIPFEAS_CAL_OUT = "jobs/mipfeas-cal-26.08.jsonl"
 # preview) and the R13 + R14 development test. Every set's labels carry a variant of its own (m1, m2, …), so no run id
 # of one set equals one of another set or of an earlier set; M4 keeps the plain label A6F (`mipfeas-report --arm A6F`)
 ITX_SEED = 0
-ITX_A9_CONFIG = "configs/itrea2-dev-rc-3way.yaml"   # the A9 development default (D-015 / D-018: back-off not adopted)
+ITX_A9_CONFIG = "configs/itrea2-dev-rc-3way.yaml"   # the A9 development default until phase 1 closed (D-015 / D-018); kept so
+# the committed job files of D-021 / D-022 / C1 stay their writers' output. Since 2026-10-16 (C1 go, Berk) A9's configuration
+# is configs/frozen-v2.yaml (= -3way-ysync-ld0: D-026 lp_decode + D-029 yield); new A9 jobs use FROZEN_V2_CONFIG.
 ITX_EXT = "ext"                                      # pair.HARNESS_PRESETS: gaps 0, env unset, RMM / host 24, CUDA cache
 ITX_ENV_KEPT = {"preset": "ext", "cuopt_env_unset": False}     # M1's env-only contrast (R14)
 ITX_M3_HARNESS = {"preset": "ext", "cuopt_rmm_gb": 40.0, "cuopt_host_gb": 40.0,  # uncensored memory probe (R29):
