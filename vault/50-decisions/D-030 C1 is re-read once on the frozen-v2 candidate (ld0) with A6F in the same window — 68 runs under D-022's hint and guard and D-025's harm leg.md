@@ -305,3 +305,10 @@ cuOpt alone crashed; kept as A6F outcomes (D-002 §6). `itrea build-runs`; `itre
   set among the 17 (15): improved 12, worse 0, 0.889 → 0.447 (−50 %), d +0.502 [+0.329, +0.675], p 0.0005 (10-13's default: −47 %).
 - **Consequence:** D-031 condition 4 → Berk. Berk (08:2x): **"Targeted glass4 check (Recommended)"** → [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]]
   (12 runs, queued 08:27). The go / no-go and what freezes stay Berk's.
+
+## Correction 2026-10-16 10:0x (AgentRA) to § Result above
+"The kept reading gains from comp21's crashes (A6F P 1 on both seeds)" is wrong on the number: the saved report
+(`logs/d030-reading.json`) scores the two crashed A6F@c1r runs on comp21-2idx at **P 0.776 (seed 0) and 0.782 (seed 1)** — kept and
+truncated at the crash, not P 1. The direction stands: against A6F@r13x's 0.511 / 0.496 on 10-13 the crashes make cuOpt alone look
+worse on comp21 (A9's d there +0.272 vs −0.080 on 10-13), so the kept reading still gains from them. Found by the phase-1 note's fact
+check; the same wrong figure was in the 08:2x report to Berk and is corrected in the next one.

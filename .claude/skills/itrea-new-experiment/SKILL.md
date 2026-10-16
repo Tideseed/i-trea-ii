@@ -54,7 +54,8 @@ description: >
   - **Breadth no decision reads is not run** (D-024 rule 4): A0 runs only on the instances a comparison reads (v1: the
     81 of H_cu ∪ W_SCIP unseen, the stage-1 instances first; with no hint only the 25 stage-1 instances, D-024 (f)).
 - Timeline (D-019, GitHub milestones `C1 checkpoint (2026-10-23)` and `v1 (end of November 2026)`): development on cuOpt
-  26.08 closes at C1, Fri 2026-10-23; v1 (A9 frozen) runs its confirmatory test and the MIPfeas run under prereg-v2
+  26.08 closes at C1, **Sat 2026-10-17** (moved from Fri 10-23 by D-019's addendum of 2026-10-15, Berk: "Assume we are
+  wrapping up phase 1 on Saturday"; the milestone keeps its old name); v1 (A9 frozen) runs its confirmatory test and the MIPfeas run under prereg-v2
   (#32) on cuOpt 26.10 (#31; on 26.08 if 26.10 is not out by 2026-11-06, to be confirmed with Berk then).
 - Daytime windows only: no I-TREA II window in 00:00–07:00 (Berk, 2026-10-10, "No nights", D-019; until then D-009
   asked for his yes for each night). Long run sets (MIPfeas ≈ 78 h) are split into daytime windows.
@@ -65,16 +66,23 @@ description: >
 ## 2. Configuration
 - Main arm on the test set: `configs/frozen-e2.yaml` once it exists. `configs/itrea2-default.yaml` (9ac4a93bf93b) is the
   pre-registered starting configuration. Development defaults: **A3** → `configs/itrea2-dev-rc-ld.yaml` (f030e23909ad,
-  lp_decode adopted, D-017); **A9** and its matched control **A3x** → `configs/itrea2-dev-rc-3way.yaml` (1d12ad490dd0;
-  the runner adds `exchange.from_cuopt` for A9 and refuses `repair.continuous: lp_decode` in A9 / A3x until the
-  two-core layout, #30); D-018 stage 1 → `itrea2-dev-rc-3way-bo1.yaml` (active) vs `-bo1s.yaml` (shadow control) — not
-  adopted; D-023 → `itrea2-dev-rc-3way-boY.yaml` (phase Y only, `5c8b535fb245`) vs `-bo1s.yaml`, under the harness
-  D-022 leaves (`make-jobs backoff2 --harness ext|r13-off`; A6F always ext); `ranks.rank1_mode` stays off (D-016 not
-  adopted). The C1 diagnosis's R1 / R2 (D-025 / D-026; branch `r1-bsync`): variant files `-3way-[boY-]bsync.yaml`
-  (fallbacks `-bnice`, `-ysync`) and `-3way-[boY-]bsync-ld[0].yaml` / `-[boY-]ld0.yaml`, each its base + one change;
-  `make-jobs r1-bsync --control r13x|boY` is written only after D-023's verdict, `make-jobs r2-ld --base …` only after
-  D-025's (with `--nice` / `--ea-cpu` from D-025's measurement); the control runs under the set's own label (`A9@r1ctl`,
-  `A9@r2ctl`: the same run hash, a new id); read with `itrea d025-report` / `itrea d026-report`. Ablations:
+  lp_decode adopted, D-017); **A9** and its matched control **A3x** → since 2026-10-15
+  `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA 835c7c5a249c, A9 run hash under ext f345de0ab936) = the old default
+  `configs/itrea2-dev-rc-3way.yaml` (1d12ad490dd0) + lp_decode gated after the EA's LP worker (D-026; the runner accepts
+  lp_decode in A9 / A3x only with `repair.lp_decode_gate: lp_worker` and `seeding.lp_source: highs_async`) + `yield`
+  (D-029); the runner adds `exchange.from_cuopt` for A9. It freezes for phase 1 by D-032's rule; `configs/frozen-v2.yaml`
+  is written from it on Saturday. **`make_jobs.ITX_A9_CONFIG` still names `-3way.yaml`** until a `src/` change after the
+  running pool: a writer that uses it (A9 in `itx-m1` … `itx-r13f`, the `r13x` control of `r1-bsync` / `r2-ld`) writes
+  the old default — name the configuration explicitly (as `c1r-rerun` and the D-029 / D-031 writers pin theirs) and
+  check the run hash. D-018 stage 1 → `itrea2-dev-rc-3way-bo1.yaml` (active) vs `-bo1s.yaml` (shadow control) — not
+  adopted; D-023 → `itrea2-dev-rc-3way-boY.yaml` (phase Y only, `5c8b535fb245`) vs `-bo1s.yaml` — not adopted
+  (2026-10-14); `ranks.rank1_mode` stays off (D-016 not adopted). The C1 diagnosis's R1 / R2 (D-025 / D-026; branch
+  `r1-bsync`, merged): variant files `-3way-[boY-]bsync.yaml` (fallbacks `-bnice`, `-ysync`) and
+  `-3way-[boY-]bsync-ld[0].yaml` / `-[boY-]ld0.yaml`, each its base + one change; `make-jobs r1-bsync --control
+  r13x|boY` was written only after D-023's verdict, `make-jobs r2-ld --base …` only after D-025's; the control runs
+  under the set's own label (`A9@r1ctl`, `A9@r2ctl`: the same run hash, a new id); read with `itrea d025-report` /
+  `itrea d026-report`. Verdicts (2026-10-15): bsync and ysync at seeds 0–1 not adopted (D-025), ld0 adopted (D-026),
+  ysync adopted on seeds 0–5 (D-029). Ablations:
   `configs/ablations/*.yaml` or `--set key=value` overrides on the base (the comment at the top of each ablation file
   gives the dotted keys; a job file carries them as `overrides`). Record the **config hash** (`EAConfig.hash()`); the
   runner refuses test-set instances unless it equals `frozen-e2`'s.
@@ -99,7 +107,24 @@ description: >
   as amended 2026-10-14 — only what a rule reads: A6@r3 / A2@r3 on comp21, toguru, doon, chromaticindex + A6F@r3 on toguru,
   doon, chromaticindex (rule 4, 18:3x), ext,
   120 s, seeds 0–1; A6F@r3 is A6F@r13x's job under its own variant, so its run ids are new); its record is D-027; read with `itrea d027-report`.
-- The C1 re-read on the frozen-v2 candidate (D-030): `itrea make-jobs c1r-rerun --a9 ld0|ysync-ld0` → `jobs/c1r-<a9>.jsonl` (set `c1r-<a9>`, 68 runs: D-022's C1 runs again — the 17 × {A9@c1r, A6F@c1r} × seeds 0–1, ext, 120 s; A6F@c1r is A6F@r13x's job under a new label; the arms alternate by seed, A6F first at even seeds; pinned run hashes); only one of the two files runs; read with `itrea c1r-report --a9 …`. A rerun set needs its own name: `--set c1r-<a9>-2` writes `jobs/c1r-<a9>-2.jsonl` by default (never the committed file).
+- The C1 re-read on the frozen-v2 candidate (D-030): `itrea make-jobs c1r-rerun --a9 ld0|ysync-ld0` → `jobs/c1r-<a9>.jsonl` (set `c1r-<a9>`, 68 runs: D-022's C1 runs again — the 17 × {A9@c1r, A6F@c1r} × seeds 0–1, ext, 120 s; A6F@c1r is A6F@r13x's job under a new label; the arms alternate by seed, A6F first at even seeds; pinned run hashes); only one of the two files runs; read with `itrea c1r-report --a9 …`. A rerun set needs its own name: `--set c1r-<a9>-2` writes `jobs/c1r-<a9>-2.jsonl` by default (never the committed file). `c1r-ysync-ld0` ran (2026-10-15/16, D-030).
+- **Job files written without a `src/` edit while pools ran (2026-10-15/16)** — the decision's tool writes them from
+  `make_jobs`' own pieces, with the configuration paths and run hashes pinned as literals and a refusal of any run id
+  already used (job files, run table, run directories): D-029 → `tools/d029_report.py --write-jobs jobs/d029.jsonl`
+  (`make-jobs r1-bsync` has no option for its control label); D-031 → `tools/d031_report.py --write-jobs
+  jobs/d031.jsonl` (one call of `make_jobs.c1_rerun("ysync-ld0", seeds=(2, 3), set_="c1r-ysync-ld0-s23")`; `make-jobs
+  c1r-rerun` has no `--seeds`). A diagnostic may reuse a writer and drop rows, stated in its record: D-028's
+  `jobs/d028.jsonl` = `make-jobs backoff2 --harness r13-off --instances chromaticindex1024-7` without the bo1s rows,
+  set renamed; D-032's `jobs/d032.jsonl` = D-030's glass4 A9 job with only config / variant / set / block / position /
+  seed changed. D-031 kept D-030's labels (A9@c1r, A6F@c1r) and D-029 kept its treatment's (A9@ysync), so their seeds
+  pool under one label; D-029's control took a new label (A9@r1fctl; r1-ysync's control was A9@r1ctl-ysync). The run ids
+  are new by the seed alone (`<instance>__<label>__s<seed>__<budget>s__<run hash>`: the set is not in a run id).
+- **The start of a pool.** D-025's ysync failed its guard on one run, the pool's first, started one second after
+  another pool ended (load average 5.75 at its gates); whether that was the change or the start could not be told.
+  D-029 opened its pool with an **unread warm-up run** (its 12:2x amendment: the control's configuration on another
+  seed, its own set, `priority` 0; read runs at `priority` 1). D-030 left a warm-up out (its "Not decided here": not part
+  of the 68; adding one would be a dated amendment). D-031 stated it has none, so its jobs stay D-030's except for seed
+  and set.
 - D-021 (ITX-1) jobs: phase 1 `itrea make-jobs itx-m1 … itx-m5 | itx-r13` (D-022: `jobs/itx-r13.jsonl` narrowed
   before any run to 58 — the 3 R13 instances × {A9@r13, A9@r13x, A6F@r13x} + C1's fixed 11 × {A9@r13x, A6F@r13x},
   seeds 0–1 — plus `jobs/itx-r13b.jsonl`, the guard's 16 on the 4 remaining instances, same set `itx-r13`; follow-up
@@ -116,7 +141,10 @@ description: >
   `itx1` hashes A0's runs on their SCIP-side harness only (`scoped_hash`), so a change to cuOpt's settings before the
   tag leaves A0's runs standing. A job-level `priority` (integers, on every job of the file) orders block groups;
   `position` orders the arms inside a block.
-- Commit the job file before the run; record its SHA-256 in the journal.
+- Commit the job file before the run; record its SHA-256 in the journal. Stage named files (`git add jobs/<file>.jsonl
+  "vault/50-decisions/D-NNN ….md"`), never a directory such as `vault/` while another agent edits it: on 2026-10-15
+  13:43 a `git add vault` swept in D-030 half-written, with placeholders (no run read it; the final text was committed
+  before any run).
 
 ## 4. Run
 - Open a window (skill `itrea-window`): lease, LLM servers stopped for confirmatory work, gates.
@@ -153,7 +181,9 @@ Close the window (skill `itrea-window`), run the analysis, write the result note
 index row, journal entry (skill `itrea-journal`). For a development test the analysis is the test's report, committed
 before the pool ends (as for D-017 and D-018) — `itrea build-runs`, then `tools/d016_report.py`, `tools/d017_report.py`,
 `itrea backoff-report --stage 0|1` (D-018) or `--stage 1y [--harness ext|r13-off]` (D-023), `itrea d022-report
-[--followup]` (D-022 and C1's interim hint and guard), `itrea d027-report` (D-027, R3), `itrea c1r-report --a9 …` (D-030, the C1 re-read), all with
+[--followup]` (D-022 and C1's interim hint and guard), `itrea d025-report` / `itrea d026-report` (D-025 / D-026, R1 /
+R2), `itrea d027-report` (D-027, R3), `tools/d029_report.py` (D-029), `itrea c1r-report --a9 … --json F` (D-030, the C1
+re-read; F kept for D-031), `tools/d031_report.py --d030-json F` (D-031, C1 on four seeds), all with
 `OMP_NUM_THREADS=1` — and the result goes into the Development log and the decision record's Result section (D-010
 §3). A staged test reports its hint as written (present / no hint / incomplete) and what it gated; an interim reading
 is labelled interim and decides nothing (skill `itrea-result-note`).

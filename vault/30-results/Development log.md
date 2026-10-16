@@ -26,6 +26,15 @@ SCIP-accepted posts. Change notes say what was changed and why, with the commit.
 | 2026-10-12 | 6f0339d | D-021 phase 2: R12's stop at the proven optimum (`ref_stop`), cuOpt SIGKILLed after a definitive end (`cuopt_kill_on_end`), `scoped_hash`, preset `itx1`, `datasets/mipfeas_strata.csv`, `make-jobs itx-v1 / itx-a0 / itx-m6`, `itrea gams-trc`, `itrea itx-report`, `tools/m0_replay.py`, the prereg-v2 registration gate; 1,009 CPU tests pass on main. Every pre-existing plan byte-identical (35,337 records) | v1's external run (D-021) |
 | 2026-10-12 | 3fe5612 | D-022 / D-023 tooling: `tools/d022_report.py` (`itrea d022-report`), `configs/itrea2-dev-rc-3way-boY.yaml` (5c8b535fb245: bo1's values, ladder disabled by unbounded patience), `make-jobs backoff2 --harness ext\|r13-off`, `make-jobs itx-r13f`, `backoff-report --stage 1y` | the two decision records, written before any run |
 | 2026-10-13 | e1403fa, ae46e7f; 75caa6d … fd75476 | `jobs/itx-r13.jsonl` narrowed from 102 to 58 runs and `jobs/itx-r13b.jsonl` (16) added, both before any run of them was read; `d022_report` implements D-022's second amendment and its clarification (no mean; floor limb one-sided; C1 hint and guard); 57 tests | Berk 10-13: targeted tests first ([[D-024 Targeted first, wider only on a hint — staged testing for development and v1]]) |
+| 2026-10-13 | 038c908 | `tools/d022_report.py`: when the runner stopped cuOpt after a partner's proof, cuOpt's gaps are read from the runner's record of its command line (`--mip-gap-zero`) — a stopped cuOpt writes no summary; test added (58 pass). Fixed before any D-022 verdict was recorded | a reading bug at the first interim report (17:45: validity failed on 8 "gap settings wrong"; [[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]] § Result) |
+| 2026-10-13 | 0b41e31, 74e2297, 3fd80f5 → merge b84d192 (records bcc9378) | D-023 amended before any backoff2 run: `make-jobs backoff2 --instances amended\|stage1\|a,b` (default the 11), `jobs/backoff2.jsonl` (66 runs, harness ext); `backoff-report --stage 1y` reads the amended set and rules (stage 1 byte-identical); `make-jobs itx-a0 --select all\|d024\|stage1` → `jobs/itx-a0-81.jsonl` (81 runs); `tools/r26-gate.sh` (stopgap for #38: D-021 R26's opening gate). Non-GPU suite 1,041 passed, 1 skipped, 1 xfailed | D-024 rule 5 (test where phase Y can act) and D-024 (f) (A0 on the 81); #37 |
+| 2026-10-14 | 61c552e, 91d38cd → merge bda6b83 | R1 + R2 of the C1 diagnosis: `host.cuda_sched` (the EA's CUDA context at blocking sync or yield; `src/itrea/ea/cuda_sched.py`), lp_decode inside A9 gated after the EA's LP worker; configs `itrea2-dev-rc-3way-bsync.yaml`, `-3way-ysync.yaml` (the yield fallback, named `byield` in 61c552e), `-3way-ld0.yaml` and variants; `make-jobs r1-bsync / r2-ld`; `tools/bsync_check.py`, `tools/d025_report.py`, `tools/d026_report.py`. Built and reviewed before any run, merged 23:41 after W-1014's restore | [[2026-10-14 C1 diagnosis and improvement candidates]] R1 / R2 |
+| 2026-10-14 | 29d54d1, 32472b5, fe3424d, 7fbb840 → merge da80772 | R3: `make-jobs r3-diag` (22 runs after D-027's amendments: A6@r3, A6F@r3, A2@r3), `tools/d027_report.py` (`itrea d027-report`, rules 1–4). Non-GPU suite on main after both merges 1,256 passed, 1 xfailed | [[D-027 Same-day diagnostic of cuOpt's thread count and SCIP's presence (R3) — reading rules fixed before the runs]] |
+| 2026-10-14 | 28f1eae | `jobs/r1-bsync.jsonl` (20 runs, `--control r13x` after D-023's verdict); `jobs/r3-diag.jsonl` (22 runs) arrived with merge da80772 (last changed in 7fbb840) and is not in 28f1eae, although 28f1eae's message and the journal 10-14 23:4x credit both files to it | window W-1015 |
+| 2026-10-15 | 52dd402 | `tools/d029_report.py` (rules over seeds 0–5, `--write-jobs` with pinned run ids), `tools/d029_oc.py`, tests; `jobs/d029.jsonl` (21 lines: 20 read + 1 unread warm-up) | [[D-029 ysync gets one follow-up at seeds 2–5, judged on all seeds 0–5 with the failing seed kept — NOT ADOPTED ends R1 for v1]] |
+| 2026-10-15 | 9e9e7de, c52d980, 17b21a3 → merge d3fe14f | `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (ld0 + yield only; EA 835c7c5a249c, A9 run hash f345de0ab936), `make-jobs c1r-rerun --a9 ld0\|ysync-ld0` → `jobs/c1r-ld0.jsonl` / `jobs/c1r-ysync-ld0.jsonl` (68 runs each), `tools/c1r_report.py` (`itrea c1r-report`); non-GPU suite on the branch 1,339 passed | [[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg]] (Berk 10-14: "Re-run C1 on frozen hash") |
+| 2026-10-15 | 967fd6a | `tools/d031_report.py` (the four-seed reading and `--write-jobs`), 31 tests; `jobs/d031.jsonl` (68 runs, set `c1r-ysync-ld0-s23`) | [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]] |
+| 2026-10-16 | 1f02eb6 | `jobs/d032.jsonl` (12 runs, set `d032`) | [[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]] |
 
 ## Results
 | date | cfg | instance | seed | P_SCIP | P_EA | P_port | ttf (s) | posts/acc | notes |
@@ -648,7 +657,7 @@ footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void 
   call clock: R 1.390 [1.081, 1.837] over 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x); launch clock 2.036
   [1.572, 2.654]; feasible 16 vs GAMS 16. The excess is in strata 3–4 (csched008 first incumbent 85.6 s vs 13.8 s,
   dano3_3 43.0 vs 14.2 s), consistent with our cuOpt on 5 threads on F vs GAMS's 24 on the whole box; no footprint
-  reading before 30 of 30.
+  reading before 30 of 30. *(Completed 2026-10-15: 30 of 30, OUTSIDE — § "External harness in phase 1's last week" below.)*
 - **Checker tolerance, found, to investigate:** in M4 our checker passed a mas74 cuOpt incumbent below MIPLIB's proven
   optimum (11,801.18516 vs 11,801.18572) and rejected 4 cuOpt incumbents (neos-4338804-snowy 1: a bound off by
   8.3e-6; neos-933966 3: integrality off by 4.8–6.5e-6; our tolerance is 1e-6). In the 2026-10-11 run table, 60 checked
@@ -658,7 +667,8 @@ footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void 
   of them (1,200,006,662.64) when offered it. The effect on any glass4 development reading has not been computed (#36).
 - Running after M4 in the same window (W-1013): D-022 (set `itx-r13`: `jobs/itx-r13.jsonl`, 58 runs, then `jobs/itx-r13b.jsonl`, 16, same set) from 15:16 — no
   result exists yet; its rules were fixed before any reading ([[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]],
-  second amendment f52e3e8, clarification fd75476). Then M6 (A0's CPU lanes).
+  second amendment f52e3e8, clarification fd75476). Then M6 (A0's CPU lanes). *(Read 2026-10-13 22:2x: § "A9 under the
+  external harness — D-022 result and C1's first interim reading" below.)*
 
 ## cuOpt 26.10 nightly — the cuopt#2073 probe (2026-10-13 10:1x–10:5x) — no A9 result
 Berk (10:00): "If the nightly for the next version is up can you check if our feature request in Github issues is
@@ -684,3 +694,228 @@ item_placement_9903).
 - **No A9 result:** no arm ran on 26.10, and A9 is unchanged (one-way cuOpt → EA). What it opens: A9 two-way — the EA's
   and SCIP's incumbents offered to cuOpt through the SET callback with presolve on (#35); a development item after the
   26.10 re-baseline (#31) or for v1.1, with its own decision record and test before any run.
+
+## Phase 1's last week (2026-10-13 afternoon – 2026-10-16) — what ran, in run order
+The development sets below ([[D-010 Develop the algorithm first on a small development set]]) ran at 120 s under harness
+ext (except D-022's A9@r13 and D-028's A9@boY under r13-off: ext with R13 + R14 off) with both LLM servers stopped,
+n = 2–6 seeds on a few development instances — **descriptive**; the external-harness section (M6, A0 on the 81, M4) is harness and v1 groundwork, not method development. No line here says that A9 or a change "improves" or "beats"
+anything beyond the numbers given. Each section quotes its decision record's
+Result (and the journal where named); run counts and run hashes are from `datasets/runs.parquet` (built 2026-10-16 08:5x).
+Phase 1 (the Roadmap's stage 1, development until C1) wraps up **Sat 2026-10-17** (Berk 2026-10-15 13:4x: "Assume we are
+wrapping up phase 1 on Saturday"; [[D-019 v1 — deadline and performance target]] § Addendum 2026-10-15).
+
+## A9 under the external harness — D-022 result and C1's first interim reading (2026-10-13 15:16–19:30) — ADOPT R13 + R14
+Set `itx-r13`: pool 20261013-151610-335372 (`jobs/itx-r13.jsonl`, 58 runs, 15:16–18:28) and the C1 guard pool
+20261013-182821-1425786 (`jobs/itx-r13b.jsonl`, 16 runs, 18:28–19:30) — **74 of 74 completed**, 0 failed / void. Arms
+A9@r13 (ext with R13 + R14 off; 6 runs), A9@r13x (ext, run hash 28e5a5e9c725; 34), A6F@r13x (cuOpt alone on F,
+82a371305f88; 34); seeds 0–1. `itrea build-runs`, `itrea d022-report`. Record:
+[[D-022 A9 under the external harness — cuOpt gaps 0 and thread variables unset (R13 + R14), development test]] § Result.
+- **D-022's rule** (fhnw-binpack4-48, neos-3004026-krka, neos-960392; 18 runs): validity holds; the mechanism is met only
+  vacuously — 0 of 6 A9 runs in either arm ended on cuOpt's "optimal" (SCIP proves first), while A6F@r13x ended that way on
+  5 of 6; no harm: fhnw ΔP −0.0016, krka −0.0001 (limit ΔP ≤ +0.005), neos-960392 d +0.022 (band 0.41) → **ADOPT R13 + R14
+  for A9**; the C1 freeze carries harness ext.
+- **C1's first interim reading** (68 of 68; A9 on the then default `configs/itrea2-dev-rc-3way.yaml`): **HINT present 0.827**
+  (ratio of mean P(120) A9@r13x / A6F@r13x over the fixed 11 = 0.585 / 0.707; present iff ≤ 0.95, futility-only), **GUARD
+  holds +0.063** (mean bounded d over the 17; holds iff ≥ −0.05). Reported, not criteria: vs cuOpt alone on the 11 improved 6,
+  worse 3, mean P −17 %, d +0.185 [+0.032, +0.368], Wilcoxon p 0.074; vs SCIP alone (A0, earlier days) improved 8, worse 0,
+  0.880 → 0.585 (−34 %), d +0.331 [+0.172, +0.500], p 0.0078. Worse than cuOpt alone on comp21-2idx, neos-4763324-toguru,
+  neos-2746589-doon among the 11, and among the other 6 on four: chromaticindex1024-7 (0.061 → 0.544, d −0.889),
+  fhnw-binpack4-48 (−0.508), radiationm18-12-05 (−0.226) and neos-3656078-kumeu (−0.076); fhnw, radiationm18 (and krka)
+  are at floor-level P (D-022 § Result, "The other 6").
+- Caveats (the record's): the fixed 11 were chosen on earlier 3-core A6 runs; A0 is from earlier days; neos-960392 carries
+  48 % of the 11's summed P reduction (without it the ratio would be 0.902).
+
+## A9 back-off, phase Y only — D-023 result (2026-10-14 14:45–17:49) — A9@boY vs A9@bo1s + same-window A6F, 11 × seeds 0–1 — NOT ADOPTED
+Set `backoff2`, pool 20261014-144534-2277541 (`jobs/backoff2.jsonl`, 22 blocks): **66 of 66 completed**, 0 failed / void.
+A9@boY (`configs/itrea2-dev-rc-3way-boY.yaml`, EA 5c8b535fb245; run hash under ext 86b1e527db68) vs A9@bo1s (f22e8571f52e) +
+A6F (82a371305f88). `itrea backoff-report --stage 1y --harness ext`. Record:
+[[D-023 A9 back-off, phase Y only — yield until cuOpt's first incumbent, then full duty]] § Result.
+- **T fails:** chromaticindex1024-7 d +0.030 (P 0.545 → 0.529; needs d ≥ +0.30 and P ≤ 0.30). **M2 fails:** cuOpt's first
+  incumbent inside boY at 63.47 / 63.41 s vs A6F's 10.87 / 10.52 s (D-018 stage 1, old harness, same phase-Y values: 9.4 /
+  12.4 s).
+- **G fails** on sing44's "still beats A6F" leg (+0.111 < 0.15; the control +0.229). **M5 fails:** local-search cap hits per
+  call on ca 0.94 / 1.00 vs the control's 0.61. M1, M3, M4, F, the ladder targets and the mean over the nine (+0.023) hold.
+- Reported, not criteria: ca d +0.247 (0.395 → 0.298), the LP-core mechanism the diagnosis note predicted; kumeu +0.255. The
+  control's item_placement P (0.218) lies well below A9@r13x's on 10-13 (0.364): item_placement's day-to-day spread is large.
+- **Consequence:** the back-off line (D-018, D-023) is closed for v1 without a GPU-sharing change; the next A9 control is
+  A9@r13x.
+
+## C1 diagnosis (2026-10-14, analysis of existing runs, no new runs)
+[[2026-10-14 C1 diagnosis and improvement candidates]] (54c2faa; an analysis, not a decision): A9's losses come from cuOpt
+running slower inside A9 with no partner making up for it (inside-A9 slowdown +0.064 mean over the 17, partner gain +0.147;
+journal 2026-10-14 15:xx). Ranked candidates: R1 (the EA at blocking sync so its LP worker gets core 6) → D-025; R2
+(lp_decode inside A9 after the LP worker) → D-026; R3 (same-day thread / SCIP diagnostic) → D-027; R4 (two-way exchange,
+cuOpt 26.10) → v1.1 (Berk 10-14 16:0x: "v1.1, no nightly runs"); R5 (aggregation probe, CPU). Berk (16:0x): if R1 / R2
+change A9's default before the freeze, **"Re-run C1 on frozen hash"** (→ D-030).
+
+## External harness in phase 1's last week — M6 → 3 lanes, A0 on the 81 (validity only), M4 complete (OUTSIDE)
+- **M6** (A0's lanes, CPU only; pools 20261013-193050-1695474, set `itx-m6a`, 3 runs, and 20261013-193352-1723855, set
+  `itx-m6`, 17 runs; 10-13 19:30–20:14): SCIP nodes/s slowdown beside 3 other lanes **13.2 %** (fhnw 15.0, glass4 12.1, crna
+  12.4) > 3 %; hottest 78.6 °C → **3 lanes** (rule fixed before the runs: 4 lanes iff ≤ 3 % and < 85 °C, else 3). `itrea
+  itx-report --m6`; journal 2026-10-13 22:2x.
+- **A0 (SCIP alone) on the 81** of D-024 (f) (H_cu ∪ W_SCIP unseen; set `itx-a0`, `jobs/itx-a0-81.jsonl`, A0@v1 run hash
+  ccaa8af273ca, 600 s, seed 2000, `--layout screen --cpu-lanes 3`, the 25 v1 stage-1 instances first): W-1013b 22:34–23:24
+  (pool 20261013-223431-2448203, 16 completed) and W-1014 17:49–21:48 (pool 20261014-174913-3077187, 64 completed + 1
+  failed) → **80 completed + 1 failed of 81**. The failure: s100 — SCIP did not stop at its 600-s limit and the runner killed
+  it at 701 s (rc −9; scope peak 3.8 GB, under the 9-GB cap); kept as an A0 failure (D-002 §6). **Validity only:** A0 may run
+  before prereg-v2's tag with only validity read (D-021 R33); no outcome of these runs is read or reported. Deviation on
+  record: W-1013b started 8 s after the servers stopped, without D-021 R26's opening gate (hottest zone 52–54 °C); CPU-only,
+  kept; the pool's missing gate is #38 (stopgap `tools/r26-gate.sh`, used at every window opening since). Journal
+  2026-10-13 22:34 / 23:24, 2026-10-14 21:48.
+- **M4 complete — OUTSIDE** (set `mipfeas`, A6F, 600 s, seed 0): the last 11 runs in pools 20261014-214807-4086700 (9; 10-14
+  21:48–23:09) and 20261015-091023-2810143 (2; done 10:00) → **30 of 30**. `itrea mipfeas-report --arm A6F`: **R 1.313
+  [1.091, 1.618]** on the call clock (launch clock 1.963 [1.606, 2.408]); feasible 27 vs GAMS 27; late-clock check passed
+  (median −0.119 s over strata 0–1, n 10) → **OUTSIDE** the band [0.870, 1.150]: the difference is the footprint F (5 threads +
+  the GPU against GAMS's 24-thread whole box) and the machine; v1's targets stay anchored on our own A6F (D-021). The interim
+  R above (1.390 on 19 runs; 1.416 on 18) is superseded. Record: [[2026-10-11 D-021 measurements M1–M3 and the interim calibration]]
+  § "Addendum 2026-10-15 — M4 complete (30 of 30): OUTSIDE".
+
+## R1 — the EA's CUDA context at blocking sync: D-025 result (2026-10-15 07:17–08:06) — A9@bsync vs A9@r1ctl, 5 × seeds 0–1 — NOT ADOPTED
+Set `r1-bsync`, pool 20261015-071709-2205151: **20 of 20 completed**, 0 failed / void; ca, sing44, neos-960392 (hint),
+item_placement_9903, comp21-2idx (no-harm); A9@r1ctl (= A9@r13x's configuration, 28e5a5e9c725) vs A9@bsync (330a10a77556).
+GPU checks before the pool (07:08–07:17): `tools/bsync_check.py` host self-CPU per wall-second auto 0.9998 → blocking_sync
+0.0083; the core's competitor 0.5187 → 0.9989. `itrea d025-report` (VALID). Record:
+[[D-025 A9 EA blocking sync (R1) — the EA stops spinning on the GPU so its LP worker gets core 6, development test]] § Result.
+- Mechanism (reported): the LP worker's CPU share 0.93–0.96 (control 0.50); its finish ca 35.0 / 35.1 → 18.9 / 19.3 s.
+- **Hint PRESENT 0.765** (ca 0.393 → 0.248, sing44 0.436 → 0.385, neos-960392 0.058 → 0.045).
+- **No-harm FAILS:** generations on seed means item_placement 0.824 (threshold 0.921), comp21 0.818 (0.950); comp21's P +0.060
+  (band 0.050) → **NOT ADOPTED**; fallback (b) `ysync` fires (wake latency).
+
+## R3 — same-day diagnostic of cuOpt's threads and SCIP's presence: D-027 result (2026-10-15 08:06–09:10) — 22 runs
+Set `r3-diag`, pool 20261015-080645-2420956: **22 of 22 completed**; A6@r3 (3-thread lane, e54170304dad; 8), A6F@r3
+(82a371305f88; 6), A2@r3 (beside SCIP, 9c3031af075f; 8) on chromaticindex1024-7, comp21-2idx, neos-2746589-doon,
+neos-4763324-toguru × seeds 0–1. `itrea d027-report` (VALID). Record:
+[[D-027 Same-day diagnostic of cuOpt's thread count and SCIP's presence (R3) — reading rules fixed before the runs]] § Result.
+- **Rule 4 → EA PRESENCE** (chromaticindex1024-7): cuOpt's first incumbent A6F@r3 9.80 / 7.33 s, A6@r3 9.24 / 8.21 s, A2@r3
+  6.53 / 9.65 s, against 62–66 s inside A9 on every A9 run on record except three back-off arms on the old harness (bo1
+  9.38 / 12.35 s, bof25 9.81 s, bof50 8.33 s; D-027 amendment 18:3x, run table `cuopt_t_first`). The EA's generation 0
+  there is a 48.3-s GPU repair
+  (~1,300 back-to-back launches of ~40 ms).
+- **Rule 1 → closed** (no thread effect on toguru or doon): the layout line is closed for v1. **Rule 3 → SCIP's presence ruled
+  out** on toguru and doon at n = 2. **Rule 2 → not read** (precondition not met).
+- Beside: doon's cuOpt-alone P 1.000 / 1.000 here vs 0.792 / 0.996 on 10-13 — doon's C1 "loss" sits on cuOpt-alone's edge.
+- Berk (09:3x, question panel, CUDA MPS): **"Not for v1"** → v1.1.
+
+## R1 fallback (b) — yield instead of spin: D-025 result (2026-10-15 10:00–11:09) — A9@ysync vs A9@r1ctl-ysync — NOT ADOPTED
+Set `r1-ysync`, pool 20261015-100013-3024118: **20 of 20 completed**; the same 5 instances; A9@ysync
+(`configs/itrea2-dev-rc-3way-ysync.yaml`, a08221cca653) vs A9@r1ctl-ysync (28e5a5e9c725). `itrea d025-report --variant ysync
+--set r1-ysync` (VALID). Record: D-025 § "Result of fallback (b) ysync".
+- **Hint PRESENT 0.834** (ca 0.392 → 0.253, the LP worker done 37.3 / 38.3 → 20.0 / 20.2 s; sing44 0.408 → 0.418; neos-960392
+  0.059 → 0.045).
+- comp21's guard holds (generations 0.980; P −0.001); **item_placement's generation guard fails** — 0.759 vs 0.921: seed 0
+  1.085, **seed 1 678 vs 1,480 generations = 0.458** — the pool's first run, started one second after M4's 600-s pool ended
+  (load average 5.75 at its gates; not voided) → **NOT ADOPTED**; "the R1 line ends for C1" — reopened once by D-029 on Berk's
+  choice (11:3x).
+
+## d028 — does D-022's harness stop phase Y from restoring cuOpt on chromaticindex? (2026-10-15 11:09–11:17) — NOT R13 + R14
+Set `d028`, pool 20261015-110921-3312868: **4 of 4 completed**; chromaticindex1024-7 × seeds 0–1 × {A9@boY under `r13-off`
+(36a2c7e5c4e8), A6F under ext}. cuOpt's first incumbent: A6F 7.45 / 9.91 s → L = 19.82 s; **A9@boY under r13-off 63.25 / 63.24
+s** (≥ 50 s on both seeds) → **not R13 + R14**. D-022's adoption is not implicated; chromaticindex stays a known v1 loss to
+cuOpt alone (MPS is v1.1). Record:
+[[D-028 Does D-022's harness (R13 + R14) stop phase Y from restoring cuOpt on chromaticindex — a 4-run diagnostic]] § Result.
+
+## R2 — lp_decode inside A9 on the EA's core after the LP worker: D-026 result (2026-10-15 11:17–13:16) — ADOPT
+Set `r2-ld`, pool 20261015-111740-3344629: **28 of 28 completed**; item_placement_9903 and sing44 × seeds 0–3 (hint), ca,
+glass4, neos-3656078-kumeu × seeds 0–1 (no-harm); A9@r2ld (`configs/itrea2-dev-rc-3way-ld0.yaml`, EA a05af2c732dc, run hash
+341267810eed) vs A9@r2ctl (`-3way.yaml`, 28e5a5e9c725). Run on the branch "R1 not adopted" (`make-jobs r2-ld --base r13x`).
+`itrea d026-report --base r13x` (VALID). Record:
+[[D-026 lp_decode inside A9 on the EA's core after the LP worker (R2), development test]] § Result.
+- Mechanisms 1–3 hold (decoder ready 0.23–0.26 s after the gate, 5.83 / 5.91 s on ca; decoded incumbents on every seed of the
+  hint instances; ca's LP worker solve wall ratio 1.039 / 0.940 ≤ 1.1).
+- No harm on every leg, all in the treatment's favour: ca −0.006 (band 0.021), glass4 −0.030 (0.050), kumeu −0.054 (0.138),
+  item_placement −0.133 (0.104), sing44 −0.062 (0.050).
+- **Hint PRESENT 0.758** (ΣP 2.4362 / 3.2145; threshold 0.90): item_placement 0.330 → 0.198 (lower on all four seeds), sing44
+  0.473 → 0.411 (lower on all four seeds) → **ADOPT**: `-3way-ld0.yaml` becomes A9's and A3x's development default and the
+  frozen-v2 candidate. The record: "nothing claims that R2 improves A9 in general (development, n = 2–4 seeds on 5
+  instances)".
+
+## R1 follow-up — ysync judged on seeds 0–5: D-029 result (2026-10-15 13:16–14:59) — ADOPT
+Set `r1f-ysync` (+ one unread warm-up run in `r1f-ysync-warmup`), pool 20261015-131611-3862708: **21 of 21 completed**;
+item_placement_9903 and comp21-2idx × seeds 2–5, ca × seeds 2–3; A9@ysync (a08221cca653) vs A9@r1fctl (28e5a5e9c725).
+`tools/d029_report.py` over r1-ysync (seeds 0–1) + r1f-ysync (seeds 2–5): VALID, 28 of 28. Record:
+[[D-029 ysync gets one follow-up at seeds 2–5, judged on all seeds 0–5 with the failing seed kept — NOT ADOPTED ends R1 for v1]]
+§ Result — its title states the pre-run framing (a NOT ADOPTED would have ended R1 for v1); **its Result is ADOPT**.
+- Rule 1 (generations, seeds 0–5, ≥ 0.90): item_placement **1.020** (seed 1's 0.458 kept in), comp21 **1.152** — hold.
+- Rule 2 (P, seeds 0–5, ≤ +0.05): item_placement **+0.016**, comp21 **+0.015** — hold.
+- Rule 3 (ca, seeds 2–3 alone, ≤ 0.95): **0.675** — ca's gain replicates (seeds 0–3 pooled 0.659).
+- **ADOPT:** `host.cuda_sched: yield` joins A9's development default with D-026's lp_decode → the frozen-v2 candidate
+  `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA 835c7c5a249c, A9 run hash f345de0ab936). Seed 1's collapse did not recur in
+  four more seeds; its cause stays unknown.
+
+## C1 re-read on the frozen-v2 candidate: D-030 result (2026-10-15 15:09–17:30, 2026-10-16 07:08–08:17) — HINT 0.809, GUARD +0.050, HARM flag on glass4
+Set `c1r-ysync-ld0` (`jobs/c1r-ysync-ld0.jsonl`): the 17 development + class-probe instances × {A9@c1r = `-3way-ysync-ld0.yaml`
+(f345de0ab936), A6F@c1r (82a371305f88)} × seeds 0–1, both arms of a block in one window. Pools 20261015-150955-187322
+(**halted 17:30:56 by D-021 R26's breaker**, heat — the ✗ row DEV-X4 of the [[Experiment index]]; the journal's count at the
+halt, 36 completed, 1 failed, 2 void, counted the rerun's A9, which had completed and was then voided with its block: the
+run table holds 35 completed + 1 failed there, and `traces/raw/c1r-ysync-ld0/void.jsonl` three voided run directories — the
+first A9 (gpu_cap, 17:19:18), then at 17:30:56 the rerun's completed A9 and its A6F; D-030's "2 voids" are the two the pool
+voided at the gpu_cap check) and 20261016-070810-4125812 (the 16 remaining blocks, the voided item_placement s1 block rerun
+whole; 31 completed + 1 failed). Run table: A9@c1r 34
+completed, A6F@c1r 32 completed + 2 failed → **68 runs present, VALID** (failed runs kept). The failures: **comp21-2idx A6F@c1r
+seeds 0 and 1, cuOpt rc −11 (SIGSEGV)** — cuOpt alone crashed, on both days; kept as A6F outcomes (D-002 §6). `itrea c1r-report
+--a9 ysync-ld0 --json logs/d030-reading.json` (saved for D-031). Record:
+[[D-030 C1 is re-read once on the frozen-v2 candidate (ld0) with A6F in the same window — 68 runs under D-022's hint and guard and D-025's harm leg]] § Result.
+- **HINT present 0.809** (P̄ 0.548 / 0.677 over the fixed 11; 10-13 on the old default: 0.827). **GUARD holds +0.050** over the
+  17 (10-13: +0.063). Futility-only: the hint gates the widening to four seeds (D-031) and declares nothing.
+- **HARM** (D-025 amendment 3, cross-day against A9@r13x of 10-13) **on glass4:** d_i −0.088 < −0.057 (P 0.216 → 0.237); beside,
+  the unchanged configuration's replicate (A9@r2ctl, 10-15) d −0.061 and cuOpt alone −0.035 — a possible day effect, checked by
+  D-032. neos-3004026-krka ΔP +0.0010, below D-022's 0.005 floor (marked).
+- **The letter (the two crashed A6F runs excluded): INCOMPLETE** — hint and guard unread (comp21's A6F missing on both seeds); vs
+  cuOpt alone on the 10 with both arms: improved 6, worse 3, P 0.667 → 0.546 (−18 %). The kept reading gains from comp21's
+  crashes (A6F P = 1 on both seeds); stated beside the go / no-go.
+- Reported (D-013 terms, not criteria): vs cuOpt alone (same window) on the fixed 11: improved 7, worse 3, P 0.677 → 0.548
+  (−19 %), d +0.235 [+0.052, +0.433], Wilcoxon p 0.049; vs SCIP alone (A0, earlier days): fixed 11 improved 8, worse 0, 0.880 →
+  0.548 (−38 %); SCIP's weak set among the 17 (15 instances): improved 12, worse 0, 0.889 → 0.447 (−50 %), d +0.502 [+0.329,
+  +0.675], p 0.0005 (10-13's default: −47 %).
+- Berk (08:2x, question panel): **"Targeted glass4 check (Recommended)"** → D-032.
+
+## glass4's harm flag read in one window: D-032 result (2026-10-16 08:27–08:52) — DRIFT
+Set `d032`, pool 20261016-082749-317710: **12 of 12 completed**, 0 failed / void; glass4 × seeds 0–3 × {A9@g4old =
+`-3way.yaml` (28e5a5e9c725, the 10-13 default), A9@g4yl = `-3way-ysync-ld0.yaml` (f345de0ab936, the candidate), A9@g4ld =
+`-3way-ld0.yaml` (341267810eed)}, positions rotated by seed. Record:
+[[D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds]] § Result.
+- Seed means of P(120) over seeds 0–3: old default **0.2176**, yield + lp_decode **0.2233**, lp_decode **0.2177**; d(g4yl) =
+  **−0.025 ≥ −0.057 → DRIFT**; d(g4ld) −0.0004. In one window the three configurations are level on glass4; D-030's flag
+  (0.216 on 10-13 vs 0.237 on 10-15/16) was day-to-day drift.
+- **Consequence, as fixed before the runs:** yield + lp_decode (`configs/itrea2-dev-rc-3way-ysync-ld0.yaml`) is the
+  configuration that freezes for phase 1 per D-032's rule (`configs/frozen-v2.yaml` is written on Saturday); D-031's
+  four-seed harm reading may still put which configuration freezes to Berk (D-031 § What goes to Berk). D-031 queued and
+  started 08:57:43.
+
+## Four-seed result (D-031) — filled in after the run
+**PLACEHOLDER (D-031) — nothing below this line is a result; D-031 is running and no number from it exists in this note.**
+- Set `c1r-ysync-ld0-s23`, `jobs/d031.jsonl` (sha256 `f83e6888934ac3b2e243be880a8c823ae83b787462982c5d5f59b316dc9a3198`):
+  the 17 instances × {A9@c1r, A6F@c1r} × **seeds 2–3** = 68 runs in 34 blocks, the same jobs as D-030's file except seed,
+  set, stratum, block and position (D-031 § The runs). Started **2026-10-16 08:57:43** in window W-1016 from the main checkout (journal 2026-10-16 08:52);
+  expected to end about 13:30.
+- To be read with `itrea build-runs`, then `OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .venv/bin/python
+  tools/d031_report.py --d030-json logs/d030-reading.json` — rules fixed before any run in
+  [[D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1]].
+- To fill in: validity (n of 136); THE line `PHASE-1 INTERIM RESULT` (four-seed HINT ratio and GUARD mean d if the 136 runs
+  read VALID, the seeds 2–3-alone ratio beside as the selection check — otherwise D-030's reading, with the reason); the
+  four-seed harm list with the replicates' and cuOpt alone's d beside; whether the halves (seeds 0–1, seeds 2–3) agree; the
+  D-013 lines vs cuOpt alone and vs SCIP alone; the comparison with the saved D-030 reading; the plain statement that the
+  four-seed ratio is slightly optimistic because D-031 ran only after D-030's hint, and that more seeds do not shrink the
+  10-13 reference's own error (D-031 § What goes to Berk). The go / no-go on C1 is Berk's.
+
+## Operations in phase 1's last week — what cost box time (journal 2026-10-13 to 2026-10-16; [[Mistakes and incidents]])
+- **12-h lease limit.** 10-14 07:05: the scheduled chain claimed `--until 20:15` (13 h 10 min); `box-window` refuses leases
+  longer than 12 h, the claim retried until 08:00 and the chain exited with nothing stopped; the unit had no failure alert, so
+  the box idled 07:05–14:41 (7 h 36 min). Fix: leases ≤ 12 h, `OnFailure=agent-failure-alert@` on every scheduled chain, the
+  chain's output checked within 15 min (itrea-window skill). The 10-15 and 10-16 chains (07:05–18:55, 11 h 50 min) opened on
+  schedule.
+- **Idle after a restore.** 10-13: the window's chain ended at its restore (20:17) with nothing queued; the box idled 2 h 17 min
+  until Berk's "You can continue performance runs" (22:2x). Since 10-15 each window has a queue file the chain drains.
+- **R26's opening gate** is not enforced by the pool (W-1013b opened at 52–54 °C; #38); `tools/r26-gate.sh` opens every window
+  since 10-14 (10-14 14:45:34 at a 50.0 °C median; 10-15 07:08:04 and 10-16 07:08:10 at 46.0 °C).
+- **R26's breaker tripped 10-15 17:30:56** (D-030's pool): after the governor's rest (16:44–17:14) the hottest zone reached
+  85–87 °C within ~4 min at maximum fan with the GPU at 15–20 W, the governor capped the clock at 2,200 MHz, 2 runs were voided
+  and the pool halted. Another session's CPU-heavy work ran unpinned and without a lease inside W-1014 and W-1015 (load averages
+  5.7–6.0 at pool starts) and is the likely contributor; since 10-15 19:0x its jobs run on cores 10–14 at nice 19 (our runs use
+  cores 1–3 and 5–6). Both arms of a block share their window, so comparisons stay paired; noise rises.
+- **The fan governor's rests** (30 min each, about every 1.5–2 h under load) take about 25 % of window time (journal 10-15
+  13:4x–14:4x); every run-time estimate now includes them (D-031: 3.83 min per 120-s run).
+- **Staging.** 10-15 13:43: `git add vault` swept D-030 into a commit while a build agent was still writing it (placeholders);
+  no run read it and the final text (d50c03c) was committed before any C1 re-read run. Lesson: stage named files, not
+  `vault/`, while an agent edits the vault.
+- Day totals of W-1015 (07:05–18:04): 153 completed, 1 failed, 2 void over 8 pools (journal 2026-10-15 17:30).

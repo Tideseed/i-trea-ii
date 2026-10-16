@@ -19,13 +19,25 @@ with times, arms × instances × seeds and the verdict; pool id, commit, runs co
 the test's decision record with the verdict by its own rules (e.g. *adopted*, *not adopted*, *inconclusive*,
 *proceed*) and any stated deviation from the letter of a rule. The numbers come from the test's report, which applies
 the rules fixed in the decision record (`tools/d016_report.py`, `tools/d017_report.py`, `itrea d025-report` / `itrea
-d026-report` / `itrea d027-report` (the C1 diagnosis's R1 / R2 / R3), `itrea c1r-report --a9 …` (D-030, the C1 re-read), `itrea backoff-report --stage 0|1|1y`, `itrea
+d026-report` / `itrea d027-report` (the C1 diagnosis's R1 / R2 / R3), `tools/d029_report.py` (D-029; no `itrea` entry),
+`itrea c1r-report --a9 …` (D-030, the C1 re-read), `tools/d031_report.py --d030-json F` (D-031, C1 on four seeds; no
+`itrea` entry), `itrea backoff-report --stage 0|1|1y`, `itrea
 d022-report [--followup]`, `itrea mipfeas-report --arm A6F`; commit it before the pool ends, as for D-017, D-018 and
-D-022), run single-threaded after `itrea build-runs`.
+D-022), run single-threaded after `itrea build-runs`. A record whose rule is a short read of the run table (D-028's
+first-incumbent times, D-032's seed means) quotes the per-run numbers and the rule's arithmetic in its Result.
 Development results are descriptive; they are never quoted as confirmatory.
 
+**Cross-day legs.** A rule that compares a new arm with an older day's runs (D-025 amendment 3's harm leg in D-030:
+the candidate vs A9@r13x of 2026-10-13) reads day-to-day drift as well as the change. D-030 printed the
+same-configuration replicates' and cuOpt alone's d beside each flag (its null lines); when its harm leg fired on
+glass4, D-032 (Berk's choice, 2026-10-16) re-ran glass4 in one window before anything froze: old default 0.2176 vs
+candidate 0.2233 vs lp_decode alone 0.2177, d −0.025 within the band 0.057 → DRIFT. D-030 also named a crash of the
+control that counts as an outcome (cuOpt alone's SIGSEGV on comp21-2idx at both seeds, A6F P 1) next to the aggregate
+it moves, with the reading that leaves it out (INCOMPLETE there).
+
 **Interim readings** (a report run on part of a run set, e.g. D-021's M4 calibration stopped at 19 of 30 on
-2026-10-13: R = 1.390 [1.081, 1.837] on the call clock, late-clock check on 6 of the 10 strata-0–1 instances) carry
+2026-10-13: R = 1.390 [1.081, 1.837] on the call clock, late-clock check on 6 of the 10 strata-0–1 instances; its
+final reading came at 30 of 30 on 2026-10-15: OUTSIDE, R 1.313 [1.091, 1.618], in the same note's addendum) carry
 **INTERIM** and **INCOMPLETE (n of N)** in the title, the verdict line and wherever they are quoted. An interim reading
 may report a check's outcome on what has run, labelled with its n (e.g. "the late-clock check passes on 6 of the 10
 strata-0–1 instances run", as D-024 rule 0 records it); it gives no final verdict, no adoption, no footprint or
@@ -39,7 +51,9 @@ and what it gated (which stage runs next; v1's guard-only stage runs either way)
 write a hint as a result ("A9 is better"), only as the gate it is. A note on a later stage reports the decisive
 reading over all instances, the stage-1 instances included, and beside it the **stage-2-only figure** as the selection
 check: conditional on a continuation the pooled estimate is slightly optimistic (by 1.2–2.5 points of the ratio in
-D-024's simulation; "better shown" ≈ 5 % instead of ≈ 3 % under no effect) — state that bias in the Caveats. For v1,
+D-024's simulation; "better shown" ≈ 5 % instead of ≈ 3 % under no effect) — state that bias in the Caveats. D-031
+(C1 on four seeds, run only after D-030's hint) is such a case: its seeds 2–3-alone ratio is printed on the same
+line as the four-seed result, and the halves' windows beside (they are not day-separated). For v1,
 every decisive aggregate is also given without R33's exposed instances (`itrea itx-report` prints both).
 
 ## Template

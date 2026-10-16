@@ -291,3 +291,7 @@ check passed (median first incumbent ours − GAMS over strata 0–1 −0.119 s,
 **Verdict OUTSIDE** the band [0.870, 1.150]: with the clock checked, the difference is the footprint F (5 threads + the GPU against
 GAMS's 24-thread whole box) and the machine, as D-021 expected; v1's targets are anchored on our own A6F. The interim R 1.416 on 19
 runs above is superseded. The heat ladder (R9) could now be asked for; not asked (D-021 R9: Berk's yes, not needed for v1).
+
+## Correction 2026-10-16 (AgentRA) to the 2026-10-15 addendum
+"The interim R 1.416 on 19 runs above is superseded": 1.416 was the 18-run figure; the 19-run interim figure was 1.390. Both are
+superseded by the final R 1.313 on 30 runs.

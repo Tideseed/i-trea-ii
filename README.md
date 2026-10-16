@@ -32,8 +32,9 @@ mean over all instances as a non-inferiority guard (mean d ≥ −0.05). The ref
 revised pre-registration (`prereg-v2`) before any confirmatory run.
 
 **v1** (vault `D-019`, decided by the author 2026-10-10): arm A9 frozen — SCIP 10 ↔ GPU EA ← cuOpt on one GB10.
-Checkpoint **C1 on Fri 2026-10-23** (development closes on cuOpt 26.08; MIPfeas harness calibrated; an interim A9 result
-on the 17 development and class-probe instances; go / no-go for the final phase). **v1 at the end of November 2026**
+Checkpoint **C1 on Sat 2026-10-17** (moved from Fri 10-23 on 2026-10-15, `D-019` addendum: phase 1 ends there;
+development closes on cuOpt 26.08; MIPfeas harness calibrated; an interim A9 result on the 17 development and
+class-probe instances; go / no-go for the final phase). **v1 at the end of November 2026**
 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10; if 26.10 is not released by 11-06, the v1 runs proceed on 26.08 and
 26.10 follows as an addendum (to be confirmed with the author then). Daytime windows only. Targets:
 - **Confirmatory, unseen hard instances** (about 32 × 2 seeds × {SCIP alone, cuOpt alone, A9}, T = 300 s): on SCIP's
@@ -61,9 +62,11 @@ candidates; cuOpt itself runs a GPU population beside its own branch-and-bound; 
 for infeasible solutions. What is studied here is the combination: a GPU population coupled with an external, general
 MIP solver, with a capped, incumbent-relative share of infeasible solutions.
 
-## Status (2026-10-13)
-**Development. No confirmatory experiment has run;** every number below comes from development runs (small samples,
-two seeds or fewer per instance unless stated) and is descriptive, not a performance claim.
+## Status (2026-10-16)
+**Development (phase 1, until checkpoint C1). No confirmatory experiment has run;** every number below comes from
+development runs (small samples: two seeds or fewer per instance unless stated, at most six) and is descriptive, not a
+performance claim. Phase 1 wraps up on Sat 2026-10-17 (Berk, 2026-10-15: "Assume we are wrapping up phase 1 on
+Saturday"; `D-019` addendum).
 - **Pre-registration and screening.** `D-002` v3.1 is tagged `prereg-v1` (2026-10-06). Hard-pool screening: stage 1
   complete (324 candidates, SCIP alone, 300 s, seed 900); stage 2 (seed 901) 35 of 234 runs done, deferred until the
   pool freeze (`D-010` §5, issue #1).
@@ -74,8 +77,12 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
   whose threshold is fixed before the runs.
 - **Development defaults.** A3 (SCIP ↔ EA): `configs/itrea2-dev-rc-ld.yaml` (hash `f030e23909ad`) — self-adaptive repair
   strategy, the EA's own HiGHS LP, SCIP's LP stream, deep repair under the repair clock, LP decode. A9 and its matched
-  control A3x (A3 with A9's EA footprint): `configs/itrea2-dev-rc-3way.yaml` (`1d12ad490dd0`); the runner refuses LP
-  decode there because the EA has one core (a two-core layout is issue #30).
+  control A3x (A3 with A9's EA footprint): since 2026-10-15 `configs/itrea2-dev-rc-3way-ysync-ld0.yaml` (EA hash
+  `835c7c5a249c`, A9 run hash under the ext harness `f345de0ab936`) = the old default `configs/itrea2-dev-rc-3way.yaml`
+  (`1d12ad490dd0`) + LP decode on the EA's core, started after the EA's own LP worker (`D-026`, #30) + the
+  EA's CUDA context at `yield` (`D-029`). By `D-032`'s rule it is the configuration that freezes for phase 1;
+  `configs/frozen-v2.yaml` is written on Saturday. `make_jobs.ITX_A9_CONFIG` still names `-3way.yaml` until a `src/`
+  change after the running pool, so a writer that uses it writes the old default.
 - **Development numbers** (P = primal integral, lower is better; d = bounded per-instance difference, positive = the
   coupled arm lower; seed means):
   - A3@lps1 (the 2026-10-06 baseline) against SCIP alone: lower P on 7 of 8 instances, mean d +0.43 [+0.23, +0.65],
@@ -96,34 +103,83 @@ two seeds or fewer per instance unless stated) and is descriptive, not a perform
     outcome rule held (chromaticindex1024-7: A9's P 0.545 → 0.091, cuOpt alone 0.083; back-off vs its shadow control
     9 better / 5 worse, mean d +0.083 [−0.054, +0.232]) but the mechanism failed (M3: the duty ladder stepped the EA down
     while it still led; M1: phase Y ended 0.56 / 0.80 s after cuOpt's first incumbent on toguru, limit 0.5 s; M5:
-    more local-search cap hits per call on ca and item_placement). Its phase Y alone (yield until cuOpt's first incumbent, then full duty) is the
-    next test (`D-023`, not run yet).
+    more local-search cap hits per call on ca and item_placement). Its phase Y alone (yield until cuOpt's first
+    incumbent, then full duty; `D-023`, 66 runs, 2026-10-14) was **NOT ADOPTED** either (failed M2, M5, T, G:
+    chromaticindex1024-7 d +0.030 where +0.30 was needed; cuOpt's first incumbent inside A9 at 63.47 / 63.41 s vs
+    10.87 / 10.52 s alone on F); the back-off line is closed for v1.
 - **External harness** (`D-020`, `D-021`). GAMS's published MIPfeas archive is on disk and its primal integral is
   ported exactly (equal to GAMS's own function on all 3,495 of its traces). ITX-1's footprint F passed its thermal soak
   (steady p95 66–73 °C, maximum 76 °C over four 600-s runs); three instances do not fit F's memory (eilA101-2, nw04,
-  supportcase6) and are excluded in advance. The calibration of cuOpt alone on F against GAMS's published GB10 row is
-  **INTERIM, INCOMPLETE (19 of 30)** (stopped so that performance runs come first): at the stop the ratio of shifted
-  geometric means is 1.390 [1.081, 1.837] on the call clock (1.416 [1.087, 1.903] at 18 runs) — cuOpt on 5 cores about
-  1.4 times GAMS's 24-thread whole-box run — with the clock check passing on the 6 of 10 strata-0–1 instances run; it
-  decides nothing until 30 of 30 (`vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim
-  calibration.md`).
-- **In progress (2026-10-13, no results yet):** `D-022` — cuOpt's MIP gaps 0 inside A9, tested on the 3 instances where
-  cuOpt's own 1e-4 stop occurs — and checkpoint C1's interim A9 result against cuOpt alone on the same footprint
-  (hint: ratio of means ≤ 0.95 on 11 weak development instances; guard over all 17), 74 runs.
+  supportcase6) and are excluded in advance. The calibration of cuOpt alone on F against GAMS's published GB10 row (M4)
+  is complete, 30 of 30 (2026-10-15), and reads **OUTSIDE** the band [0.870, 1.150]: ratio of shifted geometric means
+  1.313 [1.091, 1.618] on the call clock (1.963 [1.606, 2.408] on the launch clock), feasible 27 vs GAMS 27, late-clock
+  check passed (median −0.119 s over strata 0–1). With the clock checked, the difference is the footprint (cuOpt on F's
+  5 threads and the GPU against GAMS's 24-thread whole box) and the machine, so v1's external targets stay anchored on
+  our own A6F run (`vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim calibration.md`, addendum
+  2026-10-15; its interim 19-of-30 reading is superseded). A0 (SCIP alone, 600 s) on the 81 instances v1's decisions
+  read: 80 completed + 1 failed (s100: SCIP did not stop at its limit and was killed at 701 s; kept as an A0 failure).
+- **Phase 1's last week (2026-10-13 → 10-16).** Each verdict by its record's rules, fixed before any of its runs was
+  read (`D-022`'s second amendment came with 7 of the 58 runs of its first pool done, none read; `D-029`'s, below):
+  - Adopted: `D-022` (74 runs) — A9 under the ext harness (cuOpt's MIP gaps 0, thread variables unset; R13 + R14):
+    valid, no harm on the 3 instances where cuOpt's own 1e-4 stop occurs; its mechanism was met only vacuously (no A9
+    run in either arm ended on cuOpt's "optimal": SCIP proves first), so the adoption rests on D-021's fairness and
+    GAMS fidelity. `D-026` (28 runs) — LP decode inside A9 after the LP worker: hint 0.758 (threshold 0.90;
+    item_placement P 0.330 → 0.198, sing44 0.473 → 0.411, lower on all four seeds of both), every mechanism and
+    no-harm leg held. `D-029` (21 runs) — the EA's CUDA context at `yield`, its guards read over seeds 0–5 with the
+    failing seed of D-025 kept: generations ratio item_placement 1.020, comp21 1.152 (≥ 0.90); P difference +0.016 /
+    +0.015 (≤ +0.05); ca's ratio at seeds 2–3 0.675 (≤ 0.95). These thresholds were set with seeds 0–1 (8 of its 28
+    read runs) already known, and item_placement's generation bar was loosened from D-025's 0.921 to 0.90 (disclosed in
+    D-029's amendment B1–B2). At D-025's bars the verdict is the same (item_placement 1.020 > 0.921; comp21 1.152 >
+    D-025's 0.898 for yield, 0.950 for blocking sync), so this qualifies the claim, not the result.
+  - Not adopted: `D-023` (above); `D-025` (R1, 20 runs each) — blocking sync (hint 0.765; the generation guard failed
+    on item_placement and comp21, comp21's P +0.060 beyond its band 0.050) and its fallback `yield` at seeds 0–1
+    (hint 0.834; item_placement's generation guard failed on one seed, 678 vs 1,480 generations), then reopened by
+    `D-029`.
+  - Diagnostics: `D-027` (22 runs) — cuOpt's first incumbent on chromaticindex1024-7 comes at 9.80 / 7.33 s alone on
+    F, 9.24 / 8.21 s on a 3-thread lane and 6.53 / 9.65 s beside SCIP, against 62–66 s inside A9: the EA's presence
+    on the GPU, not cuOpt's thread count or SCIP (rule 4, EA PRESENCE); the layout question is closed for v1. `D-028`
+    (4 runs) — not D-022's harness: A9 with phase Y under `r13-off` still 63.25 / 63.24 s against L = 19.82 s.
+    chromaticindex1024-7 stays a known v1 loss to cuOpt alone; CUDA MPS is not for v1 (Berk, 2026-10-15).
+  - **C1 readings** (A9 vs cuOpt alone on F, A6F, in the same window; seeds 0–1; hint = ratio of mean P(120) A9 /
+    A6F over the fixed 11 weak development instances ≤ 0.95, futility-only; guard = mean bounded d over all 17 ≥
+    −0.05): on the old default (2026-10-13, `D-022` Result) hint present 0.827, guard +0.063; **on the frozen-v2
+    candidate (`D-030`, 68 runs, 2026-10-15/16) hint present 0.809, guard +0.050** — read with cuOpt alone's crashes
+    on comp21-2idx (SIGSEGV on both seeds) kept as A6F outcomes, from which this reading gains (A6F P 1 on both
+    seeds); with those two runs left out, the hint and guard are INCOMPLETE. Reported beside, not criteria: on the
+    fixed 11 against cuOpt alone 7 lower / 3 higher, P 0.677 → 0.548 (−19 %), d +0.235 [+0.052, +0.433], Wilcoxon p
+    0.049; against SCIP alone (A0 from earlier days) on SCIP's weak set among the 17 (15 instances) 12 lower / 0
+    higher, P 0.889 → 0.447 (−50 %), d +0.502 [+0.329, +0.675], p 0.0005. D-030's harm leg (cross-day, against the
+    old default's 10-13 runs) flagged glass4 (d_i −0.088 against −0.057) and, at floor level, neos-3004026-krka;
+    `D-032` re-read glass4 in one window (12 runs, seeds 0–3): mean P old default 0.2176, candidate 0.2233, LP decode
+    alone 0.2177, d −0.025 ≥ −0.057 → DRIFT, so the candidate freezes for phase 1 by D-032's rule (fixed before its
+    runs); D-031's four-seed harm reading may still put which configuration freezes to Berk. The four-seed reading
+    (`D-031`) is running: section below. The go / no-go on C1 is Berk's.
 - **cuOpt 26.10.** NVIDIA/cuopt#2073 (filed 2026-10-07) is fixed in 26.10 by PR #2098 and checked on a 26.10 nightly in a
   separate environment: presolve stays on with a `SetSolutionCallback`, injected solutions are accepted exactly,
   invalid ones rejected; cuOpt reads injected solutions only when its GPU population records a new best. Open: our
   exact checker accepted incumbents below MIPLIB's proven optimum (glass4, from EA runs — cuOpt rejects that point
   when offered; mas74, a cuOpt incumbent) and rejected cuOpt incumbents on snowy (1) and neos-933966 (3) — a tolerance
   mismatch under investigation (#36).
-- **Tests (2026-10-12):** CPU suite 1,009 passed after D-021 phase 2; the runner's GPU tests passed on 2026-10-13.
-- **Next:** GitHub milestone *C1 checkpoint (2026-10-23)* — #23 (A9 and its back-off: D-023 next), #26 (recombine each
-  partner incumbent with the elite), #27 (lp_decode: adopted for A3; open for A9 and follow-ups), #29 (MIPfeas
-  harness), #30 (A9 core layout for LP decode), #33 (control runs moved aside by run-id reuse), #36 (checker
-  tolerance), #37 (code owed by D-024, incl. D-023's amendment); milestone *v1 (end of November 2026)* — #1 (pool
-  freeze), #31 (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper); not in a milestone: #35
-  (A9 two-way through cuOpt 26.10's SET callback, not started; after the 26.10 re-baseline or v1.1). Plan:
-  `vault/00-index/Roadmap.md`.
+- **Tests:** non-GPU suite 1,256 passed, 1 xfailed on main after the R1–R3 merges (2026-10-14); 1,339 passed on branch
+  `c1-rerun` before its merge (2026-10-15; 256 affected tests passed on main after it). GPU checks before the 10-15
+  runs: the GPU suites 45 passed, 1 skipped; `test_cuda_sched.py` 5 and `test_lp_decode_gate.py` 4 passed; the
+  candidate's A9-layout cold-cache test passed at 15:07.
+- **Next:** Saturday 2026-10-17 (C1, end of phase 1): `configs/frozen-v2.yaml`, the phase-1 results note, a
+  checkpoint, docs and issues, the go / no-go to Berk with the numbers (`D-019` addendum). Carried to phase 2: #26
+  (recombine each partner incumbent with the elite, not built), #35 (A9 two-way through cuOpt 26.10's SET callback,
+  v1.1), CUDA MPS (v1.1), chromaticindex1024-7 as a known loss. Due before `prereg-v2`, not Saturday: #36 (checker
+  tolerance) and #32's test-set size. Also open: #37 (code owed by D-024), #38 (the pool should enforce R26's opening
+  gate; `tools/r26-gate.sh` until then), #33 (control runs moved aside by run-id reuse). GitHub milestones *C1
+  checkpoint (2026-10-23)* (still named for the old date) and *v1 (end of November 2026)* — #1 (pool freeze), #31
+  (cuOpt 26.10), #32 (`prereg-v2`, confirmatory and MIPfeas runs), #12 (paper). Plan: `vault/00-index/Roadmap.md`.
+
+### Four-seed result (D-031) — filled in after the run
+**Placeholder: no number of D-031 exists yet.** Set `c1r-ysync-ld0-s23` (`jobs/d031.jsonl`): D-030's 68 C1 runs at seeds
+2–3 on the same candidate, started 2026-10-16 08:57, read together with D-030's seeds 0–1 by `tools/d031_report.py
+--d030-json logs/d030-reading.json`. Its `PHASE-1 INTERIM RESULT` line goes here once the 136 runs are read. It carries
+the four-seed hint and guard, with seeds 2–3 alone beside as the selection check, only if all 136 read VALID; otherwise
+it carries D-030's two-seed reading and names why (INCOMPLETE or INVALID, n of 136). Until then the phase-1 interim
+reading is D-030's two-seed one above.
 
 ## How to start
 1. Read [`AGENTS.md`](AGENTS.md) (every rule for agents and the code map), then the vault's
@@ -176,13 +232,13 @@ file mailbox on `/dev/shm` offers the same API; the runner and the pool use it b
 | path | what |
 |---|---|
 | `src/itrea/` | the package: `cli` (the `itrea` command), `config`, `problem`, `backend`, `trace`, `paths`; `ea/` (evaluation, population, three-rank survival, elite clearing, operators, feasibility-jump local search on GPU and CPU, continuous decoding and the LP decode worker, repair clock, A9 GPU back-off, equality aggregation (not wired in), frontier, engine, EA process); `exchange/` (file mailbox, Redis); `solvers/` (SCIP, HiGHS, cuOpt processes); `experiments/` (gates, GPU health, Redis container control, environment record, runner, job builder, pool); `analysis/` (exact checker, metrics, run tables, pre-registered statistics, lineage, re-derivation, the back-off report); `benchmarks/` (toy models, hard-pool screening and freeze, reference values) |
-| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`); development files (never confirmatory): `itrea2-adaptive.yaml` (`584ddee83747`), `itrea2-adaptive-lps.yaml` (`a2ad94e9188d`), `itrea2-adaptive-lps-rc.yaml` (the repair clock in shadow mode), `itrea2-dev-rc-3way.yaml` (repair clock active; `1d12ad490dd0`; A9 / A3x), `itrea2-dev-rc-ld.yaml` (+ LP decode; `f030e23909ad`; the A3 default), `itrea2-dev-rc-3way-bo*.yaml` (A9 back-off: `bo0` shadow, `bof50` / `bof25` / `bof12` forced duty, `bo1` active, `bo1s` its shadow control, `boY` phase Y only); `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison); `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
+| `configs/` | `itrea2-default.yaml` (every parameter at its default, generated; hash `9ac4a93bf93b`); development files (never confirmatory): `itrea2-adaptive.yaml` (`584ddee83747`), `itrea2-adaptive-lps.yaml` (`a2ad94e9188d`), `itrea2-adaptive-lps-rc.yaml` (the repair clock in shadow mode), `itrea2-dev-rc-3way.yaml` (repair clock active; `1d12ad490dd0`; A9 / A3x until 2026-10-15, the old default), `itrea2-dev-rc-ld.yaml` (+ LP decode; `f030e23909ad`; the A3 default), `itrea2-dev-rc-3way-bo*.yaml` (A9 back-off: `bo0` shadow, `bof50` / `bof25` / `bof12` forced duty, `bo1` active, `bo1s` its shadow control, `boY` phase Y only; not adopted, D-018 / D-023); the C1 diagnosis's variants of `-3way.yaml` and of `-3way-boY.yaml`, each its base + one change (R1, D-025 / D-029: `-bsync`, `-bnice`, `-ysync`; R2, D-026: `-bsync-ld`, `-bsync-ld0`, `-ld0`); **`itrea2-dev-rc-3way-ysync-ld0.yaml`** (`-ld0` + `yield`; EA `835c7c5a249c`, A9 run hash `f345de0ab936`; A9's and A3x's development default since D-026 + D-029 and the configuration that freezes for phase 1, D-032; `frozen-v2.yaml` is written from it on Saturday); `itrea1-faithful.yaml` (closest to part I; a record, not a planned comparison); `ablations/` (x0 — the H6 arm, y0, no_bound_demote, one-way exchange both ways, post_frontier); `tests/test_configs.py` checks them |
 | `tests/` | correctness tests on toy models and synthetic problems (`-m gpu` needs CuPy, `-m solver` runs a real solver for seconds, `-m integration` launches real processes through the runner) |
-| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`), `probe_lp_decode.py` (the LP decode worker on stored vectors), `cuopt_verify_mipstart.py` (cuOpt MIP start check, GPU), `probe_cuopt_setsol.py` (cuopt#2073's check, GPU), `d016_report.py` / `d017_report.py` / `d022_report.py` (decision reports), `d027_report.py` (D-027, the C1 diagnosis's R3, `itrea d027-report`), `c1r_report.py` (D-030, the C1 re-read on the frozen-v2 candidate, `itrea c1r-report`), `derive_mipfeas_strata.py` / `m0_replay.py` (`D-021`'s sets and replay), development probes |
+| `tools/` | `serving-window.sh` (stop / restore the host's local LLM servers for an experiment window), `bench_ls.py` (local-search throughput, `itrea bench-ls`), `probe_lp_decode.py` (the LP decode worker on stored vectors), `cuopt_verify_mipstart.py` (cuOpt MIP start check, GPU), `probe_cuopt_setsol.py` (cuopt#2073's check, GPU), `d016_report.py` / `d017_report.py` / `d022_report.py` (decision reports), `d027_report.py` (D-027, the C1 diagnosis's R3, `itrea d027-report`), `d025_report.py` / `d026_report.py` (D-025 / D-026, the C1 diagnosis's R1 / R2, `itrea d025-report` / `d026-report`), `bsync_check.py` (R1's spin check before its window, GPU), `c1r_report.py` (D-030, the C1 re-read on the frozen-v2 candidate, `itrea c1r-report`), `d029_report.py` (D-029's report and job writer, `--write-jobs`), `d029_oc.py` (the pass rates D-029's rules imply, a seeded simulation), `d031_report.py` (D-031, C1 on four seeds — D-030's and D-031's sets as one reading — and its job writer; no `itrea` entry for D-029 / D-031: the scripts are the entry), `r26-gate.sh` (D-021 R26's opening gate for a chain: 3 min idle, then a 60-s median of the hottest zone ≤ 50 °C and the fan governor alive; stopgap until the pool enforces it, #38), `derive_mipfeas_strata.py` / `m0_replay.py` (`D-021`'s sets and replay), development probes |
 | `jobs/`, `traces/`, `datasets/` | job files; run outputs (raw traces are not committed, resource records are); derived tables (`dev_set.csv`, `classprobe_set.csv`, the run tables) |
 | `data/` | instances (not in git; symbolic links to the public sets, see `vault/10-design/Datasets.md`) |
 | `paper/` | LaTeX source of the paper (skeleton; no results) |
-| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-024, results, literature, incidents, upstream drafts, reviews, checkpoints — start at `vault/00-index/Home.md` |
+| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-032, results, literature, incidents, upstream drafts, reviews, checkpoints — start at `vault/00-index/Home.md` |
 | `tutorials/` | tutorials (planned) |
 | `.claude/skills/` | repository skills for AI agents (window, journal, result note, new experiment, literature, reproduce) |
 
