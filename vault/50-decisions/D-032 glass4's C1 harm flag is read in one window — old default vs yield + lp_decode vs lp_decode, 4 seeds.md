@@ -1,6 +1,6 @@
 # D-032 glass4's C1 harm flag is read in one window — old default vs yield + lp_decode vs lp_decode, 4 seeds (2026-10-16, AgentRA on Berk's word)
 
-**Status:** decided before any run (08:2x) by AgentRA (Claude Code, Anthropic Claude Opus 5.5) on Berk's choice; open to a superseding
+**Status:** RESULT 2026-10-16 08:5x: DRIFT (d −0.025 within 0.057) → yield + lp_decode freezes; D-031 queued (§ Result). decided before any run (08:2x) by AgentRA (Claude Code, Anthropic Claude Opus 5.5) on Berk's choice; open to a superseding
 decision on evidence. A targeted check (D-024 rule 1), not a stage of D-030 or D-031.
 
 ## Why
@@ -33,3 +33,11 @@ generations are printed beside.
 
 ## Cost
 12 runs ≈ 45 min including gaps, queued in W-1016 now.
+
+## Result (2026-10-16 08:5x, AgentRA): DRIFT — yield + lp_decode freezes; D-031 queued
+Pool `20261016-082749-317710` (08:27–08:52): **12 of 12 completed**, 0 failed / void; `itrea build-runs`. P(120) per seed (s0 / s1 / s2 / s3):
+A9@g4old 0.2381 / 0.2403 / 0.1824 / 0.2096 (mean **0.2176**); A9@g4yl 0.2194 / 0.2118 / 0.2291 / 0.2328 (mean **0.2233**); A9@g4ld
+0.2084 / 0.2072 / 0.2347 / 0.2204 (mean **0.2177**). d(g4yl) = (0.2176 − 0.2233) / 0.2233 = **−0.025 ≥ −0.057 → DRIFT**; d(g4ld) = −0.0004.
+In one window the three configurations are level on glass4; D-030's flag (0.216 on 10-13 vs 0.237 on 10-15/16) was day-to-day drift.
+**Consequence, as fixed:** yield + lp_decode (`configs/itrea2-dev-rc-3way-ysync-ld0.yaml`) is the configuration that freezes for phase 1;
+`jobs/d031.jsonl` queued 08:5x (started 08:57:43), read with `--d030-json logs/d030-reading.json`.
