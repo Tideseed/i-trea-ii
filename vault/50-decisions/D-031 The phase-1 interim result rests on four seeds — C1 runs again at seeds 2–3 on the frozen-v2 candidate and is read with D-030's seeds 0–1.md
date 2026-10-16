@@ -1,6 +1,6 @@
 # D-031 The phase-1 interim result rests on four seeds — C1 runs again at seeds 2–3 on the frozen-v2 candidate and is read with D-030's seeds 0–1 (2026-10-15, AgentRA on Berk's "go ahead with recommendations")
 
-**Status:** decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's "go ahead with recommendations"
+**Status:** RESULT 2026-10-16 13:1x: HINT present 0.798, GUARD holds +0.045 on four seeds (136 runs VALID); harm flags glass4 (drift per D-032) and comp21 (edge) beside (§ Result). decided by AgentRA (Claude Code, Anthropic Claude Opus 5.5) under Berk's "go ahead with recommendations"
 (2026-10-15 13:5x) and the plan of [[D-019 v1 — deadline and performance target]]'s addendum of 2026-10-15 13:4x —
 **before any run of set `c1r-ysync-ld0-s23`**; open to a superseding decision on evidence. **Not run.** A change to any
 rule below before the first run of the set is a dated amendment here. Development only
@@ -282,3 +282,21 @@ The 16:0x text stands, including condition 4's default: if D-030's harm leg fire
 Berk approved at 13:5x, "go ahead with recommendations"), and D-031 runs then only on Berk's word. Procedure owed on Friday: when D-030
 is read, save `itrea c1r-report --a9 ysync-ld0 --json logs/d030-reading.json` and name it in the journal; D-031 is read with
 `python tools/d031_report.py --d030-json logs/d030-reading.json`; D-031's pool is launched with the default `--order-seed`.
+
+## Result (2026-10-16 13:1x, AgentRA): THE PHASE-1 INTERIM RESULT — HINT present 0.798, GUARD holds +0.045 (four seeds, 136 runs)
+Set `c1r-ysync-ld0-s23`, pool `20261016-085742-499378` (08:57–12:55): **67 completed, 1 failed** (comp21-2idx A6F@c1r seed 2, cuOpt rc −11,
+the third cuOpt-alone SIGSEGV on comp21 in four seeds). `itrea build-runs`; `python tools/d031_report.py --d030-json logs/d030-reading.json`
+(JSON `logs/d031-reading.json`): **VALID, 136 of 136** (verdict reading: failed runs kept, D-002 §6).
+- **PHASE-1 INTERIM RESULT (seeds 0–3):** **HINT present, ratio 0.798** (P̄ 0.550 / 0.690 over the fixed 11; ≤ 0.95; futility-only, it
+  declares nothing) and **GUARD holds, mean bounded d +0.045** over the 17 (≥ −0.05). Selection check (stage-2-only figure): seeds 2–3 alone
+  0.787 / +0.034; seeds 0–1 alone (= D-030) 0.809 / +0.050 — the halves agree (they also differ in window and day).
+- **Harm leg (cross-day vs A9@r13x's seeds 0–1 of 10-13):** glass4 d_i −0.114 (P̄ 0.216 → 0.244; band 0.057) — D-032 read glass4 in one
+  window as drift; **comp21-2idx d_i −0.051** (P̄ 0.548 → 0.577; band 0.050) — at the edge, with the same-configuration replicates' null lines
+  far wider on comp21 (−0.353 on 10-15). Beside, not criteria; any harm goes to Berk with the go / no-go.
+- **Reported (D-013 terms):** vs cuOpt alone (same window per block) on the fixed 11: improved 7, worse 3, P 0.690 → 0.550 (−20 %), d +0.249
+  [+0.078, +0.441], Wilcoxon p 0.027 (seeds 2–3 alone: 7 / 1, −21 %); vs SCIP alone (A0, earlier days, seeds 0–1): fixed 11 8 / 0, −38 %;
+  SCIP's weak set among the 17 (15): 12 / 0, 0.889 → 0.448 (−50 %), d +0.499 [+0.323, +0.676], p 0.0005.
+- **Exclude reading** (the three crashed A6F runs left out): INCOMPLETE (comp21's A6F missing at seeds 0, 1, 2) — hint and guard unread; the
+  kept reading counts cuOpt alone's crashes on comp21 against cuOpt alone (its P̄ there 0.692 vs 0.504 on 10-13), which favours A9 on comp21.
+- **For Berk:** the go / no-go on C1 and what freezes (the candidate `configs/itrea2-dev-rc-3way-ysync-ld0.yaml`) are his (D-019 addendum,
+  D-025 amendment 3), with these numbers and the two harm flags beside.
