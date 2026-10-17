@@ -8,7 +8,7 @@ SCIP-accepted posts. Change notes say what was changed and why, with the commit.
 ## Changes
 | date | commit | change | why |
 |---|---|---|---|
-| 2026-10-06 | 4127f10 / e05886c | baselines: default config `9ac4a93bf93b`, A0 / A5 / A3 × 9 × seeds 0–1 + A6, 120 s, beside an idle [local LLM agent] (`--allow-serving`) | D-010 yardstick |
+| 2026-10-06 | 4127f10 / e05886c | baselines: default config `9ac4a93bf93b`, A0 / A5 / A3 × 9 × seeds 0–1 + A6, 120 s, beside an idle vLLM server (`--allow-serving`) | D-010 yardstick |
 | 2026-10-06 | 40fecba | self-adaptive repair strategy (`strategy` section, off by default — the default hash stays `9ac4a93bf93b` and a disabled run is identical to one before the change, regression-tested on NumPy and CuPy): every individual carries (repair row scale l2/rhs) × (LP guidance off/on), inherited from parent A, redrawn with p = 0.1, each strategy ≥ 5 % of the offspring; ONE local search with a per-individual row-scale table (one repair call and one mutation call per generation, whatever the number of strategies); V stays on `ranks.viol_norm`. `configs/itrea2-adaptive.yaml` = default + `strategy.enabled` + `seeding.lp_source: highs_async` (hash `584ddee83747`). Review fixes (same day, before any run): the first version repaired each row scale in its own GPU call, one after the other (+13–39 % per generation with two scales — it would have biased a fixed-budget comparison against the fixed-strategy arms; now within 2–5 % of the strategy-off generation time on `set_cover(2000, 300, 0.02)`, P = 256); injected solver rows drew sorted strategies, so the best solver row got strategy 0 ~90 % of the time (now independent draws); solver finds were credited to a strategy (now `incumbents_solver` / `best_events_solver`). Also for every configuration: the warm-up now forces `violation_guided`'s draw over violated rows (one seed in eight compiled 14 kernels on the clock at generation 1; results unchanged). Not yet run on the development set | feasibility probe 1: the LP point and the rhs row scale each unlock instances the other cannot, and each hurts where the other helps — let selection choose per instance ([[I-TREA II algorithm]], "Self-adaptive repair strategy") |
 
 | 2026-10-06 | 770df17 / c192bb5 | LP stream (D-011): SCIP streams good infeasible node LP points (2 % time budget, few fractional variables preferred); the EA ranks them (V of the nearest rounding, key) and turns each into 4 repaired children, ordinary survival only. `configs/itrea2-adaptive-lps.yaml` (`a2ad94e9188d`); with the c01 budget `4a96b872ffdc`. Reviewed before the first GPU run (3 medium findings fixed). Measured as `lps1` against `ad1` | Berk 15:2x: "when solver comes up with suitable good infeasible solutions (minimize infeasibility then maximize objective function) it might be able to inject to EA's population … We are aiming for more diversity in EA" |
@@ -128,7 +128,7 @@ P(120), seeds averaged (P_port; lower is better):
 
 Provenance caveat: the 18 runs span code states 0e69732 (9 clean, 7 with the uncommitted LP-stream code — off in
 these runs) and 770df17 (4); a disabled stream is bit-identical (review of 770df17), so the numbers stand
-([[Mistakes and incidents]], 2026-10-06 15:15–16:35).
+(incident log, 2026-10-06 15:15–16:35, in the private operations repository).
 Mean bounded d of A3@ad1 (positive = A3@ad1 better): vs SCIP alone **+0.34** (6 better, 1 worse — radiationm −0.02 —,
 2 equal); vs coupled default +0.11 (4 better, 2 worse: item_placement −0.23, loue −0.22); vs cuOpt alone +0.09 (6
 better, 3 worse: fhnw, radiationm, rail01). Hygiene: 18/18 completed, every incumbent checked (0 failed, 0 unchecked),
@@ -495,7 +495,7 @@ slower beside the EA**: cuOpt inside A9 reached 0.545 on chromaticindex1024-7 ag
 ## Rank 1 as a distinct elite — D-016 result (2026-10-08 11:26–14:04) — A3@rc1d / A3@cl1 / A3@tp1 × 9 × seeds 0–1
 [[D-016 Rank 1 as a distinct elite — cuOpt's clearing rule, development test]]. Pool 20261008-112631, commit 6ae6a6f,
 54/54 completed, 0 void, every incumbent checked, `compiled_on_clock` false in all 54 (a first attempt's block at
-11:11 was voided for kernels compiled on the clock — `60-incidents`). rc1d = the development default re-run in the
+11:11 was voided for kernels compiled on the clock — journal 2026-10-08 11:11–11:26). rc1d = the development default re-run in the
 window (`1d12ad490dd0`); cl1 = + `ranks.rank1_mode: clearing` (`8d01ac13f25f`); tp1 = + `ranks.elite_basis:
 population`, the size-only control (`e0483418b66d`). Both LLM servers stopped. `tools/d016_report.py`.
 
@@ -652,7 +652,7 @@ footprint F (X925 5–6, A725 1–3, the GPU), both LLM servers stopped, 0 void 
   the 40-GB host cap, supportcase6 at 22.6 GiB host (> 19.2) → **does not fit F: eilA101-2, nw04, supportcase6**,
   excluded from both arms; decision set 218 → 215, H_cu-unseen 65 → 64.
 - **M4 calibration — INTERIM, INCOMPLETE (19 of 30)** (A6F × D-020's 30-instance sample × 600 s, seed 0; pools 20261012-120607-2036840, 5 runs,
-  paused for [other project], and 20261013-123201-3850111, 14 runs): stopped at 19 of 30 by D-024 rule 0
+  paused for another project's session, and 20261013-123201-3850111, 14 runs): stopped at 19 of 30 by D-024 rule 0
   (performance runs first). Late-clock check on the 6 strata-0–1 instances run: median first-incumbent offset ours −
   GAMS −0.119 s — passes (≤ +0.3 s); 4 strata-0–1 instances still owed before v1's first external run. Footprint ratio,
   call clock: R 1.390 [1.081, 1.837] over 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x); launch clock 2.036
@@ -677,7 +677,7 @@ implemented properly?" NVIDIA/cuopt#2073 (filed 2026-10-07: a `SetSolutionCallba
 closed on 2026-10-12 by PR #2098, merged into `main` = 26.10.00. Probe: `tools/probe_cuopt_setsol.py` and
 `tools/probe_cuopt_setsol_report.py` (e5217ae) on the nightly `cuopt-cu13 == libcuopt-cu13 ==
 26.10.0a294.post261013051018` in a separate venv `~/venvs/cuopt-2610n` (installed on Berk's ask; the repository venv
-stays on 26.08); 31 solves of 20–30 s (most on the nightly; the injection also on 26.08 in the repository venv), 3 threads, RMM 8 GB, short lease, both LLM servers left up (for [other project],
+stays on 26.08); 31 solves of 20–30 s (most on the nightly; the injection also on 26.08 in the repository venv), 3 threads, RMM 8 GB, short lease, both LLM servers left up (for another project's session,
 as agreed on 10-12). Five development instances (glass4, sing44, neos-3024952-loue, neos-2657525-crna,
 item_placement_9903).
 - **Implemented properly:** with a SET callback, presolve stays on in 26.10 (26.08: "Presolve is disabled because
@@ -690,7 +690,7 @@ item_placement_9903).
   crna: 11 calls, all at 0.70–0.71 s, none in the remaining 29 s; sing44: the first call at 28.3 s. An outside solution
   enters only while cuOpt's own heuristics improve, not when it has stalled.
 - **Berk (11:xx): "I just got word it is integrated to 26.10."** The two upstream drafts (a thanks comment; a request to
-  poll SET on a timer) stay unposted (`vault/70-upstream/2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with
+  poll SET on a timer) stay unposted (`vault/70-upstream/2026-10-07 NVIDIA-cuopt 2073 — SetSolutionCallback with
   presolve.md`, `vault/70-upstream/drafts/`). Latest cuOpt release on 2026-10-13: still v26.08.00.
 - **No A9 result:** no arm ran on 26.10, and A9 is unchanged (one-way cuOpt → EA). What it opens: A9 two-way — the EA's
   and SCIP's incumbents offered to cuOpt through the SET callback with presolve on (#35); a development item after the
@@ -912,7 +912,8 @@ Record: [[D-031 The phase-1 interim result rests on four seeds — C1 runs again
   after D-030's hint was present (hence the seeds 2–3-alone ratio beside); more seeds do not shrink the 10-13 reference's
   own error.
 - Window: nothing else was queued for phase 1, so `logs/pool.stop` at 13:0x let the chain restore at once; restore
-  13:03–13:06 verified (both units active and enabled, health 200 / 200, lease released; journal 2026-10-16 12:55).
+  13:03–13:06 verified (both units active and enabled, health 200 / 200, lease released; operational notes of
+  2026-10-16, private operations repository).
 
 ## C1 go: phase 1 closes, `configs/frozen-v2.yaml` written (2026-10-16 13:1x) — D-033
 Berk (question panel): **"Go: freeze the candidate (Recommended)"** — yield + lp_decode freezes; phase 1 closes on the
@@ -926,7 +927,7 @@ four-seed result above. Record: [[D-033 C1 go — phase 1 closes with configs-fr
 - **Still due before prereg-v2 (not phase 1):** #36 (one checker rule for every arm; it reaches glass4), #32's test-set size
   (Berk's), the prereg-v2 tag itself; v1 runs on cuOpt 26.10.
 
-## Operations in phase 1's last week — what cost box time (journal 2026-10-13 to 2026-10-16; [[Mistakes and incidents]])
+## Operations in phase 1's last week — what cost box time (operational notes and incident log of 2026-10-13 to 2026-10-16, private operations repository; journal 2026-10-15 17:30–19:0x)
 - **12-h lease limit.** 10-14 07:05: the scheduled chain claimed `--until 20:15` (13 h 10 min); `box-window` refuses leases
   longer than 12 h, the claim retried until 08:00 and the chain exited with nothing stopped; the unit had no failure alert, so
   the box idled 07:05–14:41 (7 h 36 min). Fix: leases ≤ 12 h, `OnFailure=agent-failure-alert@` on every scheduled chain, the
@@ -941,8 +942,8 @@ four-seed result above. Record: [[D-033 C1 go — phase 1 closes with configs-fr
   and the pool halted. Another session's CPU-heavy work ran unpinned and without a lease inside W-1014 and W-1015 (load averages
   5.7–6.0 at pool starts) and is the likely contributor; since 10-15 19:0x its jobs run on cores 10–14 at nice 19 (our runs use
   cores 1–3 and 5–6). Both arms of a block share their window, so comparisons stay paired; noise rises.
-- **The fan governor's rests** (30 min each, about every 1.5–2 h under load) take about 25 % of window time (journal 10-15
-  13:4x–14:4x); every run-time estimate now includes them (D-031: 3.83 min per 120-s run).
+- **The fan governor's rests** (30 min each, about every 1.5–2 h under load) take about 25 % of window time (operational
+  notes of 10-15); every run-time estimate now includes them (D-031: 3.83 min per 120-s run).
 - **Staging.** 10-15 13:43: `git add vault` swept D-030 into a commit while a build agent was still writing it (placeholders);
   no run read it and the final text (d50c03c) was committed before any C1 re-read run. Lesson: stage named files, not
   `vault/`, while an agent edits the vault.

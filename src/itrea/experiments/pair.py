@@ -85,7 +85,7 @@ on; preset `itx1` = ext + all three, carried by the v1 tier jobs and A0's extern
   are, while every arm with cuOpt (A9, A6F, A2F) hashes the whole harness. run.json `config.harness` keeps the whole
   resolved harness either way.
 
-Process launch, barrier and stop adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/xchg_pair.py`.
+Process launch, barrier and stop adapted from berkorbay/optopt@2a3348c0a102 (MIT), `src/optopt/experiments/xchg_pair.py`.
 
     python -m itrea.experiments.pair --instance /tmp/toy.mps --arm A0 --seed 0 --budget 10 --set smoke
 

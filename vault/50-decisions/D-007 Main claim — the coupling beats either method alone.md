@@ -17,12 +17,12 @@ with an exact solver can beat either single solution."
    the honest reading is "running both helps; the exchange adds nothing measurable".
 3. **Other controls stay, as secondaries:** SCIP ‖ cuOpt (A2: is our GPU EA a better partner than NVIDIA's GPU
    heuristics on the same GPU?), SCIP ‖ SCIP (A1: equal CPU), tuned SCIP alone (A0*).
-4. **I-TREA (2015) is the starting point, not a template.** What carries over as a principle: **keep good infeasible
-   solutions** (Rank 0 — infeasible solutions better than the best feasible one, a reserved share x of the population).
-   The rank names stay. Faithfulness to part I's elimination order, tournament or operators is no longer a goal: every
-   such choice is an ordinary parameter, chosen on the tuning set like any other. [[D-004 Mapping I-TREA (2015) to
-   I-TREA II]] stays as a record of where the defaults came from; its "part-I-faithful configuration" is dropped from the
-   planned comparisons.
+4. **I-TREA (part I; Orbay 2011 M.S. thesis, `orbay2011itrea`) is the starting point, not a template.** What carries
+   over as a principle: **keep good infeasible solutions** (Rank 0 — infeasible solutions better than the best feasible
+   one, a reserved share x of the population). The rank names stay. Faithfulness to part I's elimination order,
+   tournament or operators is no longer a goal: every such choice is an ordinary parameter, chosen on the tuning set
+   like any other. [[D-004 Mapping I-TREA (2011) to I-TREA II]] stays as a record of where the defaults came from; its
+   "part-I-faithful configuration" is dropped from the planned comparisons.
 5. **Mechanism hypothesis kept:** Rank 0 (good infeasible solutions) helps — the EA alone with x = 10 % vs x = 0 (A5 vs
    A5x0). The protected elite (y) moves to exploratory.
 

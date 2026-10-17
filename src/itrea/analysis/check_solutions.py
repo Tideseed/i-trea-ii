@@ -1,6 +1,6 @@
 """Independent exact check of EVERY stored incumbent of every process (vault D-002 §4 "Integrity").
 
-Adapted from berkorbay/optopt@4dd48395, MIT (`src/optopt/analysis/check_solutions.py`, issue #25 there). The rules
+Adapted from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/analysis/check_solutions.py`, issue #25 there). The rules
 carried over, because each one was paid for:
 
 - **Another library re-reads the model.** A solution is checked against the model as parsed by a different MPS reader

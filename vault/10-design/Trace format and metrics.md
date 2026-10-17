@@ -449,7 +449,7 @@ Limits: minimisation only (refused otherwise; every MIPfeas instance minimises);
 as it is and flagged in the header — GAMS's script raises on it unless the trace is on its whitelist.
 
 ## Metrics
-All in the user's objective sense; computed by `itrea.analysis` (adapted from berkorbay/optopt@4dd48395, MIT,
+All in the user's objective sense; computed by `itrea.analysis` (adapted from berkorbay/optopt@2a3348c0a102, MIT,
 `src/optopt/analysis/metrics.py`).
 
 **Checked trajectory.** Only incumbents that pass the independent exact checker (`itrea.analysis.check_solutions`:

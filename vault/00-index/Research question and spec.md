@@ -51,11 +51,12 @@ Lessons X2 paid for and that are encoded in the design (see [[I-TREA II algorith
   "better than optimal" solutions). Rejected posts are a first-class metric.
 - Start-up (instance parse, CUDA context, kernel compile) happens before the shared clock and is recorded.
 
-## The three ranks — from I-TREA (2015) to I-TREA II
-Berk supplied the part-I manuscript on 2026-10-05 (the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509)).
+## The three ranks — from I-TREA (2011) to I-TREA II
+Part I is Berk's open 2011 M.S. thesis (`orbay2011itrea`, [hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509);
+what it says: [[E Novelty check 2026-10-05]] § 1).
 **Part I is the starting point, not a template** (Berk, 2026-10-06): the principle that carries over is keeping good
 infeasible solutions; the rank names stay; every other choice is an ordinary parameter tuned like any other. Where
-the defaults came from: [[D-004 Mapping I-TREA (2015) to I-TREA II]].
+the defaults came from: [[D-004 Mapping I-TREA (2011) to I-TREA II]].
 
 | rank (I-TREA name) | who | size | rule |
 |---|---|---|---|

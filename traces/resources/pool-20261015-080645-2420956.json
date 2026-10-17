@@ -1,0 +1,143 @@
+{
+ "window": "20261015-080645-2420956",
+ "started": "2026-10-15T08:06:45.113098+02:00",
+ "layout": "pair",
+ "lanes": [
+  {
+   "name": "g0",
+   "x925": [
+    5,
+    6
+   ],
+   "a725": [
+    1,
+    2,
+    3
+   ],
+   "gpu": true,
+   "whole_box": false
+  }
+ ],
+ "cpu_lanes": 0,
+ "e0_concurrent": null,
+ "mailbox": "file",
+ "use_systemd": true,
+ "memory_max_gb": {
+  "solver": 9.0,
+  "ea": 6.0,
+  "cuopt": 12.0
+ },
+ "gpu_mem_gb": null,
+ "reserve_gb": 20.0,
+ "freeze": {
+  "test_jobs": 0,
+  "screen_jobs": 0,
+  "candidate_jobs": 22,
+  "other_jobs": 22,
+  "toy_jobs": 0,
+  "prereg": "4cdc33d7fe3b47f1cf4feb3506ef5ea785db59aa",
+  "ext_jobs": 0
+ },
+ "thermal_start_c": 80.0,
+ "thermal_start_c_cpu": 86.0,
+ "gates": {
+  "t": 1792044405.1131644,
+  "mem_available_gb": 109.01,
+  "acpi_max_c": 50.6,
+  "loadavg_1m": 5.01,
+  "lease": {
+   "who": "i-trea-ii (Claude Code)",
+   "why": "D-025 R1 (20), D-027 R3 (22), M4 remainder, queued D-026 R2",
+   "until": "2026-10-15T18:55:00+02:00",
+   "stops": "ornith-vllm,llama-qwen38",
+   "mem": 97,
+   "claimed": "2026-10-15T07:05:00+02:00"
+  },
+  "serving": {
+   "ornith-vllm": "inactive",
+   "llama-qwen38": "inactive"
+  },
+  "co_running": [
+   {
+    "pid": 4155,
+    "name": "clickhouse-serv",
+    "uid": 101,
+    "rss_gb": 1.66
+   }
+  ]
+ },
+ "env": {
+  "versions": {
+   "python": "3.12.3",
+   "numpy": "2.4.6",
+   "scipy": "1.18.1",
+   "cupy": "14.2.0",
+   "highspy": "1.15.1",
+   "pyscipopt": "6.2.1",
+   "cuopt": "26.8.0",
+   "redis": "8.1.0",
+   "itrea": "0.1.0.dev0",
+   "scip": "10.0"
+  },
+  "cpu_models": {
+   "0": "Cortex-A725",
+   "1": "Cortex-A725",
+   "2": "Cortex-A725",
+   "3": "Cortex-A725",
+   "4": "Cortex-A725",
+   "5": "Cortex-X925",
+   "6": "Cortex-X925",
+   "7": "Cortex-X925",
+   "8": "Cortex-X925",
+   "9": "Cortex-X925",
+   "10": "Cortex-A725",
+   "11": "Cortex-A725",
+   "12": "Cortex-A725",
+   "13": "Cortex-A725",
+   "14": "Cortex-A725",
+   "15": "Cortex-X925",
+   "16": "Cortex-X925",
+   "17": "Cortex-X925",
+   "18": "Cortex-X925",
+   "19": "Cortex-X925"
+  },
+  "gpu": {
+   "name": "NVIDIA GB10",
+   "driver": "580.173.02",
+   "cuda": "13.0"
+  },
+  "kernel": "6.17.0-1031-nvidia",
+  "machine": "aarch64",
+  "hostname": "dgx-spark (redacted)",
+  "hardware": "NVIDIA DGX Spark (GB10: 10x Cortex-X925 + 10x Cortex-A725, 128 GB unified memory)",
+  "git": {
+   "revision": "4c2f424cd49b2bb266efae71548e323806e88427",
+   "dirty": false,
+   "dirty_paths": [],
+   "prereg_tag": "4cdc33d7fe3b47f1cf4feb3506ef5ea785db59aa",
+   "prereg_ancestor": true,
+   "frozen_tag": null
+  }
+ },
+ "jobs": 22,
+ "blocks": 8,
+ "order_seed": 20261005,
+ "pause_c": 92.0,
+ "cap_floor_mhz": 2300.0,
+ "governor": true,
+ "fan_state": {
+  "iso": "2026-10-15T08:06:41+02:00",
+  "epoch": 1792044401.0,
+  "state": "max",
+  "for_s": 424.0,
+  "zone_c": 62.0,
+  "gpu_w": 18.0,
+  "rest": false,
+  "cap": 0,
+  "raw": "2026-10-15T08:06:41+02:00 state=max for=424s zone=62 gpu=18W rest=no cap=0",
+  "age_s": 3.9
+ },
+ "harnesses": [
+  "\"ext\""
+ ]
+}

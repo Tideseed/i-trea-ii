@@ -8,7 +8,7 @@ updated: 2026-10-05
 Sweep date 2026-10-05. Question asked of each work: does it keep infeasible solutions in an evolutionary population on
 purpose, and if so, by what rule, how many, and is anything protected on the feasible side?
 
-**Rank names** follow the vault ([[D-004 Mapping I-TREA (2015) to I-TREA II]]): **Rank 0 = infeasible good**
+**Rank names** follow the vault ([[D-004 Mapping I-TREA (2011) to I-TREA II]]): **Rank 0 = infeasible good**
 (infeasible, key better than the incumbent; at most ⌊x·P⌋; the brief's "R2"), **Rank 1 = feasible good** (the best
 ⌈y·#feasible⌉ feasible, protected every generation; the brief's "R1"), **Rank 2 = rejects** (everything else; the
 brief's "R3").

@@ -64,7 +64,7 @@ def test_restore_failed_health_exits_1_after_cleanup(home):
     r = run(home, "restore", STUB_HEALTH="fail")
     assert r.returncode == 1, r.stdout + r.stderr
     log = log_text(home)
-    assert "RESTORE FAILED: ornith=0 qwen38=0" in log
+    assert "RESTORE FAILED: vllm=0 llamacpp=0" in log
     c = calls(home)
     # the remaining steps still ran: canaries resumed, hold lines dropped, lease released, state lines logged
     assert any(x.startswith("hermes cron resume") for x in c)

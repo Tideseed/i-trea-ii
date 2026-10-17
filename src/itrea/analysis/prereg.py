@@ -20,7 +20,9 @@ every EA run must carry the expected configuration hash (`configs/frozen-e2.yaml
 `ARM_OVERRIDES`), every non-EA run the hash of its frozen solver-side settings (`configs/frozen-e2-solver.json`, see
 below; review 2026-10-06 F4), every test instance must have a frozen reference, no run may hold an incumbent stamped
 before t0 (clock rule), and (optionally checked here, always checked by the runner) every run's recorded git revision
-must descend from `prereg-v1`. Otherwise `PreregError`. `--exploratory` computes the same numbers labelled exploratory.
+must descend from `prereg-v1` (a revision from before the history rewrite of 2026-10-17 is translated to its new
+commit through `COMMIT_MAP.tsv` first). Otherwise `PreregError`. `--exploratory` computes the same numbers labelled
+exploratory.
 
 The frozen solver-side settings: `configs/frozen-e2-solver.json` = {"emphasis": <A0*'s static SCIP emphasis>,
 "cuopt_threads": <A2's num_cpu_threads, 3>, "gpu_mem_gb": <A2's RMM limit; must equal frozen-e2's gpu_mem_gb>}, written
@@ -65,6 +67,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from itrea.analysis import commit_map as CM
 from itrea.analysis import metrics as M
 from itrea.analysis import stats as S
 from itrea.benchmarks import references as R
@@ -155,9 +158,12 @@ def expected_hashes(frozen_yaml: str | os.PathLike, overrides: dict[str, dict] =
 
 
 def _git_descends(rev: str, tag: str = TAG, cwd: Path = ROOT) -> bool | None:
-    """True/False if git can tell whether `rev` descends from `tag`; None if git or the tag is unavailable."""
+    """True/False if git can tell whether `rev` descends from `tag`; None if git or the tag is unavailable. A hash from
+    before the history rewrite of 2026-10-17 is first translated to its new commit (`COMMIT_MAP.tsv`,
+    `itrea.analysis.commit_map`), so a `runs.parquet` built from old run records still passes the check."""
     if not rev:
         return False
+    rev = CM.translate(rev)
     try:
         r = subprocess.run(["git", "merge-base", "--is-ancestor", tag, rev], cwd=cwd, capture_output=True, timeout=30)
     except (OSError, subprocess.SubprocessError):

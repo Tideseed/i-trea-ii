@@ -4,10 +4,10 @@ YAML files in `configs/` hold named configurations; a run records the configurat
 trace can always be tied to the exact parameters. Unknown keys are an error (a typo must not silently fall back to a
 default). Defaults are starting points to be tuned on the tuning set only (vault D-002).
 
-The rank parameters follow Berk's brief (2026-10-05) and the original I-TREA (Orbay 2011 thesis): at
-most `x` of the population reserved for Rank 0 (infeasible individuals better than the best feasible one), and the best
-`y` of the feasible individuals (Rank 1) protected in every generation. See vault `10-design/I-TREA II algorithm.md`
-and `50-decisions/D-004 Mapping I-TREA (2015) to I-TREA II.md`.
+The rank parameters follow Berk's brief (2026-10-05) and the original I-TREA (Orbay 2011 M.S. thesis,
+`orbay2011itrea`): at most `x` of the population reserved for Rank 0 (infeasible individuals better than the best
+feasible one), and the best `y` of the feasible individuals (Rank 1) protected in every generation. See vault
+`10-design/I-TREA II algorithm.md` and `50-decisions/D-004 Mapping I-TREA (2011) to I-TREA II.md`.
 
 `strategy` (`StrategyCfg`, off by default) makes the repair self-adaptive: every individual carries a (row scale, LP
 guidance) strategy that children inherit and occasionally redraw (vault `10-design/I-TREA II algorithm.md`,
@@ -77,7 +77,7 @@ class PopulationCfg:
 
 @dataclass
 class RankCfg:
-    """The three ranks of I-TREA (Orbay 2011 thesis), single-objective form:
+    """The three ranks of I-TREA (Orbay 2011 M.S. thesis, `orbay2011itrea`), single-objective form:
     Rank 0 = infeasible good, Rank 1 = feasible good (protected elite), Rank 2 = rejects."""
     x: float = 0.10                    # Rank 0 quota: at most floor(x * P) infeasible-good individuals (reserved up to it)
     y: float = 0.10                    # Rank 1: the best ceil(y * basis) feasible individuals are protected

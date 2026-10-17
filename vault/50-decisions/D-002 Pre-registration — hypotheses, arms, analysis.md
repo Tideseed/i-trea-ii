@@ -12,10 +12,11 @@ from the P strata; solver-limit stops flagged; frozen solver settings file; kern
 block; partner GPU memory 12 GB.
 v2 → v3 (2026-10-06 00:0x, before any run): Berk set the main claim — the coupled system beats
 **either** method alone ([[D-007 Main claim — the coupling beats either method alone]]). H1 is now the pair H1a
-(A3 < A0) and H1b (A3 < A5), both required; the uncoupled portfolio and SCIP‖cuOpt become secondaries; I-TREA (2015)
+(A3 < A0) and H1b (A3 < A5), both required; the uncoupled portfolio and SCIP‖cuOpt become secondaries; I-TREA (part I)
 is the starting point only (no part-I-faithful arm).
-v1 (23:0x) → v2 (23:4x), before any run. Berk supplied the part-I manuscript, so the rank names follow
-I-TREA: Rank 0 infeasible good, Rank 1 feasible good, Rank 2 rejects ([[D-004 Mapping I-TREA (2015) to I-TREA II]]).
+v1 (23:0x) → v2 (23:4x), before any run. The rank names now follow I-TREA (part I; Orbay 2011 M.S. thesis,
+`orbay2011itrea`, §5.3): Rank 0 infeasible good, Rank 1 feasible good, Rank 2 rejects
+([[D-004 Mapping I-TREA (2011) to I-TREA II]]).
 A three-lens design critique followed ([[2026-10-05 design critique — response]]). Changes made in response:
 - the pool is chosen on SCIP alone, from a fresh screening pass;
 - 2 seeds × 32 test instances instead of 3 × 20;

@@ -500,7 +500,7 @@ rules are below.**
     stopped.
   - The transient unit had no OnFailure alert, so 7 h 36 min of a daytime window were lost.
   - Fixed in the itrea-window skill: leases ≤ 12 h; `OnFailure=agent-failure-alert@` on the chain; the session checks
-    the chain's output within 15 min (journal 10-14 07:05; [[Mistakes and incidents]]).
+    the chain's output within 15 min (operational notes and incident log of 10-14, private operations repository).
 - **R26's breaker tripped on heat (10-15 17:30).**
   - After the fan governor's rest (16:44–17:14), the hottest zone reached 85–87 °C within about 4 min at maximum fan,
     with the GPU at 15–20 W.
@@ -512,18 +512,19 @@ rules are below.**
     starts were 5.7–6.0. Unpinned processes can land on our pinned cores and add heat.
   - Since 10-15 19:0x that session's units run on cores 10–14 at nice 19 (its answer, checked with `systemctl --user
     show`).
-  - Both arms of every block share their window, so the comparisons stay paired, but noise rises (journal 10-15 17:30,
-    19:0x).
-- **The fan governor's rests take about 25 % of window time** (the journal's estimate).
+  - Both arms of every block share their window, so the comparisons stay paired, but noise rises (journal 10-15
+    17:30–19:0x).
+- **The fan governor's rests take about 25 % of window time** (an estimate in the operational notes of 10-15, private
+  operations repository).
   - By 14:57 on 10-15 there had been four rests of 30 min (the fourth 14:27–14:57), about every 1.5–2 h under load
-    (journal 10-15 13:4x–14:4x). A fifth followed at 16:44–17:14 (journal 10-15 17:30).
+    (same notes). A fifth followed at 16:44–17:14 (journal 10-15 17:30–19:0x).
   - Plan 120-s run sets at 3.44–3.83 min per run with the rests included (D-030, D-031 cost sections).
 - **Stage named files, not `vault/`, while an agent edits the vault.**
   - A 13:43 commit (`git add vault`) on 10-15 swept in D-030 while its build agent was still writing it (placeholders
     COMMIT_SHA, TEST_COUNTS).
-  - No run read that version, and the final text (d50c03c) was committed before any c1r run (journal 10-15
-    13:4x–14:4x).
-- Earlier the same week ([[Mistakes and incidents]], 10-13):
+  - No run read that version, and the final text (d50c03c) was committed before any c1r run (operational notes of
+    10-15, private operations repository).
+- Earlier the same week (10-13; incident log, private operations repository):
   - A chain whose tail is the restore left the box idle for 2 h 17 min of a daytime window. A chain's tail should be
     the next performance run set.
   - The pool enforces R26's breaker but not its opening gate (#38; stopgap `tools/r26-gate.sh`).
@@ -598,5 +599,6 @@ Each number above comes from one of these:
   20261015-150955-187322, 32 in 20261016-070810-4125812).
 - **§ 8–9** — D-033 (caveats; still due before prereg-v2); D-019 addendum 2026-10-15; journal 2026-10-13 10:00 and 11:xx (cuopt#2073, polling); journal 2026-10-14
   16:0x (Berk on #35); journal 2026-10-15 09:2x (Berk on MPS); AGENTS.md (#36's instances, #32's sizes); D-010 §4.
-- **§ 10** — journal 2026-10-14 07:05–14:41; journal 2026-10-15 13:4x–14:4x, 17:30, 19:0x; [[Mistakes and incidents]]
-  (rows 2026-10-13 20:17, 22:34; 2026-10-14 07:05); D-030 and D-031 cost sections.
+- **§ 10** — journal 2026-10-15 17:30–19:0x; D-030 and D-031 cost sections; the rest from the operational notes of
+  2026-10-14 (07:05–14:41) and 2026-10-15 (13:4x–14:4x, 19:0x) and the incident log (rows 2026-10-13 20:17, 22:34;
+  2026-10-14 07:05), all kept in the private operations repository.

@@ -1,0 +1,21 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 Berk Orbay
+
+The prose and figures of this repository -- the paper (paper/), the research
+vault (vault/) and the website (docs/) -- are licensed under the Creative
+Commons Attribution 4.0 International License,
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+You may share and adapt this material for any purpose, including commercially,
+provided you give appropriate credit, link to the licence and indicate whether
+changes were made. Suggested credit: "Berk Orbay, I-TREA II,
+https://github.com/Tideseed/i-trea-ii".
+
+Not covered by this notice:
+- Source code, configurations, tests and tools, wherever they sit, are under the
+  MIT License (see LICENSE).
+- Third-party material keeps its own terms: benchmark instances and published
+  benchmark values are described in datasets/README.md ("Data sources and
+  attribution"); quoted or reproduced third-party figures and text keep their
+  owners' terms.

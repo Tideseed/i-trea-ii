@@ -15,7 +15,7 @@ This is the **only** place for paywalled literature. The other notes, the paper 
 cite the open route in the "cite instead" column. If a legal free copy turns up later, the work moves into the topic
 note and `paper/refs.bib` with the link. Sweeps and rules: [[Prior art]].
 
-**Rank names:** Rank 0 = infeasible good, Rank 1 = feasible good, Rank 2 = rejects ([[D-004 Mapping I-TREA (2015) to I-TREA II]]).
+**Rank names:** Rank 0 = infeasible good, Rank 1 = feasible good, Rank 2 = rejects ([[D-004 Mapping I-TREA (2011) to I-TREA II]]).
 
 ## 1. Paywalled-only works from sweeps A–E (`paywalled_only = true`)
 
@@ -75,14 +75,12 @@ that no one cites them by accident.
 - **Not available from this host:** the IBM CPLEX solution-polishing documentation page (empty JavaScript shell) and the
   SCIP `heur_crossover` doxygen page (HTTP 429) — not cited; `berthold2006primal` is used instead.
 
-## 5. Part I's own references
+## 5. Part I
 
-The unpublished manuscript's reference list is audited separately in the part-I references (12 reachable,
-28 not; BibTeX in `paper/refs-itrea1.bib`, which also lists closed works). None of those closed works is listed here
-yet; any of them that the part-II paper cites is added to section 1 first, with its open route or a "needs Berk" flag.
-Two links between the audits:
-- **IDEA (Ray et al. 2009; `ray2009infeasibility` in `refs-itrea1.bib` = `ray2009idea` here)** — that note flags it as
-  "crucial and closed … unless an open IDEA paper turns up (not searched yet)". Sweep A searched: no open copy of an IDEA paper
-  was found, but Singh's 2011 PhD thesis (`singh2011thesis`, UNSWorks, open) gives IDEA in full (Ch. 3, Alg. 3.1), so the
-  mechanism can be cited without the closed chapter. Whether the chapter itself must also be cited is still Berk's call.
-- **The I-TREA master's thesis** (`orbay2011itrea`, METU 2011) is open — see [[E Novelty check 2026-10-05]].
+Part I is cited only through the open 2011 M.S. thesis (`orbay2011itrea`, METU 2011,
+[hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509); see [[E Novelty check 2026-10-05]]). Of the works it
+builds on, one matters here:
+- **IDEA (Ray et al. 2009, `ray2009idea`)** — the source the thesis cites for its reserved infeasible share; closed.
+  Sweep A found no open copy of an IDEA paper, but Singh's 2011 PhD thesis (`singh2011thesis`, UNSWorks, open) gives
+  IDEA in full (Ch. 3, Alg. 3.1), so the mechanism can be cited without the closed chapter. Whether the chapter itself
+  must also be cited is still Berk's call.

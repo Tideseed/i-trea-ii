@@ -1,6 +1,8 @@
-"""Three-rank survival — the core rule of I-TREA, carried from the unpublished manuscript to single-objective MIP.
+"""Three-rank survival — the core rule of I-TREA, carried from part I to single-objective MIP.
 
-I-TREA (Orbay 2011 M.S. thesis, manuscript unpublished, 2015) ranks a population into
+I-TREA (Orbay, "An Interactive Evolutionary Algorithm for the Multiobjective Relocation Problem with Partial
+Coverage", M.S. thesis, METU, 2011, `orbay2011itrea`, https://open.metu.edu.tr/handle/11511/20509, §5.3) ranks a
+population into
     Rank 0  infeasible good   infeasible solutions not dominated by any feasible solution; a quota of the population is
                               reserved for them;
     Rank 1  feasible good     feasible non-dominated solutions (not rejected by the decision maker);

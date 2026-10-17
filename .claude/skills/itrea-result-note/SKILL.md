@@ -86,7 +86,8 @@ point estimates; "not significant" is never written as "equal" — give the inte
 What limits the reading (sample, single machine, budgets, deviations from the plan with the decision that allowed them).
 
 ## Failures
-Everything that went wrong, including runs outside the analysis; link incident entries.
+Everything that went wrong, including runs outside the analysis, stated here in full (validity facts are public). The
+incident log is private (operations repository, skill `itrea-journal`): name an incident by its date, do not link it.
 
 ## Files
 Derived tables in `datasets/…` (committed), the analysis module that wrote them, figures; raw traces under

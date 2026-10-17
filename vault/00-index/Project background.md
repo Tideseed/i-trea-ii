@@ -44,14 +44,14 @@ Algorithm and every parameter: [[I-TREA II algorithm]].
 The project succeeds two pieces of the author's work.
 
 - **I-TREA, part I.** The author's master's research: Orbay 2011, M.S. thesis, Middle East Technical University, open
-  access at hdl:11511/20509; thesis. It is an interactive three-rank
+  access at [hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509). It is an interactive three-rank
   evolutionary algorithm for a bi-objective facility relocation problem. Part II carries over its idea of keeping good
   infeasible solutions: part I reserved a share of the population for them as a floor; part II caps it. Records:
-  the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509), D-004.
+  [[E Novelty check 2026-10-05]] (what the thesis says), D-004.
 - **The optopt study** ([`berkorbay/optopt`](https://github.com/berkorbay/optopt)). Its CPU evolutionary partner beside
   SCIP found no gain at 60 s. Its verdict named the changes tested here: a GPU population, longer budgets, and
   instances where the solver's own heuristics struggle. Code adapted from it carries the line "adapted from
-  berkorbay/optopt@4dd48395, MIT". Background: [[Research question and spec]],
+  berkorbay/optopt@2a3348c0a102, MIT". Background: [[Research question and spec]],
   [[Where cuOpt struggles (optopt background, 2026-10-07)]].
 
 ## 3. The claim, the aim and the pre-registration
@@ -303,8 +303,8 @@ Full tables and caveats: [[2026-10-17 Phase 1 — development until C1]].
 
 ## 8. Getting started, in full
 
-1. Read `AGENTS.md` (every rule for agents and the code map), then [[Home]], the newest checkpoint in
-   `vault/90-checkpoints/` and the [[Roadmap]].
+1. Read `AGENTS.md` (every rule for agents and the code map), then [[Home]] and the [[Roadmap]] (session checkpoints
+   are kept in the private operations repository).
 2. Install and run the tests (§ 9).
 3. **A toy run needs no lease and no GPU.** SCIP alone on a toy knapsack for 10 s, the runner's own example
    (`src/itrea/experiments/pair.py`). It takes the runner lock, so it refuses to start while a pool runs. `--no-pin`
@@ -318,7 +318,7 @@ Full tables and caveats: [[2026-10-17 Phase 1 — development until C1]].
      memory, thermal and GPU-health gates;
    - `itrea-new-experiment`: job file, frozen configuration, pool.
    - Job files run with `itrea pool JOBS --layout pair`; then `itrea build-runs` and the experiment's report.
-5. **Two practices learned from incidents** ([[Mistakes and incidents]]):
+5. **Two practices learned from incidents** (incident log, private operations repository):
    - before a window that runs new GPU code, the GPU-marked cold-cache tests (`pytest -m gpu -k cold_cache`) must pass
      and must reach the new code after `t0`;
    - no commit to `src/` or `configs/` while a pool can still launch runs (each run imports the current source) —
@@ -327,7 +327,7 @@ Full tables and caveats: [[2026-10-17 Phase 1 — development until C1]].
 ## 9. Install, in full
 
 ```bash
-git clone https://github.com/Tideseed/i-trea-ii && cd i-trea-ii     # private while the study runs
+git clone https://github.com/Tideseed/i-trea-ii && cd i-trea-ii
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev,plots]"          # CPU backend (NumPy/SciPy/Numba), HiGHS, SCIP, Redis client, tests, plots
 uv pip install -e ".[gpu]"                # + CuPy for CUDA 13 (the GPU backend)
@@ -365,7 +365,7 @@ mailbox on `/dev/shm` offers the same API; the runner and the pool use it by def
 | `jobs/`, `traces/`, `datasets/` | job files; run outputs (raw traces are not committed, resource records are); derived tables (`dev_set.csv`, `classprobe_set.csv`, the run tables) |
 | `data/` | instances (not in git; symbolic links to the public sets, see [[Datasets]]) |
 | `paper/` | LaTeX source of the paper (`main.tex`, `sections/`, `refs.bib`; `paper/generated/` holds the tables written by code). Was a skeleton with no results until 2026-10-16, when Berk asked for an interim technical report of phase 1 in optopt's form (journal [[2026-10-16]], 10:1x) |
-| `vault/` | research vault (Obsidian): journal, design notes, decisions D-001–D-032, results, literature, incidents, upstream drafts, reviews, checkpoints — start at [[Home]] |
+| `vault/` | research vault (Obsidian): journal (research developments only), design notes, decisions D-001–D-033, results, literature, upstream drafts, reviews; session checkpoints and the incident log are kept in a private operations repository — start at [[Home]] |
 | `tutorials/` | tutorials (planned) |
 | `.claude/skills/` | repository skills for AI agents (window, journal, result note, new experiment, literature, reproduce) |
 
@@ -478,8 +478,9 @@ See `AGENTS.md` → "Rules for new experiments".
 
 Author: Berk Orbay (berk.orbay@tideseed.com). The design and the code are developed with **AgentRA** (Agent Research
 Assistant) — AgentRA is mainly Claude Opus 5.5, working through Claude Code — under the author's direction. Code adapted
-from the predecessor carries the line "adapted from berkorbay/optopt@4dd48395, MIT". Licence: MIT (`LICENSE`);
-third-party files keep their own terms.
+from the predecessor carries the line "adapted from berkorbay/optopt@2a3348c0a102, MIT". Licence: code MIT (`LICENSE`);
+prose and figures in `paper/`, `vault/` and `docs/` CC BY 4.0 (`LICENSE-CC-BY-4.0`); third-party data keeps its own
+terms (`datasets/README.md`).
 
 ## 15. Records cited
 
@@ -487,7 +488,7 @@ third-party files keep their own terms.
 |---|---|
 | D-002 | [[D-002 Pre-registration — hypotheses, arms, analysis]] |
 | D-003 | [[D-003 Resources, memory and thermal rules]] |
-| D-004 | [[D-004 Mapping I-TREA (2015) to I-TREA II]] |
+| D-004 | [[D-004 Mapping I-TREA (2011) to I-TREA II]] |
 | D-006 | [[D-006 Exchange platform — Redis, file mailbox as fallback]] |
 | D-007 | [[D-007 Main claim — the coupling beats either method alone]] |
 | D-008 | [[D-008 Thermal start gate by arm type]] |

@@ -42,11 +42,11 @@ THERMAL_WAIT_C_CPU = 86.0  # CPU-only runs (no GPU process) may start below this
                            # 10-06 addendum (88 gave 8 pauses in 24 min) and D-021 R24. Pause/resume (92/80 °C) unchanged.
 THERMAL_PAUSE_C = 92.0     # pause the run set at or above this ...
 THERMAL_RESUME_C = 80.0    # ... until below this
-SERVING_UNITS = ("ornith-vllm", "llama-qwen38")
+SERVING_UNITS = ("ornith-vllm", "llama-qwen38")   # the host's two local LLM servers (vLLM :8094, llama.cpp :8092)
 # fan-governor's rest flag (host convention since 2026-10-02, Berk: "allow the spark to recover some … fans should not
 # go max for prolonged periods"): written after 30 min of continuous fan MAX, removed once the fan is back on AUTO (idle
 # and cool) and the rest has lasted its length (escalating 10–30 min). Launchers start nothing new while it exists.
-THERMAL_DIR = Path.home() / ".local/state/thermal"   # the host's thermal tools ([other repository] tools/bin)
+THERMAL_DIR = Path.home() / ".local/state/thermal"   # written by the host's thermal tools (outside this repository)
 REST_FLAG = THERMAL_DIR / "rest"
 # fan-governor's state file (rewritten every 5 s: `<iso> state=<auto|max> for=<s>s zone=<C> gpu=<W>W rest=<yes|no>
 # cap=<0|1>`) and its log ("fan -> max", "REST requested", "clock cap 2200 MHz on (…)", "clock cap off (…)"); its

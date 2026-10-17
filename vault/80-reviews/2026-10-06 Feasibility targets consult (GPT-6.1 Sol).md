@@ -1,8 +1,9 @@
 # 2026-10-06 Feasibility targets consult — Hermes Agent with OpenAI GPT-6.1 Sol
 
 **What:** the two instances where cuOpt alone finds solutions and the coupled system does not, put to Hermes Agent
-with OpenAI GPT-6.1 Sol (reasoning high), one-shot, 2026-10-06 16:13 (Berk: "You can use [local LLM agent] to help with the
-development"). Context: [[Development log]] (coupled adaptive results; aggregation probe). Brief: design and our own
+with OpenAI GPT-6.1 Sol (reasoning high), one-shot, 2026-10-06 16:13 (Berk: "You can use [the hosted GPT agent] to help
+with the development").
+Context: [[Development log]] (coupled adaptive results; aggregation probe). Brief: design and our own
 measurements only.
 
 ## Take-aways (ours)

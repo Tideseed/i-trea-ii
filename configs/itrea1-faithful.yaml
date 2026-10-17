@@ -1,6 +1,6 @@
 # RECORD ONLY -- NOT A PLANNED COMPARISON. No pre-registered arm (vault D-002 v3) uses this file.
-# I-TREA II -- the configuration closest to part I (Orbay 2011 M.S. thesis, `orbay2011itrea`; Orbay 2011
-# manuscript), as far as single-objective MIP allows. Mapping and every deviation: vault 50-decisions/D-004.
+# I-TREA II -- the configuration closest to part I (Orbay 2011 M.S. thesis, `orbay2011itrea`), as far as
+# single-objective MIP allows. Mapping and every deviation: vault 50-decisions/D-004.
 #
 # Status: kept as a record of where the defaults came from. Since D-007 (Berk, 2026-10-06) part I is the starting
 # point only -- the principle carried over is keeping good infeasible solutions (Rank 0) -- and faithfulness to part I

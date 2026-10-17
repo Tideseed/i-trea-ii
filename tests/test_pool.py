@@ -421,7 +421,7 @@ def test_full_layout_refusals(env, monkeypatch):
         pool.Pool([], _full(tmp_path, fake, cpu_lanes=1))._lanes()
 
     def up(*a, **k):
-        raise gates.GateError("ornith-vllm is active")
+        raise gates.GateError("a serving unit is active")
     monkeypatch.setattr(gates, "check_serving_stopped", up)                              # servers up: refused
     assert pool.Pool(_jobs(insts[:1], ["A6m"]), _full(tmp_path, fake)).run() == 2
     assert not (tmp_path / "traces" / "raw").exists()

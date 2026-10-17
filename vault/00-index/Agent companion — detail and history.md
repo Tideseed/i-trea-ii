@@ -133,7 +133,7 @@ and `AGENTS.md`.
 - **v1 target (D-019, Berk 2026-10-10):** checkpoint C1 on Sat 2026-10-17 (was Fri 10-23; D-019 addendum 2026-10-15;
   development closes on cuOpt 26.08), v1 at the end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10,
   daytime windows only; targets in the next-but-one section.
-- Newest checkpoint: `vault/90-checkpoints/2026-10-14-2350.md`.
+- Session checkpoints: kept in the private operations repository (newest at this snapshot: 2026-10-14 23:50).
 - Every hypothesis and target below is pre-registered or planned, not a finding.
 - Do not write, in any file, that I-TREA II "beats", "improves on" or "matches" anything until the corresponding
   experiment note in `vault/30-results/` says so with its numbers.
@@ -474,7 +474,7 @@ run at `priority` 0, then the 20 read runs; pinned configuration paths and run h
 | Carried to phase 2 | #26 (not built), #35 two-way (v1.1, Berk 10-14), CUDA MPS (v1.1, Berk 10-15), chromaticindex as a known loss | D-019 addendum |
 | v1 | end of November 2026 (aim Fri 11-27, hard end Mon 11-30) on cuOpt 26.10; daytime windows only | D-019 |
 | Phase-1 results note | `vault/30-results/2026-10-17 Phase 1 — development until C1.md` (DRAFT until D-031 is read) | — |
-| Newest checkpoint | `vault/90-checkpoints/2026-10-14-2350.md` | — |
+| Newest checkpoint | 2026-10-14 23:50, kept in the private operations repository | — |
 
 ### 7.1 Open issues (GitHub, `Tideseed/i-trea-ii`)
 

@@ -2,7 +2,7 @@
 
     python -m itrea.analysis.reproduce [--recheck] [--restore]
 
-Pattern adapted from berkorbay/optopt@4dd48395, MIT (`src/optopt/analysis/reproduce.py`). Every number in the paper
+Pattern adapted from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/analysis/reproduce.py`). Every number in the paper
 comes from this chain, so a reader (or the next session) can check that the committed tables follow from the traces:
 
     1. itrea.analysis.build_runs     -> datasets/runs.parquet, datasets/incumbents_checked.parquet

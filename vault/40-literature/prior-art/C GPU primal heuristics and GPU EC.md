@@ -8,7 +8,7 @@ updated: 2026-10-05
 Sweep date 2026-10-05. Question asked of each work: what runs on the GPU (LP, propagation, local search, a population),
 for which problem class, against which baselines, and does it exchange solutions with an exact solver?
 
-**Rank names** follow the vault ([[D-004 Mapping I-TREA (2015) to I-TREA II]]): **Rank 0 = infeasible good** (the
+**Rank names** follow the vault ([[D-004 Mapping I-TREA (2011) to I-TREA II]]): **Rank 0 = infeasible good** (the
 brief's "R2"), **Rank 1 = feasible good**, protected (the brief's "R1"), **Rank 2 = rejects** (the brief's "R3").
 
 **Sources and rules** as in [[A Constraint handling with infeasible solutions]]. Source code is cited at a pinned

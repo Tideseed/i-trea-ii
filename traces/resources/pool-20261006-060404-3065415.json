@@ -95,7 +95,7 @@
   "acpi_max_c": 49.8,
   "lease": {
    "who": "i-trea-ii (Claude Code)",
-   "why": "I-TREA II build tests + SCIP screening pass; [local LLM agent] + Think stopped on Berk's word (23:2x)",
+   "why": "I-TREA II build tests + SCIP screening pass; both local LLM servers stopped on Berk's word (23:2x)",
    "until": "2026-10-06T07:30:00+02:00",
    "stops": "ornith-vllm,llama-qwen38",
    "mem": 90,
@@ -156,7 +156,7 @@
   },
   "kernel": "6.17.0-1031-nvidia",
   "machine": "aarch64",
-  "hostname": "spark-865d",
+  "hostname": "dgx-spark (redacted)",
   "hardware": "NVIDIA DGX Spark (GB10: 10x Cortex-X925 + 10x Cortex-A725, 128 GB unified memory)",
   "git": {
    "revision": "589adcc4fd8bfe9afcfacd4770bc4926b3e64f39",

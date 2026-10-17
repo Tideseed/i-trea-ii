@@ -122,7 +122,7 @@ This review is saved at /tmp/itrea-cuopt/judgement.txt.
 
 ## Facts (verbatim)
 
-**mip_start.** Sources. The installed package is exactly the v26.08.00 release commit 400863c1a92914bd47f5d68245f9a00e2d0d2df4 (V/cuopt/GIT_COMMIT; GitHub commit message "REL v26.08.00 release", 2026-08-06). In the citations below, V = /home/coulson/git_repositories/i-trea-ii/.venv/lib/python3.12/site-packages and R = https://github.com/NVIDIA/cuopt/blob/400863c1a92914bd47f5d68245f9a00e2d0d2df4. The fetched sources are saved in /tmp/itrea-cuopt/src_*.
+**mip_start.** Sources. The installed package is exactly the v26.08.00 release commit 400863c1a92914bd47f5d68245f9a00e2d0d2df4 (V/cuopt/GIT_COMMIT; GitHub commit message "REL v26.08.00 release", 2026-08-06). In the citations below, V = .venv/lib/python3.12/site-packages (in the repository) and R = https://github.com/NVIDIA/cuopt/blob/400863c1a92914bd47f5d68245f9a00e2d0d2df4. The fetched sources are saved in /tmp/itrea-cuopt/src_*.
 
 **API**
 - Python: `DataModel.set_initial_primal_solution(x)` (V/cuopt/linear_programming/data_model/data_model.py:528).
@@ -161,7 +161,7 @@ This review is saved at /tmp/itrea-cuopt/judgement.txt.
 **Unverified, and how to check in under 2 minutes on the GPU**
 - Script: /tmp/itrea-cuopt/verify_mipstart.py. It is written and syntax-checked, **not run**.
 - Run it inside an i-trea-ii box-window lease, below 80 °C:
-  `cd /home/coulson/git_repositories/i-trea-ii && OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python /tmp/itrea-cuopt/verify_mipstart.py`
+  from the repository root: `OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python /tmp/itrea-cuopt/verify_mipstart.py`
 - Cost: one process, 9 Solves × 3 s, about 6 GB RMM peak.
 - It uses glass4. cuOpt alone reaches 2.1000173e9 by 3 s and 1.6000131e9 at 120 s (traces/raw/dev/glass4__A6__s0__120s__6e35f122f659). The script passes the 120-s vector as the start with a 3-s limit, so a result ≤ 1.6000131e9 plus an echo with the start's objective proves the start was used.
 - Variants:
@@ -528,7 +528,7 @@ GPU ONLY (`gpu` marker, inside a lease):
 6. **GPU bandwidth contention.** In optopt A4, GPU load beside cuOpt doubled its P(30). Contrast 4 measures this here, and it may cancel the gain.
 7. **Memory.** Two CUDA processes need about 64 GB MemAvailable at launch, or 54 GB with `cuopt_mem_gb` 6 and peak 8.
    - That fits now (both LLM servers stopped, about 108 GB free) and in any window like it.
-   - It does **not** fit beside a running [local LLM agent] (55–56 GB in the A6 runs); the pool's gate will refuse.
+   - It does **not** fit beside a running vLLM server (55–56 GB in the A6 runs); the pool's gate will refuse.
    - RMM growth across in-process Solves is unverified; `rmm_current` is recorded per slice and after each clear.
 8. **Heat:** two GPU processes. D-008 start gate below 80 °C, pause at ≥ 92 °C.
 9. **Unverified API behaviour:**
@@ -694,7 +694,7 @@ SCOPE AND RUN ORDER
 - K2y and A6y read K2's run directory, so the pool permutes {A6, C1, K2} by the Williams design and appends the yoked arms last in each block. This is a stated limitation (time-of-day drift), mitigated by same-session blocks, the thermal gate and GPU health.
 - These numbers are descriptive only. Nothing is confirmatory before a D-014 decision and prereg-v2.
 
-**implementation.** NEW CODE (repository /home/coulson/git_repositories/i-trea-ii; nothing written there by this design)
+**implementation.** NEW CODE (in this repository; nothing written there by this design)
 - **src/itrea/solvers/cuopt_worker.py** (GPU; tested only on the GPU)
   - Reuses cuopt_run._rmm_setup, _settings, _warmup and STATUS.
   - READY/GO protocol over stdin/stdout JSON lines.
@@ -781,7 +781,7 @@ GPU ONLY (inside an i-trea-ii lease)
 **first_test.** ONE LEASE, cuOpt only: no EA process and no supervisor. About 13 min on the GPU. ACPI below 80 °C, nothing else on the GPU lane.
 
 Step 0: MIP-start check (about 1–2 min, glass4)
-- Run: `cd /home/coulson/git_repositories/i-trea-ii && OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python /tmp/itrea-cuopt/verify_mipstart.py`
+- Run from the repository root: `OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python /tmp/itrea-cuopt/verify_mipstart.py`
 - Continue only if the VERDICT line shows `start_used: True` and `presolve_kept: True` (V1), and V2 shows that an in-process re-Solve with a start works.
 - Otherwise the design is dead.
 

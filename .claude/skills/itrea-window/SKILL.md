@@ -13,20 +13,33 @@ Rules: `vault/50-decisions/D-003 Resources, memory and thermal rules.md`. Code: 
 `gpu_health.py`. The box is shared with other Claude Code sessions, the host's cron jobs and two local LLM servers;
 Berk usually does not coordinate the sessions — the lease does.
 
+**Where to write.** A window's logistics (lease, stops and restores, chains, timers, messages with other sessions) go to
+the private operations repository `Tideseed/i-trea-ii-ops`; what the window measured goes in the public journal and the
+result notes (skill `itrea-journal`, "What goes where").
+
+The two servers' systemd units are named in `SERVING_UNITS` (`src/itrea/experiments/gates.py`). Set them once per
+shell, from the repository root, before the commands below — `$U1` is the vLLM server (:8094), `$U2` the llama.cpp
+server (:8092):
+```bash
+read U1 U2 < <(.venv/bin/python -c 'from itrea.experiments.gates import SERVING_UNITS as u; print(*u)')
+```
+
 ## Before
 1. `box-window status` — if another session holds an unexpired lease, **wait or ask it**; never `--force`.
-   **[other project]:** before stopping `ornith-vllm`, ask the [other project] session (cross-session message) — agreed on
-   2026-10-12, when [other project]'s hosted model had run out of [hosted model provider] credit and `ornith-vllm` was its only way to answer
-   on Slack: that day's M4 pool was stopped after 5 of 30 runs and both servers were restored 12:40–12:43 for it. Since
-   2026-10-13 09:32 (Berk's decision) [other project] answers with Claude Haiku 5.5 on the Anthropic API, so both local servers
-   may stop for our windows ([other project] session, 10-13); whether [other project] still uses `ornith-vllm` anywhere (a
-   fallback, its nightly canary) is not recorded here — ask anyway, as agreed, and write its answer in the journal.
+   **Another project's chat agent:** before stopping the vLLM server (`$U1`), ask that project's session
+   (cross-session message; which session: the operational notes of 2026-10-12, in the private operations repository)
+   — agreed on 2026-10-12, when the agent's hosted model
+   had run out of credit and `$U1` was its only way to answer its users: that day's M4 pool was stopped after 5 of 30
+   runs and both servers were restored 12:40–12:43 for it. Since 2026-10-13 09:32 (Berk's decision) the agent answers
+   with a hosted model, so both local servers may stop for our windows (that session, 10-13); whether it still uses
+   `$U1` anywhere (a fallback, its nightly canary) is not recorded here — ask anyway, as agreed, and write its answer
+   in the operations repository (skill `itrea-journal`, "What goes where").
    **Other sessions' CPU jobs:** unpinned CPU-heavy work of other sessions can be scheduled onto our run cores (A725
-   1–3, X925 5–6) and adds heat: the [other project] forecasting session's CPU-heavy jobs ran unpinned and without a
-   lease inside W-1014 and W-1015 (e.g. one unit 26 CPU-min 11:20–13:34; joblib workers at ~95 % CPU each; journal
-   2026-10-15 17:30). Ask the session to pin such work to cores
-   10–14 at nice 19 or hold it during our lease; the [other project] session has done so since 2026-10-15 19:0x.
-2. Look at what is running: `systemctl --user is-active ornith-vllm llama-qwen38`, `nvidia-smi` (foreign GPU
+   1–3, X925 5–6) and adds heat: another project's forecasting session ran CPU-heavy jobs unpinned and without a
+   lease inside W-1014 and W-1015 (e.g. one unit 26 CPU-min 11:20–13:34; joblib workers at ~95 % CPU each;
+   operational notes of 2026-10-15, private operations repository). Ask the session to pin such work to cores
+   10–14 at nice 19 or hold it during our lease; that session has done so since 2026-10-15 19:0x.
+2. Look at what is running: `systemctl --user is-active $U1 $U2`, `nvidia-smi` (foreign GPU
    processes), MemAvailable, the ACPI maximum (`gates.acpi_max_c()`); a GPU arm must not start above 80 °C. ITX-1
    windows (D-021 R26) open only if the hottest zone's median over the last 60 s is ≤ 50 °C after 3 min idle with
    both LLM servers stopped, and the fan governor is alive (`cat ~/.local/state/thermal/fan-state`: written within
@@ -39,11 +52,11 @@ Berk usually does not coordinate the sessions — the lease does.
    # Before claiming: daytime windows only — no I-TREA II window in the night rest (00:00–07:00): Berk, 2026-10-10,
    # "No nights" (D-019; until then D-009 asked for his yes for each night). Long run sets (MIPfeas ≈ 78 h) are split
    # into daytime windows, with the fan governor's rests. Check `tail ~/.local/state/thermal/fan-governor.log`
-   # and `ls ~/.local/state/thermal/rest`: the runner waits while the rest flag exists. Journal 2026-10-15 14:4x (an
-   # estimate): four 30-min rests by 14:57, about every 1.5–2 h under A9 load, about 25 % of window time (30 min every
-   # 1.5–2 h is 25–33 %) — budget window hours for it.
+   # and `ls ~/.local/state/thermal/rest`: the runner waits while the rest flag exists. Operational notes of 2026-10-15
+   # 14:4x (an estimate): four 30-min rests by 14:57, about every 1.5–2 h under A9 load, about 25 % of window time
+   # (30 min every 1.5–2 h is 25–33 %) — budget window hours for it.
    box-window claim --who "i-trea-ii (Claude Code)" --why "<experiment id and what runs>" --until HH:MM \
-     [--stops ornith-vllm,llama-qwen38] [--mem <GB>]
+     [--stops $U1,$U2] [--mem <GB>]
    ```
    `--until` covers the whole run set plus the restore (restore time + 20 min); a block is never split across windows.
    `--mem` = the memory gate's requirement, which the pool's `--dry-run` prints (`memory: … need up to N GB`): 48 GB
@@ -96,8 +109,9 @@ Berk usually does not coordinate the sessions — the lease does.
    the hottest zone stays < 85 °C). The screen layout's single-core X925 lanes need no E0 flag (the pair layout's
    `--cpu-lanes` does). A block voided by `ref_rejected` (R12's trigger not confirmed by the exact checker) is rerun once
    with the stop off — normal, counted in `counts.requeues`.
-4. Confirmatory runs (and the screening pass) need **both LLM servers stopped** (vLLM serving Ornith-1.5-35B-A3B on
-   :8094, llama.cpp serving Qwen3.8-27B on :8092; Berk's yes of 2026-10-05). Schedule the restore **first**, then stop:
+4. Confirmatory runs (and the screening pass) need **both LLM servers stopped** (vLLM serving a 35B-A3B
+   mixture-of-experts model on :8094, llama.cpp serving Qwen3.8-27B on :8092; Berk's yes of 2026-10-05). Schedule
+   the restore **first**, then stop:
    ```bash
    ~/git_repositories/i-trea-ii/tools/serving-window.sh schedule "YYYY-MM-DD HH:MM:00"
    # creates itrea-restore-serving.timer with OnFailure=agent-failure-alert@… so a failed restore alerts
@@ -112,23 +126,25 @@ Berk usually does not coordinate the sessions — the lease does.
    lease longer than 12 h, "not a window; split it" — and the chain exited at 08:00 with nobody told; 7.5 h of box
    lost): (a) keep each lease ≤ 12 h (split a long day: the chain claims the second lease itself after the first
    pool); (b) give the chain's service `-p OnFailure=agent-failure-alert@%n.service` and make every early exit
-   `exit 1`, so a refused claim alerts in [ops channel]; (c) at the chain's start time, check `logs/chain-*.out` within
-   15 min — a waiting session does that, not the chain. The chains of 2026-10-15 and 10-16 (`logs/chain-1015.sh`,
+   `exit 1`, so a refused claim alerts on the host's alert channel; (c) at the chain's start time, check
+   `logs/chain-*.out` within 15 min — a waiting session does that, not the chain.
+   The chains of 2026-10-15 and 10-16 (`logs/chain-1015.sh`,
    `chain-1016.sh`, transient timers at 07:05) followed (a)–(c) and opened on schedule: lease 07:05–18:55 (11 h 50 min,
    the claim retried until 08:00), restore timer 18:45, `serving-window.sh stop`, `tools/r26-gate.sh --deadline 08:30`
    (step 2), the GPU checks before any timed run (10-15), the pools, then a queue file (`logs/queue-1015.txt`, `queue-1016.txt`: job
    files appended by the session after each reading; the chain waits ≤ 45 min for the next, nothing after 18:00), then
    the restore. A session check is scheduled at the chain's start (07:20) and at the restore.
-   Development windows have also stopped both servers since 2026-10-07. The D-010 variant — `ITREA_UNITS=llama-qwen38`
+   Development windows have also stopped both servers since 2026-10-07. The D-010 variant — `ITREA_UNITS=$U2`
    (the llama.cpp server only; §7) with the pool's `--allow-serving` (its 08:2x addendum) — is for development runs
-   that fit beside the vLLM server `ornith-vllm`, never for confirmatory or screening runs.
+   that fit beside the vLLM server (`$U1`), never for confirmatory or screening runs.
 5. GPU tests (they use the GPU, so only inside the window, before the timed pool): after any change to GPU code run
    `pytest -m gpu` on the touched modules, including the cold-cache tests (`test_cupy_cold_cache_*` in
    `tests/test_ea_run.py`, `test_elite.py`, `test_lp_decode.py`), then a short smoke run whose summary says
    `compiled_on_clock = false` (skill `itrea-new-experiment` §4).
 6. Exchange platform (if the run set uses Redis): `python -m itrea.experiments.exchange_ctl up` (only the container
    `itrea-redis`; never the host's other Redis instances).
-7. Journal line (skill `itrea-journal`): window id, lease, what was stopped, MemAvailable before and after.
+7. Operational note in the private operations repository (skill `itrea-journal`, "What goes where"): window id,
+   lease, what was stopped, MemAvailable before and after. The public journal records only what the window measures.
 
 ## During
 - The runner applies the gates on every run: memory budget (Σ MemoryMax + Σ CuPy pool limits + 1 GB per CUDA process +
@@ -171,9 +187,9 @@ Berk usually does not coordinate the sessions — the lease does.
 - **Chain scripts.** A pool is launched by a new `logs/chain-<id>.sh` (`setsid nohup bash logs/chain-<id>.sh >
   logs/chain-<id>.out 2>&1 < /dev/null & echo $! > logs/chain-<id>.pid`), which either ends with
   `tools/serving-window.sh restore && systemctl --user stop itrea-restore-serving.timer` or does not restore (another
-  pool follows in the same window); its header comment and the journal say which. To stop a pool and restart it in the
-  same window: kill the chain script first (`kill $(cat logs/chain-<id>.pid)`; otherwise it restores the servers when
-  the pool ends), then `touch logs/pool.stop` — the pool opens no new block. Before relaunching, `rm -f logs/pool.stop`:
+  pool follows in the same window); its header comment and the operational note say which. To stop a pool and
+  restart it in the same window: kill the chain script first (`kill $(cat logs/chain-<id>.pid)`; otherwise it
+  restores the servers when the pool ends), then `touch logs/pool.stop` — the pool opens no new block. Before relaunching, `rm -f logs/pool.stop`:
   the pool only tests that the file exists and nothing removes it, so a new pool would open no block and end `stopped`.
   Every chain writes its PID file at launch, a replacement chain included (`chain-itx-m4c`, `-r13` and `-r13b` of
   2026-10-13 have none, which leaves a chain waiting in its `until grep` loop findable only by a process scan).
@@ -203,8 +219,8 @@ Berk usually does not coordinate the sessions — the lease does.
      pool 335372's parent became PID 2843, `systemd --user`). Never signal the pool or a run scope.
   4. To end the running pool early as well (switching pools), `touch logs/pool.stop` only now, after the old bash is
      gone; the new chain removes it when the pool's end line appears.
-  5. Launch the new chain detached (`setsid nohup … & echo $! > logs/chain-<new>.pid`); check its `.out` and the
-     journal entry name both chains. The lease, the restore timer and the hold lines must cover the new chain's end
+  5. Launch the new chain detached (`setsid nohup … & echo $! > logs/chain-<new>.pid`); check its `.out`, and name
+     both chains in the operational note. The lease, the restore timer and the hold lines must cover the new chain's end
      (extend them as below if not).
 - **An idle box is used** (Berk 2026-10-13: "If the box is idle make the most of it"). Inside a daytime lease, chain the
   queued pools back to back — performance runs first (D-024), then calibration or CPU-only checks (M6) that fill the
@@ -213,7 +229,7 @@ Berk usually does not coordinate the sessions — the lease does.
 - **Extending the window** (as on 2026-10-09 14:11 and 16:12): re-claim with the same `--who` and the new `--until`,
   then move the restore timer and the hold lines with it:
   ```bash
-  box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM --stops ornith-vllm,llama-qwen38 --mem <GB>
+  box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM --stops $U1,$U2 --mem <GB>
   systemctl --user stop itrea-restore-serving.timer
   systemctl --user reset-failed itrea-restore-serving.timer itrea-restore-serving.service
   tools/serving-window.sh schedule "YYYY-MM-DD HH:MM:00"
@@ -229,9 +245,11 @@ Berk usually does not coordinate the sessions — the lease does.
    `tools/serving-window.sh restore` (starts both units, waits up to 15 min for health, resumes the canaries, removes
    the `# i-trea-ii window` hold lines, releases the lease). Then stop the now-unneeded timer:
    `systemctl --user stop itrea-restore-serving.timer`.
-3. Verify, and write the result in the journal:
-   `systemctl --user is-active ornith-vllm llama-qwen38` **and** `systemctl --user is-enabled ornith-vllm llama-qwen38`
+3. Verify, and write the result in the operational note (private operations repository):
+   `systemctl --user is-active $U1 $U2` **and** `systemctl --user is-enabled $U1 $U2`
    (active-but-disabled would not survive a reboot), `curl -sf 127.0.0.1:8094/v1/models`, `curl -sf
    127.0.0.1:8092/health`, `hermes cron list` (canaries resumed), `box-window status` (lease released),
    `grep 'i-trea-ii window' ~/.config/cronrestore/hold-units` (nothing).
-4. Fill the window row in `vault/10-design/Compute resources.md` (runs, MemAvailable minimum, ACPI maximum, notes).
+4. Record the window: its logistics (lease, stop and restore times, chains, timers) in the operational note (private
+   operations repository); the runs' conditions (runs, MemAvailable minimum, ACPI maximum, voids and pauses) in the
+   public result note and the Experiment index row (skill `itrea-result-note`).

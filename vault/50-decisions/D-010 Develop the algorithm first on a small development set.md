@@ -36,18 +36,22 @@ development never touched.
    every GPU timing is contaminated; (b) the local-search knobs already measured on synthetic problems (row scale `rhs`
    for UC-shaped models, `row_scan_cap` with the cutoff row, the stall rule); (c) operator mix and population size;
    (d) the exchange (what and when to inject / post).
-7. **Resources:** daytime windows with **[local LLM agent] stopped only** ([local LLM agent] stays for chat; Berk does not chat with
-   [local LLM agent]), one GPU lane (one coupled run at a time: one SCIP core + the GPU EA, far cooler than 8 SCIP lanes),
-   fan-governor rest breaks honoured (D-009). Free memory is checked after stopping llama-qwen38 before any run.
+7. **Resources:** daytime windows with **the llama.cpp server stopped only** (the vLLM server stays for chat; Berk does
+   not chat with the llama.cpp-backed agent), one GPU lane (one coupled run at a time: one SCIP core + the GPU EA, far
+   cooler than 8 SCIP lanes), fan-governor rest breaks honoured (D-009). Free memory is checked after stopping the
+   llama.cpp server before any run.
 
-**Addendum 08:2x — the GPU is shared with an idle [local LLM agent].** The first development run was voided by the GPU-health
-check: [local LLM agent]'s vLLM engine (`ornith-vllm.service`) holds a GPU context even when idle, and every other GPU process
-counts as foreign. For development runs the pool is started with `--allow-serving`: GPU processes of the two model
-servers (identified by their systemd cgroup) are recorded as `tolerated_pids` in each run's GPU-health record instead
-of voiding the run. A chat with [local LLM agent] during a run adds bandwidth noise — acceptable for descriptive development
-numbers; confirmatory and screening runs still require both servers stopped and void on any foreign process.
+**Addendum 08:2x — the GPU is shared with an idle vLLM server.** The first development run was voided by the
+GPU-health check: the chat agent's vLLM engine (its systemd service) holds a GPU context even when idle, and every other
+GPU process counts as foreign. For development runs the pool is started with `--allow-serving`: GPU processes of the two
+model servers (identified by their systemd cgroup) are recorded as `tolerated_pids` in each run's GPU-health record
+instead of voiding the run. A chat with the vLLM-backed agent during a run adds bandwidth noise — acceptable for
+descriptive development numbers;
+confirmatory and screening runs still require both servers stopped and void on any foreign process.
 
 ## Addendum 2026-10-06 15:2x — yardstick
 Berk: "You are benchmarking EA but our EA shall be coupled with a solver similar to what cuopt does." §3 is amended
 by [[D-011 Solver streams good infeasible solutions to the EA]] §1: development changes are judged on the coupled arm
 A3 (against A0 and A6); A5 (the EA alone) is a diagnostic only.
+
+Redacted 2026-10-17 for publication: names of other services/projects replaced by neutral wording; meaning unchanged.

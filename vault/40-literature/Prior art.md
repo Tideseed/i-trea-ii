@@ -5,7 +5,7 @@ updated: 2026-10-05
 
 # Prior art — synthesis (sweeps A–E, 2026-10-05)
 
-**Rank names** follow the vault ([[D-004 Mapping I-TREA (2015) to I-TREA II]]): **Rank 0 = infeasible good**
+**Rank names** follow the vault ([[D-004 Mapping I-TREA (2011) to I-TREA II]]): **Rank 0 = infeasible good**
 (infeasible, key better than the incumbent, at most ⌊x·P⌋; the brief's "R2"), **Rank 1 = feasible good** (the best
 ⌈y·#feasible⌉ feasible, protected every generation; the brief's "R1"), **Rank 2 = rejects** (the rest; the brief's "R3").
 
@@ -36,7 +36,7 @@ beats infeasible" the parameter-free default; stochastic ranking (Runarsson & Ya
 infeasible solutions whose objective beats the best feasible one, to set penalties; SMES and Mezura-Montes & Coello
 (2005) copy the best infeasible solution into the next population at a small rate; IDEA (Singh, Isaacs, Ray, Smith
 2008; Ray et al. 2009; open account in Singh's 2011 thesis) reserves a fixed proportion α of the population for
-infeasible solutions. **I-TREA (Orbay 2011, METU M.S. thesis; unpublished manuscript)** cites IDEA and adds three ranks for a
+infeasible solutions. **I-TREA (Orbay 2011, METU M.S. thesis, `orbay2011itrea`)** cites IDEA and adds three ranks for a
 bi-objective problem with an interactive decision maker: Rank 0 infeasible good (not dominated by any feasible
 solution) with a preserved share (a floor, e.g. 10 %), Rank 1 the feasible front, Rank 2 the rest.
 
@@ -161,4 +161,5 @@ Nothing in the sweeps supports a stronger claim, and none should be made before 
 - **Traps:** Runarsson & Yao (2000) is mislinked to arXiv:1510.04409 by OpenAlex and Semantic Scholar; Coello's author
   files are `.pdf.gz`; `corduk2025gpuprimal` is a workshop poster; `spoorendonk2026highsheur`'s heuristics are not in
   upstream HiGHS; `gallardo2007mabnb`'s open copy is a draft (do not quote its pagination).
-- **The I-TREA thesis** (`orbay2011itrea`) is public and citable; the unpublished manuscript is not, without Berk.
+- **The I-TREA thesis** (`orbay2011itrea`, https://open.metu.edu.tr/handle/11511/20509) is public and citable; it is
+  the only part-I source cited.

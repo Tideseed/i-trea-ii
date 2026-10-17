@@ -4,8 +4,8 @@
 % 18,100 passed); SHA-256 of configs/frozen-v2.yaml and the job files re-computed; EA hash 835c7c5a249c re-computed
 % with itrea.config.EAConfig.from_yaml; parameter values from configs/frozen-v2.yaml and src/itrea/config.py defaults.
 \section{Reproducibility}\label{sec:repro}
-Every number here comes from the code, configurations and job files in the project repository (to be made public
-with the final version). The chain, with analysis steps pinned (\texttt{OMP\_NUM\_THREADS=1 nice -n 19 taskset -c
+Every number here comes from the code, configurations and job files at \url{https://github.com/Tideseed/i-trea-ii}.
+The chain, with analysis steps pinned (\texttt{OMP\_NUM\_THREADS=1 nice -n 19 taskset -c
 10-14}); each test's job file and reading command are in its decision record and the experiment index:
 \begin{enumerate}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
 \item \texttt{itrea make-jobs} (or a test's tool) writes \path{jobs/*.jsonl}: instance, arm, seed, budget,
@@ -68,7 +68,7 @@ re-scores those runs) and the screening's best on the item-placement instance.
 NumPy 2.4.6, SciPy 1.18.1, CuPy 14.2.0, HiGHS 1.15.1, PySCIPOpt 6.2.1 (SCIP 10.0), cuOpt 26.08, pandas 3.0.3, PyArrow
 23.0.1 (pinned in \path{pyproject.toml}; each run record stores its versions).
 
-\paragraph{Not yet public.} The repository is private until the final version. Raw runs (\path{traces/raw/}, about
+\paragraph{Not yet published.} Raw runs (\path{traces/raw/}, about
 3.5\,GB) and run tables are to be published as a versioned archive, as for the predecessor
 study~\citep{orbay2026optopt}; step~4 regenerates the readings in \path{logs/}. Instances and GAMS's archive are
 third-party data. Open (issue~\#36): the checker accepted incumbents below MIPLIB's optimum on \texttt{glass4} (11

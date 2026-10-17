@@ -16,7 +16,7 @@ MAXLEN 64) — the exchange log comes for free; (3) clients in any language (a f
 6390; `--save "" --appendonly no` (no persistence); `maxmemory 1536mb noeviction`; container cap 2 GB; pinned to
 A725 core 0 (never a timed X925 core); `--restart no`. Client `redis-py` 8.1.0 installed offline from the uv cache
 (hiredis has no cp312 wheel in the cache — the pure-Python parser is used). **Never** the host's other Redis instances
-([secrets manager], fhub, buzz — other services' data) and never [other service]'s (remote, read-only).
+(other services' data) and never another service's remote Redis (read-only).
 
 **Measured 2026-10-05 (loopback, pure-Python client):** round trip 52 µs (a file `stat` is ~1 µs); a dense
 364k-variable float64 vector: XADD 2.2 ms, read 7.3 ms; sparse encoding (non-zeros only) shrinks a 1 %-dense
@@ -30,3 +30,5 @@ A725 core 0 (never a timed X925 core); `--restart no`. Client `redis-py` 8.1.0 i
   (a), the confirmatory runs use the file mailbox. Every SCIP arm carries the same (inert where unused) plugin.
 - The runner starts/stops the container (`itrea exchange up|down`) and deletes each run's keys at the end; keys also
   expire after a day.
+
+Redacted 2026-10-17 for publication: names of other services/projects replaced by neutral wording; meaning unchanged.

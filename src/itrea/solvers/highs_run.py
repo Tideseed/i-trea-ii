@@ -34,7 +34,7 @@ with --inert, and absent with --no-plugin (calibration only). The incumbent reco
 control-plane interrupt callback are installed in every mode: the stop file / SIGTERM are checked at most once per
 second and the interrupt lands at the next `cbMipInterrupt` (`e.data_in.user_interrupt = True`).
 
-Adapted in part from berkorbay/optopt@4dd48395, MIT (`src/optopt/solvers/highs.py`).
+Adapted in part from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/solvers/highs.py`).
 """
 from __future__ import annotations
 

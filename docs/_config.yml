@@ -1,0 +1,17 @@
+title: "I-TREA II — a GPU evolutionary algorithm coupled with MIP solvers"
+description: "A GPU evolutionary algorithm that runs beside SCIP and NVIDIA cuOpt while they solve: interim report on phase 1, code and decision records"
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+relative_links:
+  enabled: true
+  collections: false
+url: "https://tideseed.github.io"
+baseurl: "/i-trea-ii"
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: /social-card.png

@@ -11,6 +11,8 @@ data/
 traces/raw/
 traces/sol/
 logs/
+# derived run tables: rebuilt from the traces by `itrea build-runs` (datasets/README.md); not committed
+datasets/*.parquet
 # LaTeX build products
 paper/*.aux
 paper/*.log
@@ -22,3 +24,10 @@ paper/*.fdb_latexmk
 paper/*.synctex.gz
 # Obsidian workspace state
 vault/.obsidian/workspace*.json
+# secrets and local agent settings: never committed
+.env
+*.env
+*.key
+*.pem
+credentials*.json
+.claude/settings.local.json

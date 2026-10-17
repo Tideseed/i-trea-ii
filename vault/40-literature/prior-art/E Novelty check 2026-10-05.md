@@ -11,23 +11,18 @@ exactly is the I-TREA lineage? This note is the **novelty record**: it lists wha
 find. It makes no "first" claim; a search that finds nothing is reported as a negative search result, not as proof of
 absence.
 
-**Rank names** follow the vault ([[D-004 Mapping I-TREA (2015) to I-TREA II]]): **Rank 0 = infeasible good** (the
+**Rank names** follow the vault ([[D-004 Mapping I-TREA (2011) to I-TREA II]]): **Rank 0 = infeasible good** (the
 brief's "R2"), **Rank 1 = feasible good**, protected (the brief's "R1"), **Rank 2 = rejects** (the brief's "R3").
 
 ## 1. Headline: the I-TREA master's thesis is online
 
 **Berk Orbay, *An Interactive Evolutionary Algorithm for the Multiobjective Relocation Problem with Partial Coverage*,
-M.S. thesis in Operational Research, Middle East Technical University (METU/ODTÜ), April 2011 (approved 22.04.2011);
-supervisor Assoc. Prof. Dr. Esra Karasakal (Industrial Engineering).** Persistent id hdl:11511/20509; landing page
+M.S. thesis in Operational Research, Middle East Technical University (METU/ODTÜ), April 2011 (approved
+22.04.2011).** Persistent id hdl:11511/20509; landing page
 https://open.metu.edu.tr/handle/11511/20509; open PDF https://open.metu.edu.tr/bitstream/handle/11511/20509/index.pdf
 (143 pp.). §5.1 names the method "Interactive Three Ranks Evolutionary Algorithm (I-TREA)". Key `orbay2011itrea`.
 
-There are therefore **two part-I documents**, and they must be kept apart:
-
-| document | status | use |
-|---|---|---|
-| the 2011 METU thesis (`orbay2011itrea`) | public, open access | the citable source for part I |
-| the unpublished manuscript (unpublished; the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509)) | unpublished, supplied by Berk | cite only with Berk's agreement |
+The thesis is public and open access, and it is the only part-I source this repository cites.
 
 What the thesis says, and how it bears on the design:
 
@@ -44,12 +39,12 @@ What the thesis says, and how it bears on the design:
 - **Lineage.** The thesis cites Ray et al. (2009), IDEA, as the source of its infeasibility-driven idea (§2.4 and
   references). IDEA is paywalled-only; cite its mechanism through `singh2011thesis` ([[A Constraint handling with infeasible solutions]]).
 
-**Consistency with the vault.** [[D-004 Mapping I-TREA (2015) to I-TREA II]] already records the Rank 0 share as
+**Consistency with the vault.** [[D-004 Mapping I-TREA (2011) to I-TREA II]] already records the Rank 0 share as
 "reserved **and capped** … brief overrides", Rank 1 as "brief overrides", and the solver's role as an "analogue" of the
-decision maker. The thesis confirms those entries from a public source; it does not contradict them. Two vault
-statements are out of date: the journal entry of 2026-10-05 23:00–23:20 ("I-TREA (part I) is not findable online") and
-[[Home]]'s row "(our reading — assumption until Berk's thesis details arrive)". The journal is append-only and is not
-edited here; the correction belongs in the next journal entry and in Home.
+decision maker. The thesis confirms those entries from a public source; it does not contradict them. One vault
+statement was out of date: the journal entry of 2026-10-05 23:00–23:20 ("I-TREA (part I) is not findable online"). The
+journal is append-only, so the entry stands; the same journal file corrects it at 00:1x on 10-06 ("Correction to
+23:00–23:20").
 
 ## 2. Novelty record — what exists (no "first" claim)
 
@@ -106,7 +101,7 @@ national thesis database could not be queried non-interactively.
 
 | key | authors | year | venue | link | access | what it does | relation to I-TREA II | verification |
 |---|---|---|---|---|---|---|---|---|
-| `orbay2011itrea` | Berk Orbay (supervisor Esra Karasakal, METU IE) | 2011 | M.S. thesis, Operational Research, Graduate School of Natural and Applied Sciences, METU, Ankara; hdl:11511/20509 | [OpenMETU PDF](https://open.metu.edu.tr/bitstream/handle/11511/20509/index.pdf); [landing](https://open.metu.edu.tr/handle/11511/20509) | open | I-TREA (§5.1): an interactive multi-objective GA derived from NSGA-II for a bi-objective capacitated facility relocation problem with partial coverage (maximise weighted coverage, minimise the number of facilities). Three ranks: Rank 0 infeasible good, Rank 1 feasible good (the feasible non-dominated front), Rank 2 rejects; tournament Rank 1 > Rank 0 > Rank 2. Rank 0 is exempt from elimination once it falls to a preservation proportion (e.g. 10 %; App. B: 10 % at population 100) — a floor, not a stated maximum. Pairwise preference questions to a decision maker (simulated by linear and Chebyshev utilities); benchmarked against exact solutions and a modified NSGA-II on random instances. | Lineage: part I. Its Rank 0 is the multi-objective analogue of I-TREA II's Rank 0 (with one objective, "not dominated by any feasible solution" means "objective at least as good as the best feasible"); its 10 % was a floor, so the "at most x %" cap is a change; its Rank 1 was the whole front, not a top-y % elite; its "interactive" was a human DM, not a solver. | Full text read (the handle URL returned HTTP 500 twice on 2026-10-05; the landing page works) |
+| `orbay2011itrea` | Berk Orbay | 2011 | M.S. thesis, Operational Research, Graduate School of Natural and Applied Sciences, METU, Ankara; hdl:11511/20509 | [OpenMETU PDF](https://open.metu.edu.tr/bitstream/handle/11511/20509/index.pdf); [landing](https://open.metu.edu.tr/handle/11511/20509) | open | I-TREA (§5.1): an interactive multi-objective GA derived from NSGA-II for a bi-objective capacitated facility relocation problem with partial coverage (maximise weighted coverage, minimise the number of facilities). Three ranks: Rank 0 infeasible good, Rank 1 feasible good (the feasible non-dominated front), Rank 2 rejects; tournament Rank 1 > Rank 0 > Rank 2. Rank 0 is exempt from elimination once it falls to a preservation proportion (e.g. 10 %; App. B: 10 % at population 100) — a floor, not a stated maximum. Pairwise preference questions to a decision maker (simulated by linear and Chebyshev utilities); benchmarked against exact solutions and a modified NSGA-II on random instances. | Lineage: part I. Its Rank 0 is the multi-objective analogue of I-TREA II's Rank 0 (with one objective, "not dominated by any feasible solution" means "objective at least as good as the best feasible"); its 10 % was a floor, so the "at most x %" cap is a change; its Rank 1 was the whole front, not a top-y % elite; its "interactive" was a human DM, not a solver. | Full text read (the handle URL returned HTTP 500 twice on 2026-10-05; the landing page works) |
 | `ray2009idea` | Tapabrata Ray, Hemant Kumar Singh, Amitay Isaacs, Warren Smith | 2009 | SCI 198, Springer, pp. 145–165; doi:10.1007/978-3-642-00619-7_7 | — | **paywalled** | IDEA keeps and evolves a small proportion of marginally infeasible solutions so the constraint boundary is approached from both sides (per abstract snippets and the I-TREA thesis summary; method details not read in the chapter). | Lineage for item 3: the source the I-TREA thesis cites for its reserved infeasible share. See [[A Constraint handling with infeasible solutions]]. | Metadata only |
 | `nvidia2026cuoptsrc` | NVIDIA cuOpt developers | 2026 | GitHub NVIDIA/cuopt, Apache-2.0, commit c2f3df54af31d51c106791812ad1829ab0ca5caa (2026-10-05); repo created 2025-04-08 | [population.cu at commit](https://github.com/NVIDIA/cuopt/blob/c2f3df54af31d51c106791812ad1829ab0ca5caa/cpp/src/mip_heuristics/diversity/population.cu) | open (Apache-2.0) | GPU-resident population (`population.cu`, `diversity_manager.cu`); bandit-chosen recombiners (bound-prop, FP, line-segment, sub-MIP) and LS configurations. CPU B&B runs as a concurrent OpenMP task (`solver.cu`); B&B solutions enter via `add_external_solution(…, BRANCH_AND_BOUND)` (`population.cu` 146–177); a new best feasible is pushed to B&B via `branch_and_bound_callback(…, HEURISTICS)` (264–284), wired only in `CUOPT_MODE_OPPORTUNISTIC` (a TODO in deterministic mode, `solver.cu` ~449–463). User solutions enter the same queue (`EXTERNAL`); CPU-FJ solutions are dropped unless better than the best feasible. Slot 0 is the best feasible (line 84). Infeasible members are scored by objective + weighted violation; when the best-by-quality member is infeasible, `adjust_weights_according_to_best_feasible()` (363–395) raises infeasibility importance by gap·1.1 / weighted violation, leaving the best infeasible 10 % of the former quality gap behind the best feasible. | Competitor / closest prior for items 1–3: a GPU population beside a CPU B&B with two-way exchange exists; its infeasible rule is the opposite of a super-optimal Rank 0. (Sweep E key `nvidia2025cuopt` = this entry.) | Full text (source) read |
 | `corduk2025gpuprimal` | Akif Çördük, Piotr Sielski, Alice Boucher, Kumar Aatish | 2025 | arXiv:2510.20499 [math.OC, cs.DC]; poster, NeurIPS 2025 ScaleOpt workshop | [arXiv:2510.20499](https://arxiv.org/abs/2510.20499) | open (preprint) | GPU PDLP as approximate LP solver, a probing cache for fast rounding and early infeasibility detection, accelerated FP, FJ and fix-and-propagate; 221 feasible solutions and a 22 % gap on presolved MIPLIB 2017. | Competitor: cuOpt's GPU heuristic stack and the optopt race partner. The population and recombiners are attributed to the repository, not to this paper. (Sweep E key `corduk2025gpuheur` = this entry.) | Abstract read here; full text read in sweep C |

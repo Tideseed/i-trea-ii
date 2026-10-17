@@ -31,6 +31,8 @@ item_placement = item_placement_9903, doon = neos-2746589-doon, toguru = neos-47
 - **What the SCIP comparison measures:** adopting I-TREA II on a GPU machine — SCIP alone uses one core, I-TREA II five
   cores and the GPU. Most of that gain is what cuOpt alone also reaches on the same five cores and GPU (mean P 0.517 on
   SCIP's 15, against 0.448 for I-TREA II and 0.889 for SCIP alone); the cuOpt row shows what I-TREA II adds beyond cuOpt.
+  SCIP's 15 hard instances were picked on the same runs they are compared with (cuOpt's 11 on earlier runs), which can
+  flatter the gain.
 - **When not to expect it:** outside cuOpt's hard set (6 of the 17), I-TREA II was worse on 5, by at most 0.022
   in P except on chromaticindex1024-7: 0.08 → 0.54, because the EA's GPU work delays cuOpt's first solution from
   6.5–12.2 s to 65 s. Where cuOpt alone finds a solution only on some seeds (doon 2 of 4, rail01 1 of 4), I-TREA II found none;
@@ -40,8 +42,10 @@ item_placement = item_placement_9903, doon = neos-2746589-doon, toguru = neos-47
   `SetSolutionCallback`, fixed for presolve in 26.10 after our bug report; untested here, planned for v1.1, after 26.10
   is released) and if two processes could share the GPU without slowing cuOpt (CUDA MPS, planned for v1.1).
 - **How sure:** interim development results — 17 instances that we tuned on, 2-minute runs, one DGX Spark (GB10), cuOpt
-  26.08; SCIP alone ran on 6–7 October; cuOpt alone crashed on comp21 on 3 of 4 seeds (counted as its result). The test
-  on unseen instances, with cuOpt 26.10, follows in November ([Roadmap]).
+  26.08; SCIP alone ran on 6–7 October; cuOpt alone crashed on comp21-2idx on 3 of 4 seeds (a segmentation fault, not yet
+  reported upstream; counted as its result). One instance, neos-960392, carries 35 % of the gain over cuOpt alone;
+  without it, −20 % shrinks to −14 % (ratio of mean P 0.858 instead of 0.798). The test on unseen instances, with
+  cuOpt 26.10, follows in November ([Roadmap]).
 
 ## Summary
 
@@ -171,12 +175,12 @@ itrea c1r-report --a9 ysync-ld0 --set c1r-ysync-ld0-2                # C1's hint
 |---|---|
 | `src/itrea/` | the package: `ea/`, `solvers/`, `exchange/`, `experiments/` (runner, pool, job builder), `analysis/` (checker, statistics) |
 | `configs/` | EA configurations, hashes pinned |
-| `jobs/` · `traces/` · `datasets/` | job files (one line per run) · run outputs · derived tables |
+| `jobs/` · `traces/` · `datasets/` | job files (one line per run) · run outputs · derived tables ([data sources and attribution](datasets/README.md)) |
 | `tools/` | decision reports, `serving-window.sh`, probes |
 | `tests/` | toy-scale tests |
 | `data/` | instances (not in git) |
 | `paper/` | the interim report on phase 1 (LaTeX, in progress; built as `paper/main.pdf`) |
-| `vault/` | research record: journal, decisions, results, literature |
+| `vault/` | research record: journal (research developments only), decisions, results, literature. Operational notes (session checkpoints, the incident log, box windows and coordination) are kept in a private operations repository |
 | `.claude/skills/` | skills for AI agents |
 
 ## Documentation
@@ -193,11 +197,16 @@ itrea c1r-report --a9 ysync-ld0 --set c1r-ysync-ld0-2                # C1's hint
 
 Author: Berk Orbay (berk.orbay@tideseed.com). Developed under his direction with AgentRA (Agent Research Assistant),
 which designs with him and executes the experiments; AgentRA is mainly Claude Code (Anthropic Claude Opus 5.5). Code
-adapted from the predecessor carries the line "adapted from berkorbay/optopt@4dd48395, MIT".
+adapted from the predecessor carries the line "adapted from berkorbay/optopt@2a3348c0a102, MIT".
 
 ## Licence
 
-[MIT](LICENSE). Third-party files keep their own terms.
+- **Code** (`src/`, `tools/`, `tests/`, `configs/`, and every source file wherever it sits) and everything not listed
+  below: [MIT](LICENSE).
+- **Prose and figures** (`paper/`, `vault/`, `docs/`): [CC BY 4.0](LICENSE-CC-BY-4.0) — Creative Commons
+  Attribution 4.0 International, <https://creativecommons.org/licenses/by/4.0/legalcode>.
+- **Third-party data** keeps its own terms; no instance file is redistributed here. Sources, licences and how to
+  cite them: [datasets/README.md](datasets/README.md#data-sources-and-attribution).
 
 [AGENTS.md]: AGENTS.md
 [Home]: vault/00-index/Home.md

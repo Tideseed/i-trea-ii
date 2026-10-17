@@ -23,7 +23,7 @@ author or lab pages, technical reports, official documentation, source code at a
 capture of one of these. Search with Unpaywall, OpenAlex, Semantic Scholar, CORE and the authors' pages.
 **Never send Berk's e-mail address (or anyone's) to an outside service** without his explicit ask — Unpaywall's API
 asks for an `email=` parameter (Crossref and OpenAlex ask for a contact too): send none or a project placeholder
-(incident of 2026-10-05/06 in `vault/60-incidents/`, rule restated 2026-10-06).
+(incident of 2026-10-05/06, logged in the private operations repository; rule restated 2026-10-06).
 **Never** shadow libraries, ResearchGate or Academia.edu uploads, or copies of unclear provenance (mark a doubtful
 mirror as such, as sweep C did).
 
@@ -43,13 +43,12 @@ subsection `app:paywalled`, under its disclaimer. In the main text cite an open 
 `berthold2006primal` for Rothberg's combination operator, `boschetti2022matheuristics` for matheuristics).
 
 ## 5. Bib entry
-- The paper's only bibliography is `paper/refs.bib` — legally readable works only. Part I's reference audit lives in
-  `vault/40-literature/I-TREA (2015) references.bib`, deliberately outside `paper/` so its closed works cannot be cited
-  by accident; to cite one of its open works, copy the entry into `refs.bib`. Key = first author's surname + year +
-  one word (`luteberget2023feasibility`), the same key as in the sweep table and [[Prior art]].
+- The paper's only bibliography is `paper/refs.bib` — legally readable works only. Key = first author's surname +
+  year + one word (`luteberget2023feasibility`), the same key as in the sweep table and [[Prior art]].
 - Fields as verified; `doi` when one exists; `url` = the legal full text; `note` = the kind of copy
   ("Open version: \url{…}", "author manuscript", "preprint", "CC BY 4.0"). Closed works carry
   `note = {Full text: not openly available}` and are cited only under §4.
 - Software and documentation: the version or commit hash and the access date (`/current/` URLs drift).
-- Part I is cited through Berk's open M.S. thesis (`orbay2011itrea`, METU 2011, hdl:11511/20509). The 2015 journal
-  manuscript (unpublished) is not cited with a key until Berk agrees; describe it in prose.
+- Part I is cited only through Berk's open M.S. thesis (`orbay2011itrea`, METU 2011, hdl:11511/20509,
+  https://open.metu.edu.tr/handle/11511/20509). No other part-I document is cited, quoted or described anywhere in
+  this repository (Berk, 2026-10-17).

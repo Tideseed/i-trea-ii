@@ -29,7 +29,8 @@ runs, and it only gates whether a line widens. "We shall also always aim for per
 structural is buggy in our experimentation methodology." — calibration and harness runs only for a structural bug or to
 fill idle hours. "If the box is idle make the most of it."
 
-Each stage lists its GitHub issues (`Tideseed/i-trea-ii`). Newest checkpoint: [[2026-10-14-2350]].
+Each stage lists its GitHub issues (`Tideseed/i-trea-ii`). Session checkpoints are kept in the private operations
+repository.
 
 ## C1 checkpoint — end of phase 1: closed Fri 2026-10-16 13:1x on Berk's go (planned Sat 10-17, moved from Fri 10-23; table status 2026-10-16 13:1x)
 Berk 2026-10-15 13:4x: **"Assume we are wrapping up phase 1 on Saturday."** ([[D-019 v1 — deadline and performance target]]

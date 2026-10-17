@@ -1,0 +1,122 @@
+{
+ "window": "20261007-112058-1892511",
+ "started": "2026-10-07T11:20:58.613966+02:00",
+ "layout": "pair",
+ "lanes": [
+  {
+   "name": "g0",
+   "x925": [
+    5,
+    6
+   ],
+   "a725": [
+    1,
+    2,
+    3
+   ],
+   "gpu": true
+  }
+ ],
+ "cpu_lanes": 0,
+ "e0_concurrent": null,
+ "mailbox": "file",
+ "use_systemd": true,
+ "memory_max_gb": {
+  "solver": 9.0,
+  "ea": 6.0,
+  "cuopt": 12.0
+ },
+ "gpu_mem_gb": null,
+ "reserve_gb": 20.0,
+ "freeze": {
+  "test_jobs": 0,
+  "screen_jobs": 0,
+  "candidate_jobs": 18,
+  "other_jobs": 18,
+  "toy_jobs": 0,
+  "prereg": "4cdc33d7fe3b47f1cf4feb3506ef5ea785db59aa"
+ },
+ "thermal_start_c": 80.0,
+ "thermal_start_c_cpu": 88.0,
+ "gates": {
+  "t": 1791364858.6140244,
+  "mem_available_gb": 108.89,
+  "acpi_max_c": 40.8,
+  "lease": {
+   "who": "i-trea-ii (Claude Code)",
+   "why": "I-TREA II development: repair clock GPU tests + shadow measurement (D-012), fhnw and LP-source runs; both LLM servers stopped (Berk 09:0x)",
+   "until": "2026-10-07T13:00:00+02:00",
+   "stops": "ornith-vllm llama-qwen38",
+   "mem": 60,
+   "claimed": "2026-10-07T08:59:51+02:00"
+  },
+  "serving": {
+   "ornith-vllm": "inactive",
+   "llama-qwen38": "inactive"
+  },
+  "co_running": [
+   {
+    "pid": 4155,
+    "name": "clickhouse-serv",
+    "uid": 101,
+    "rss_gb": 1.64
+   }
+  ]
+ },
+ "env": {
+  "versions": {
+   "python": "3.12.3",
+   "numpy": "2.4.6",
+   "scipy": "1.18.1",
+   "cupy": "14.2.0",
+   "highspy": "1.15.1",
+   "pyscipopt": "6.2.1",
+   "cuopt": "26.8.0",
+   "redis": "8.1.0",
+   "itrea": "0.1.0.dev0",
+   "scip": "10.0"
+  },
+  "cpu_models": {
+   "0": "Cortex-A725",
+   "1": "Cortex-A725",
+   "2": "Cortex-A725",
+   "3": "Cortex-A725",
+   "4": "Cortex-A725",
+   "5": "Cortex-X925",
+   "6": "Cortex-X925",
+   "7": "Cortex-X925",
+   "8": "Cortex-X925",
+   "9": "Cortex-X925",
+   "10": "Cortex-A725",
+   "11": "Cortex-A725",
+   "12": "Cortex-A725",
+   "13": "Cortex-A725",
+   "14": "Cortex-A725",
+   "15": "Cortex-X925",
+   "16": "Cortex-X925",
+   "17": "Cortex-X925",
+   "18": "Cortex-X925",
+   "19": "Cortex-X925"
+  },
+  "gpu": {
+   "name": "NVIDIA GB10",
+   "driver": "580.173.02",
+   "cuda": "13.0"
+  },
+  "kernel": "6.17.0-1031-nvidia",
+  "machine": "aarch64",
+  "hostname": "dgx-spark (redacted)",
+  "hardware": "NVIDIA DGX Spark (GB10: 10x Cortex-X925 + 10x Cortex-A725, 128 GB unified memory)",
+  "git": {
+   "revision": "a088d25078c4bd8edd1307702868ce6bed0ed6f6",
+   "dirty": false,
+   "dirty_paths": [],
+   "prereg_tag": "4cdc33d7fe3b47f1cf4feb3506ef5ea785db59aa",
+   "prereg_ancestor": true,
+   "frozen_tag": null
+  }
+ },
+ "jobs": 18,
+ "blocks": 18,
+ "order_seed": 20261005
+}

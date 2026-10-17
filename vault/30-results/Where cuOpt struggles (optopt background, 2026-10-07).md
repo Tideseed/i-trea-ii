@@ -1,6 +1,6 @@
 # Where cuOpt struggles — background from optopt's runs (2026-10-07)
 
-**Data:** `berkorbay/optopt` `datasets/runs.parquet` (commit 4dd48395 lineage) — cuOpt 26.08 as shipped (strategy C0)
+**Data:** `berkorbay/optopt` `datasets/runs.parquet` (commit 2a3348c0a102 lineage) — cuOpt 26.08 as shipped (strategy C0)
 and SCIP default (S0), budget 60 s, 5 seeds, primal integral P(60); 80 MIPLIB benchmark instances and 33 PGLib-UC
 instances with both; static features from optopt `datasets/features.parquet`. Bounded d = (P_SCIP − P_cuOpt) /
 max(P_SCIP, P_cuOpt, 10⁻³), positive = cuOpt better. **Background only** — like `hardness_from_optopt.csv`, never a

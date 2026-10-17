@@ -8,7 +8,7 @@ updated: 2026-10-05
 Sweep date 2026-10-05. Question asked of each work: does a heuristic (population or not) run beside or inside an exact
 MIP / branch-and-bound solver, and which information crosses between them, in which direction, and when?
 
-**Rank names** follow the vault ([[D-004 Mapping I-TREA (2015) to I-TREA II]]): **Rank 0 = infeasible good** (the
+**Rank names** follow the vault ([[D-004 Mapping I-TREA (2011) to I-TREA II]]): **Rank 0 = infeasible good** (the
 brief's "R2"), **Rank 1 = feasible good**, protected (the brief's "R1"), **Rank 2 = rejects** (the brief's "R3").
 
 **Sources and rules** as in [[A Constraint handling with infeasible solutions]]: legal copies only; paywalled-only works

@@ -3,7 +3,7 @@ platform. perhaps redis is good for that?"). Same API as the file `Mailbox`, plu
 
 Server: a dedicated container `itrea-redis` (image redis:7-alpine already on the host), loopback port 6390, no
 persistence, `maxmemory 1536mb noeviction`, 2 GB container cap, pinned to an A725 core (never a timed X925 core).
-Never the other Redis instances on the host (they belong to other services), never [other service]'s (read-only, remote).
+Never the other Redis instances on the host (they belong to other services), never another service's remote Redis.
 
 Keys of one run (all under `itrea:<run_id>:`, deleted by the runner at the end; 1-day expiry as a backstop):
     order                       canonical variable names (JSON list)

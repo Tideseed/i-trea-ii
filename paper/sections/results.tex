@@ -84,8 +84,8 @@ Against SCIP alone, most of the drop on SCIP's hard set (0.889 to 0.448) is what
 cores and GPU (0.517); on these 15, the coupled system had a lower $P$ than cuOpt alone on 7, an equal one on 1 and a
 higher one on 7.
 
-cuOpt alone's crashes favour the result: it ended with a segmentation fault on 3 of the 4 seeds of
-\texttt{comp21-2idx} (not on 13 October), and these runs count with $P$ up to the crash (its one complete seed scored
+cuOpt alone's crashes favour the result: it ended with a segmentation fault (not yet reported upstream) on 3 of the 4
+seeds of \texttt{comp21-2idx} (not on 13 October), and these runs count with $P$ up to the crash (its one complete seed scored
 0.520; seed mean 0.692, coupled 0.577), so that instance's gain rests on them. Without them that instance is incomplete, and the fixed rules read the hint and
 the guard only on complete sets; on the other 10 hard instances, $P$ is lower on 6 and higher on 3 ($p = 0.055$).
 

@@ -57,8 +57,10 @@ Phase 1 in one note: [[2026-10-17 Phase 1 — development until C1]] (final; the
 ## Start here
 
 1. **Where it stands** (above); agents also read `AGENTS.md` "At a glance" and "Read first" at the repository root.
-2. **The newest checkpoint:** [[2026-10-14-2350]] (all checkpoints in `90-checkpoints/`). It predates the results of
-   D-025–D-027 and everything from D-028 on, so read it after the state above.
+2. **Operational notes are not in this vault.** Session checkpoints, the incident log and the procedural notes (box
+   windows, leases, server stops, coordination with other sessions) are kept in the private operations repository;
+   this vault holds the research record. The history was rewritten on 2026-10-17 to move them out, so every commit
+   hash recorded before then is old: translate it with [[History rewrite 2026-10-17]].
 3. [[2026-10-17 Phase 1 — development until C1]] — phase 1's record: the frozen method, D-010 to D-033, the C1 readings.
 4. [[Roadmap]] — the aim in Berk's words, v1 and C1, the stages and their GitHub issues: **what is next**.
 5. [[Development log]] — every development change and result since 2026-10-06, failures included.
@@ -97,7 +99,7 @@ D-029 was ADOPTED; D-030 ran ysync-ld0 (D-030 § Which candidate runs).
 | [[D-001 Language, solvers and process model\|D-001]] | Python 3.12 + CuPy / NumPy; SCIP primary partner, HiGHS replication, cuOpt control; separate pinned processes and a mailbox | decided |
 | [[D-002 Pre-registration — hypotheses, arms, analysis\|D-002]] | hypotheses H1a / H1b (primary), H2–H6, arms, pool rules, bounded d, Wilcoxon, bootstrap | v3.1 binding since `prereg-v1`; prereg-v2 owed (D-013, D-019) |
 | [[D-003 Resources, memory and thermal rules\|D-003]] | lease, memory gate (20 GB reserve), 12 GB GPU limit, pinning, thermal and GPU-health gates | in force; amended by D-008, D-009 |
-| [[D-004 Mapping I-TREA (2015) to I-TREA II\|D-004]] | where the defaults came from | record; narrowed by D-007 |
+| [[D-004 Mapping I-TREA (2011) to I-TREA II\|D-004]] | where the defaults came from | record; narrowed by D-007 |
 | [[D-005 The frontier of diverse solutions\|D-005]] | single objective first, plus a frontier archive of diverse near-optimal solutions | decided (Berk); exploratory metrics only |
 | [[D-006 Exchange platform — Redis, file mailbox as fallback\|D-006]] | Redis as the platform, the file mailbox as fallback | decided; transport set by E0b (not run); runs so far use the file mailbox |
 | [[D-007 Main claim — the coupling beats either method alone\|D-007]] | main claim: the coupling beats either method alone | Berk; amended by D-013 |
@@ -148,15 +150,14 @@ Full descriptions: [[Home — long form]] § Results notes.
 | section | contents |
 |---|---|
 | `00-index/` | this page, [[Home — long form]], [[Research question and spec]], [[Roadmap]], [[Project background]] (the detail behind the README), [[Agent companion — detail and history]] (the detail behind `AGENTS.md`) |
-| `10-design/` | [[I-TREA II algorithm]], [[Feasibility jump local search]], [[Process interface]], [[Trace format and metrics]], [[Hard instance pool]], [[Datasets]], [[Compute resources]] (with the window log), [[Islands (draft)]] |
-| `20-journal/` | dated research journal, append-only, times in CEST (newest: [[2026-10-16]]) |
+| `10-design/` | [[I-TREA II algorithm]], [[Feasibility jump local search]], [[Process interface]], [[Trace format and metrics]], [[Hard instance pool]], [[Datasets]], [[Compute resources]] (machine, caps and gates), [[Islands (draft)]] |
+| `20-journal/` | dated research journal, append-only, times in CEST (newest: [[2026-10-16]]): research developments only (Berk, 2026-10-17: "Journal must keep only the developments regarding the problem not procedural stuff.") |
 | `30-results/` | see Results notes above |
-| `40-literature/` | [[Prior art]] (91 works, 78 legally readable; sweeps A–E in `prior-art/`); [[Paywalled research]] (the only home for paywalled works); part I: the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509) |
+| `40-literature/` | [[Prior art]] (91 works, 78 legally readable; sweeps A–E in `prior-art/`); [[Paywalled research]] (the only home for paywalled works); part I: the open 2011 M.S. thesis (`orbay2011itrea`, [hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509)) |
 | `50-decisions/` | D-001 … D-033 — see Decisions above |
-| `60-incidents/` | [[Mistakes and incidents]] |
 | `70-upstream/` | upstream drafts and records — **filed only with Berk's per-post yes**; filed so far: NVIDIA/cuopt#2073 (fixed in cuOpt 26.10) |
 | `80-reviews/` | design critiques, consults and Claude Code workflow reviews |
-| `90-checkpoints/` | session checkpoints (newest [[2026-10-14-2350]]) |
+| *(not in this vault)* | session checkpoints, the incident log and procedural notes: the private operations repository |
 
 Every link of every section: [[Home — long form]] § Vault sections.
 
@@ -178,11 +179,11 @@ Carried from the host (DGX Spark) and from this project's incidents. The full ag
 - Production serving is restored by the session that stopped it.
 - Never `pkill -f` / `pgrep -f` from an agent shell.
 - The stop file `logs/pool.stop` stops a pool, and a chain script that tests it after the pool goes on to restore the
-  servers. To pause a pool inside a window, kill the chain first by its PID ([[Mistakes and incidents]], 2026-10-13).
+  servers. To pause a pool inside a window, kill the chain first by its PID (incident of 2026-10-13).
 
 **Code and runs**
 - **No commits to `src/` or `configs/` while a pool can still launch runs** — each run imports the current source, so
-  development goes in a git worktree ([[Mistakes and incidents]], 2026-10-06).
+  development goes in a git worktree (incident of 2026-10-06).
 - **Before a window that runs new GPU code, the GPU-marked cold-cache tests pass and reach the new code after `t0`**
   (practice from the incidents of 2026-10-08 and journal 2026-10-09; the warm-up now runs every crossover and mutation
   operator on 1-, 2- and 3-child batches).

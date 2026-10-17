@@ -18,7 +18,7 @@ relative to max(|a_i|, |rhs|, 1); `highs`, absolute; `rhs`, relative to max(1, |
 relative to max(1, |bound|) (absolute under `highs`) and every integer within `int_tol` (a per-row test — never a sum
 against a total tolerance, the X2 bug).
 
-## Population and the three ranks (I-TREA's names; mapping in [[D-004 Mapping I-TREA (2015) to I-TREA II]])
+## Population and the three ranks (I-TREA's names; mapping in [[D-004 Mapping I-TREA (2011) to I-TREA II]])
 Population X (P × n) on the device, plus per-individual `key`, `viol`, `feasible`, `rank ∈ {0,1,2}` (−1 = not yet
 ranked), `id` (age: lower = older), `parent ids`, `origin` (operator bits), `birth`, ancestry bit masks. Survival each
 generation, from the candidate set C = population ∪ offspring ∪ injected (`itrea.ea.ranks.three_rank_survival`), in
@@ -321,7 +321,7 @@ memory budget. The check is the summary's `compiled_on_clock` (the CuPy kernel c
 `test_lp_decode.py`) that start from an empty kernel cache and assert that nothing compiled after t0; the elite and
 lp_decode tests also assert that the timed part reached the new code. Two gaps were found this way: on 2026-10-08 the
 elite kernels were never warmed (the synthetic population held 2 distinct members) and compiled on the clock in the
-first block of the D-016 pool, which was voided ([[Mistakes and incidents]]); on 2026-10-09 the block crossover's
+first block of the D-016 pool, which was voided (journal 2026-10-08 11:11–11:26); on 2026-10-09 the block crossover's
 one-child chunk compiled after t0 in the lp_decode cold-cache test, before any timed run.
 
 ## Seeding

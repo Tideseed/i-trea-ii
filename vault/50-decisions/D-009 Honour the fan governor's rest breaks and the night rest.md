@@ -4,7 +4,7 @@
 session?"; the night-rest question is open for Berk (issue #11).
 
 ## What happened on the screening night (2026-10-05/06)
-The host's `fan-governor` (root service, since 2026-10-02; source in [other repository] `tools/bin/fan-governor`)
+The host's `fan-governor` (root service, since 2026-10-02; source in the host's own tools, outside this repository)
 **worked**: fan to MAX at 02:52:25 when the screening started (82 °C), GPU clock cap at 02:52:46, back to AUTO at
 07:00:49. Even at max fan, 8 X925 cores at 3.9 GHz held the box at 88–91 °C. After 30 min of continuous MAX it
 **requested a rest at 03:22:29** (`~/.local/state/thermal/rest`) — Berk's rule of 2026-10-02: "allow the spark to recover
@@ -12,7 +12,7 @@ some … fans should not go max for prolonged periods". The I-TREA II runner did
 launching: the fan ran at MAX for ~4 h 08 min without a break. The night rest (night-rest-start.timer, Berk 2026-10-02:
 "take a break after 00:00 for the night") **stepped aside** because this project already held the box-window lease
 from 23:46. Both were unknown to this session — they live in the host memory note on overheating, not in the repo's
-D-003. A miss, recorded in [[Mistakes and incidents]].
+D-003. A miss, recorded in the incident log (kept in the private operations repository).
 
 ## Decision
 - **The runner honours the rest flag** (`gates.rest_due()`, checked in `pool._gate_wait` before every launch): while
@@ -24,3 +24,5 @@ D-003. A miss, recorded in [[Mistakes and incidents]].
 - **Night windows:** no I-TREA II window runs through the night rest without Berk's explicit yes for that night (issue
   #11). Daytime windows (rest breaks honoured) are the default.
 - D-003 gains the rest-flag row; the window skill gets a "check fan-governor / rest flag / night rest" step.
+
+Redacted 2026-10-17 for publication: names of other services/projects replaced by neutral wording; meaning unchanged.

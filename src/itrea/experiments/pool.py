@@ -74,7 +74,7 @@ Resumable: run directories whose run.json says completed (or failed: a crash is 
 at a time (RunLock). Log: logs/pool-<date>.log; status: logs/pool-status.json; voided runs: traces/raw/<set>/void/ and
 void.jsonl (rerun counts per arm are reported from it).
 
-Adapted in part from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/pool.py`.
+Adapted in part from berkorbay/optopt@2a3348c0a102 (MIT), `src/optopt/experiments/pool.py`.
 
     python -m itrea.experiments.pool jobs/screen1.jsonl --layout screen
     python -m itrea.experiments.pool jobs/e2.jsonl --mailbox redis --deadline 07:15
@@ -1377,7 +1377,7 @@ class Pool:
             from itrea.experiments import gpu_health
             self.sampler = gpu_health.Sampler(
                 own_pids=self._inflight_pids, period_s=o.pair_opts.gpu_period_s,
-                tolerate=(gpu_health.is_serving_pid if o.allow_serving else None))   # D-010: dev runs beside [local LLM agent]
+                tolerate=(gpu_health.is_serving_pid if o.allow_serving else None))   # D-010: dev runs beside vLLM
             self.sampler.start()
         threads = [threading.Thread(target=self.lane_loop, args=(l,), name=f"lane-{l.name}", daemon=True)
                    for l in self.lanes]

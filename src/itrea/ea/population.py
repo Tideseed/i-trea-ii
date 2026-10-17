@@ -19,7 +19,7 @@ import numpy as np
 
 from itrea.backend import Backend
 
-# rank labels — I-TREA's names (Orbay 2011 thesis)
+# rank labels — I-TREA's names (Orbay 2011 M.S. thesis, `orbay2011itrea`)
 R0, R1, R2 = 0, 1, 2      # Rank 0 infeasible good · Rank 1 feasible good (protected) · Rank 2 rejects
 NO_RANK = -1              # not yet ranked (new children before survival)
 RANK_NAMES = {R0: "rank0_infeasible_good", R1: "rank1_feasible_good", R2: "rank2_rejects", NO_RANK: "unranked"}

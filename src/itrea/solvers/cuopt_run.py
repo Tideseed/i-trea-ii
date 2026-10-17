@@ -35,7 +35,7 @@ on such statuses is never recorded (the optopt dano3_3 trap, 2026-09-23).
 Stop file / SIGTERM: cuOpt has no interrupt API; both are checked only when an incumbent arrives (control plane), and
 otherwise the time limit ends the solve. The runner's grace period and exit-code check cover the rest.
 
-Adapted in part from berkorbay/optopt@4dd48395, MIT (`src/optopt/solvers/cuopt.py`: status table, the placeholder
+Adapted in part from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/solvers/cuopt.py`: status table, the placeholder
 objective rule).
 """
 from __future__ import annotations

@@ -2,7 +2,7 @@
 stored incumbent of every process), the two tables every result of I-TREA II is computed from (vault D-002 §4,
 `10-design/Trace format and metrics.md`).
 
-Pattern adapted from berkorbay/optopt@4dd48395, MIT (`src/optopt/analysis/build_runs.py`): one row per run, every
+Pattern adapted from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/analysis/build_runs.py`): one row per run, every
 metric cut at the budget, no silent reference fallback. What is new, and why:
 
 - **Only checked incumbents count.** Every `<role>.incumbents.npz` is checked by `itrea.analysis.check_solutions`
@@ -85,7 +85,9 @@ same job run again in another set keeps its directory, and the tables qualify th
 (`qualify_reused_ids`, issue #33);
 the stem may itself contain "__", so the id is parsed from the right). Keys read, all optional (`.get`):
 `run.json`: run_id, set, instance, arm, seed, budget, config_hash, t0, t0_epoch, attempt, window_id, williams_pos,
-git_rev | git_revision, prereg_tag, gpu_health {verdict, median_sm_mhz, foreign_share, gpu_run},
+git_rev | git_revision, prereg_tag (both commit hashes, translated old -> new through `COMMIT_MAP.tsv` when it
+exists: `itrea.analysis.commit_map`, the history rewrite of 2026-10-17),
+gpu_health {verdict, median_sm_mhz, foreign_share, gpu_run},
 processes [{role, exit_code | returncode, launch_epoch}] or {role: {...}} or exit_codes {role: code};
 `<role>.summary.json`: instance, arm, seed, budget, config_hash, sense, t0, exit_reason, status, backend, solver,
 startup_s (number or {step: seconds}) | startup {step: seconds}, exchange_s, exchange_bytes (top level or counters);
@@ -110,6 +112,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from itrea.analysis import commit_map as CM
 from itrea.analysis import metrics as M
 from itrea.analysis.check_solutions import CHECKER_VERSION, ModelCache, check_incumbents, file_sha256, producer_of
 from itrea.benchmarks import references as R
@@ -1065,8 +1068,9 @@ def _identity(run: Run) -> dict:
                 attempt=_int(rj.get("attempt"), 0), block=str(rj.get("block") or ""),
                 window_id=str(rj.get("window_id") or rj.get("window") or ""),
                 williams_pos=_int(rj.get("williams_pos", rj.get("position")), -1),
-                git_rev=str(rj.get("git_rev") or rj.get("git_revision") or git.get("revision") or ""),
-                prereg_tag=str(rj.get("prereg_tag") or git.get("prereg_tag") or ""), run_dir=_rel(run.path))
+                git_rev=CM.translate(str(rj.get("git_rev") or rj.get("git_revision") or git.get("revision") or "")),
+                prereg_tag=CM.translate(str(rj.get("prereg_tag") or git.get("prereg_tag") or "")),
+                run_dir=_rel(run.path))
 
 
 def _rel(p: Path) -> str:

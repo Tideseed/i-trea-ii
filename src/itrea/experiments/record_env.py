@@ -1,7 +1,7 @@
 """The reproducibility record stored in every run record: package versions, CPU model per core, GPU, driver, kernel,
 CUDA, and the git state (revision, dirty tree, the pre-registration tag).
 
-Adapted from berkorbay/optopt@4dd48395 (MIT), `src/optopt/experiments/record_env.py`. Versions are read from package
+Adapted from berkorbay/optopt@2a3348c0a102 (MIT), `src/optopt/experiments/record_env.py`. Versions are read from package
 metadata, not by importing CuPy or cuOpt: importing cuOpt in the runner costs seconds and hundreds of MB, and a broken
 GPU stack must not stop the record from being written (a missing package is recorded as null).
 

@@ -1,7 +1,7 @@
 # Datasets
 
 Public instance sets only, all already on disk. **No downloads** — instances, wheels, models or anything else — without
-Berk's explicit ask (host rule; the Wi-Fi link makes each download a cost to him). Customer data (customer) never
+Berk's explicit ask (host rule; the Wi-Fi link makes each download a cost to him). Customer or third-party data never
 enters this project.
 
 ## Where the instances are
@@ -161,7 +161,7 @@ selector or job file for stage 1 exists yet (code owed, D-024, #37).
 ## Derived tables (`datasets/`, committed)
 | file | what | status |
 |---|---|---|
-| `hardness_from_optopt.csv` | 386 instances: P(60)/P(300) from optopt's grid (strategies H0 H1 S0 S1 C0 C1, one seed), provenance `optopt@4dd48395` | background only — **never** a selection criterion (it mixes cuOpt into "best") |
+| `hardness_from_optopt.csv` | 386 instances: P(60)/P(300) from optopt's grid (strategies H0 H1 S0 S1 C0 C1, one seed), provenance `berkorbay/optopt@2a3348c0a102` | background only — **never** a selection criterion (it mixes cuOpt into "best") |
 | `dev_set.csv` | the 9 development instances with stratum, reason and stage-1 P(300) / first-feasible time (D-010) | committed 2026-10-06 |
 | `classprobe_set.csv` | the 8 class-probe instances with group and one-thread LP time (D-014) | committed 2026-10-07 |
 | `mipfeas_strata.csv` | D-021's external sets, one row per MIPfeas instance (section above); sha256 `c0221d429f33…` | committed 2026-10-12 (bb7f2e1, c4f0154); hashed in prereg-v2 |

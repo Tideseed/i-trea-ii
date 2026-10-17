@@ -15,6 +15,12 @@ under `datasets/` and `paper/generated/` with git HEAD (or, for an untracked fil
 `datasets/runs.parquet` and `incumbents_checked.parquet` are untracked, and `hard_pool.csv` / `reference.csv` do not
 exist yet (#1, #2). Model: optopt's `optopt reproduce`.
 
+**Old commit hashes.** The history was rewritten on 2026-10-17 (vault `00-index/History rewrite 2026-10-17.md`), so
+a hash recorded before then (a run record's `env.git.revision` / `prereg_tag`, a note, an issue) names an old commit.
+`build_runs` and `prereg` translate through `COMMIT_MAP.tsv` on their own; by hand,
+`python -m itrea.analysis.commit_map <hash> [<hash> …]`. `python -m itrea.analysis.commit_map --check-traces` checks
+that every recorded revision translates to a commit that descends from `prereg-v1` (exit 0 = all pass).
+
 Development tests (D-010) are outside that compare set: re-derive them with `itrea build-runs`, then the test's
 report (`tools/d016_report.py`, `tools/d017_report.py`, `itrea backoff-report --stage 0|1 [--json out.json]`),
 single-threaded, and compare with the decision record's Result section and the Development log.
@@ -44,6 +50,7 @@ single-threaded, and compare with the decision record's Result section and the D
   its interval land the same way, reported per hypothesis.
 
 ## When something differs
-Write it in the journal and in `vault/60-incidents/Mistakes and incidents.md`; if a published or quoted number
+Write what differs, and by how much, in the journal, and log it in the incident log of the private operations
+repository (skill `itrea-journal`, "What goes where"); if a published or quoted number
 changes, add a dated correction block to its result note (skill `itrea-result-note`) and to AGENTS.md / the paper,
 keeping the old value visible.

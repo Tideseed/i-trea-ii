@@ -8,8 +8,9 @@ front page (Berk, 2026-10-16: "In all text prioritize readability for humans, an
   ([[D-033 C1 go — phase 1 closes with configs-frozen-v2.yaml = yield + lp_decode]]). Lines below that say `frozen-v2.yaml` is written on Saturday, that D-031
   is running or that its harm reading may still put the choice to Berk are superseded; the current state is in [[Home]]
   and `AGENTS.md`.
-- **The living sources** are the decision records (`50-decisions/`), the [[Roadmap]], the [[Experiment index]] and the
-  newest checkpoint (`90-checkpoints/`).
+- **The living sources** are the decision records (`50-decisions/`), the [[Roadmap]] and the [[Experiment index]].
+- **Edited 2026-10-17:** session checkpoints, the incident log and procedural journal entries moved to the private
+  operations repository; the rows and links below that pointed to them now say so.
 - **Other snapshots of the same day:** [[Project background]] (the old README) and
   [[Agent companion — detail and history]] (the old `AGENTS.md` detail). `AGENTS.md` and [[Home]] hold the current state.
 
@@ -36,8 +37,9 @@ either method alone — a hypothesis, not a finding. **Aim, refined by Berk on 2
 set (P ≥ 0.5 alone, on seeds not used for evaluation), with the mean as a guard. **v1**
 ([[D-019 v1 — deadline and performance target]]): A9 frozen, checkpoint C1 on Fri 2026-10-23, v1 at the end of
 November 2026 on cuOpt 26.10.
-Successor of Berk Orbay's master's research I-TREA (Orbay 2011, METU M.S. thesis, open access, hdl:11511/20509; 2015
-manuscript — the starting point and the idea of keeping good infeasible solutions) and of the optopt study
+Successor of Berk Orbay's master's research I-TREA (Orbay 2011, METU M.S. thesis, open access,
+[hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509) — the starting point and the idea of keeping good
+infeasible solutions) and of the optopt study
 (`berkorbay/optopt`, whose CPU version of this idea found no gain at 60 s — see [[Research question and spec]]).
 
 ## State as of 2026-10-13 (superseded on 2026-10-16 — kept as the record of that day)
@@ -57,7 +59,7 @@ hint and guard — no result yet. Daytime windows only (D-019: "No nights"); per
 
 | start here | |
 |---|---|
-| `90-checkpoints/` | session checkpoints — **read the newest first** ([[2026-10-14-2350]]) |
+| session checkpoints | kept in the private operations repository (not in this vault) |
 | [[Roadmap]] | the aim in Berk's words, v1 and C1, the stages and the GitHub issues of each — **what is next** |
 | [[D-019 v1 — deadline and performance target]] | v1: dates, the confirmatory and MIPfeas targets, Berk's answers (addendum); the external standard is [[D-021 Our own external benchmark standard (ITX-1) — equal footprint inside the Spark's thermal envelope]], the staging [[D-024 Targeted first, wider only on a hint — staged testing for development and v1]] |
 | [[Development log]] | every development change and result since 2026-10-06, failures included |
@@ -89,7 +91,7 @@ A superseding decision says what changed and why; statuses as of 2026-10-16 (~09
 | [[D-001 Language, solvers and process model]] | Python 3.12 + CuPy / NumPy as one code path; SCIP primary partner, HiGHS replication partner, cuOpt control (its set-solution callback disables presolve in 26.08; fixed in 26.10, cuopt#2073); solver and EA as separate pinned processes behind a shared start barrier, exchanging through a mailbox | decided |
 | [[D-002 Pre-registration — hypotheses, arms, analysis]] | hypotheses H1a/H1b (primary), H2–H6, arms, pool rules, bounded d, Wilcoxon, bootstrap | v3.1, binding since `prereg-v1`; prereg-v2 owed (D-013, D-019) |
 | [[D-003 Resources, memory and thermal rules]] | runner-enforced: lease, memory gate with a 20 GB reserve, 12 GB GPU limit for the EA pool and cuOpt (cuOpt's RMM 24 GB under D-021's harness), pinning, thermal and GPU-health gates | in force; amended by D-008, D-009 |
-| [[D-004 Mapping I-TREA (2015) to I-TREA II]] | where the defaults came from | record; narrowed by D-007 |
+| [[D-004 Mapping I-TREA (2011) to I-TREA II]] | where the defaults came from | record; narrowed by D-007 |
 | [[D-005 The frontier of diverse solutions]] | single objective first, plus a frontier archive of diverse near-optimal solutions | decided (Berk); exploratory metrics only |
 | [[D-006 Exchange platform — Redis, file mailbox as fallback]] | Redis as the common platform, the file mailbox with the same API as fallback | decided; the confirmatory transport is set by the E0b overhead measurement (not run; runs so far use the file mailbox) |
 | [[D-007 Main claim — the coupling beats either method alone]] | "a GPU-based evolutionary algorithm metaheuristic coupled with an exact solver can beat either single solution" | Berk; amended by D-013 |
@@ -133,12 +135,12 @@ A superseding decision says what changed and why; statuses as of 2026-10-16 (~09
 | section | contents |
 |---|---|
 | `00-index/` | this page, [[Research question and spec]], [[Roadmap]] |
-| `10-design/` | [[I-TREA II algorithm]], [[Feasibility jump local search]], [[Process interface]], [[Trace format and metrics]], [[Hard instance pool]], [[Datasets]], [[Compute resources]] (with the window log), [[Islands (draft)]] |
-| `20-journal/` | dated research journal, append-only, times in CEST (newest: [[2026-10-16]]) |
+| `10-design/` | [[I-TREA II algorithm]], [[Feasibility jump local search]], [[Process interface]], [[Trace format and metrics]], [[Hard instance pool]], [[Datasets]], [[Compute resources]] (machine, caps and gates), [[Islands (draft)]] |
+| `20-journal/` | dated research journal, append-only, times in CEST (newest: [[2026-10-16]]); research developments only since 2026-10-17 |
 | `30-results/` | see Results above |
-| `40-literature/` | [[Prior art]] (synthesis of sweeps A–E: 91 works, 78 legally readable) with the sweep notes in `prior-art/` ([[A Constraint handling with infeasible solutions]], [[B Metaheuristics cooperating with MIP solvers]], [[C GPU primal heuristics and GPU EC]], [[D Benchmarks and metrics]], [[E Novelty check 2026-10-05]]); [[Paywalled research]] (the only home for paywalled works); part I: the 2011 thesis (https://open.metu.edu.tr/handle/11511/20509) (unpublished; the open source is the 2011 thesis, `orbay2011itrea`), the part-I references and `I-TREA (2015) references.bib` (an audit record, not citable as a whole) |
+| `40-literature/` | [[Prior art]] (synthesis of sweeps A–E: 91 works, 78 legally readable) with the sweep notes in `prior-art/` ([[A Constraint handling with infeasible solutions]], [[B Metaheuristics cooperating with MIP solvers]], [[C GPU primal heuristics and GPU EC]], [[D Benchmarks and metrics]], [[E Novelty check 2026-10-05]]); [[Paywalled research]] (the only home for paywalled works); part I: the open 2011 M.S. thesis (`orbay2011itrea`, [hdl:11511/20509](https://open.metu.edu.tr/handle/11511/20509)), summarised in [[E Novelty check 2026-10-05]] |
 | `50-decisions/` | D-001 … D-032 — see Decisions above |
-| `60-incidents/` | [[Mistakes and incidents]] |
-| `70-upstream/` | drafts and records of upstream reports — **filed only with Berk's per-post yes**; filed so far: NVIDIA/cuopt#2073 (`SetSolutionCallback` with presolve; Berk's yes, 2026-10-07; record `2026-10-07 NVIDIA-cuopt#2073 — SetSolutionCallback with presolve.md`) — fixed by PR #2098 in cuOpt 26.10 and verified on the 26.10 nightly 2026-10-13 (SET callbacks are polled only on GPU-population improvements); two follow-up drafts in `drafts/`, not posted |
+| incident log | kept in the private operations repository (not in this vault) |
+| `70-upstream/` | drafts and records of upstream reports — **filed only with Berk's per-post yes**; filed so far: NVIDIA/cuopt#2073 (`SetSolutionCallback` with presolve; Berk's yes, 2026-10-07; record `2026-10-07 NVIDIA-cuopt 2073 — SetSolutionCallback with presolve.md`) — fixed by PR #2098 in cuOpt 26.10 and verified on the 26.10 nightly 2026-10-13 (SET callbacks are polled only on GPU-population improvements); two follow-up drafts in `drafts/`, not posted |
 | `80-reviews/` | design critique: [[2026-10-05 design critique]] and [[2026-10-05 design critique — response]]; [[2026-10-06 build review]]; consults with Hermes Agent and OpenAI GPT-6.1 Sol: [[2026-10-06 Feasibility targets consult (GPT-6.1 Sol)]], [[2026-10-06 LP stream design consult (GPT-6.1 Sol)]]; Claude Code workflows: [[2026-10-06 Repair-depth design (workflow)]], [[2026-10-07 cuOpt restart design (workflow)]], [[2026-10-08 lp_decode design (workflow)]], [[2026-10-08 lp_decode review (workflow)]], [[2026-10-08 A9 GPU back-off design (workflow)]], [[2026-10-09 A9 GPU back-off review (workflow)]]; [[2026-10-08 cuOpt population and diversity — what transfers]] |
-| `90-checkpoints/` | session checkpoints (newest [[2026-10-14-2350]]) |
+| session checkpoints | kept in the private operations repository (not in this vault) |

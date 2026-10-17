@@ -211,7 +211,7 @@ never from literals.
   the run id, `<epoch_ms>` the plan's millisecond: unique per launch, so two lanes starting in the same second never
   ask systemd for one name — the first version used the configuration hash and the second, and collided) instead of an
   anonymous scope, so host tools can find the project's processes — thermal-watch's 98 °C stop pattern gains
-  `itrea-run` ([other repository], a separate edit). Every scope gets `-p TimeoutStopSec=5s` (a `systemctl stop`
+  `itrea-run` (in the host's own tools, a separate edit). Every scope gets `-p TimeoutStopSec=5s` (a `systemctl stop`
   kills within 5 s, not systemd's 90), cuOpt's also `-p KillSignal=SIGKILL` (it has no interrupt API and keeps the
   GPU busy after SIGTERM). Never part of a hash or of argv; `run.json` records `scope_unit` per process.
 - **Void causes** (`pair.void_checks`, after every run; each found cause is recorded in `void_checks`, the first in

@@ -1,0 +1,380 @@
+<!doctype html>
+<!-- No front matter on purpose: GitHub Pages (Jekyll) copies this file verbatim. The double braces in the BibTeX
+     below would break Liquid if front matter were ever added; put that block in a Liquid raw block first. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>I-TREA II — a GPU evolutionary algorithm coupled with MIP solvers</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="I-TREA II runs a GPU evolutionary algorithm beside SCIP and NVIDIA cuOpt while they solve. Interim results on 17 public instances we tuned on: mean primal integral −20 % against cuOpt alone on the same 5 cores and GPU (11 hard instances, 7 better / 3 worse); −50 % against SCIP alone on one core, most of which cuOpt alone also reaches (−42 %).">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tideseed.github.io/i-trea-ii/">
+<meta property="og:title" content="I-TREA II — a GPU evolutionary algorithm coupled with MIP solvers">
+<meta property="og:description" content="A GPU evolutionary algorithm that trades solutions with SCIP and takes NVIDIA cuOpt's. Interim report on phase 1, on 17 public instances we tuned on: mean primal integral −20 % against cuOpt alone on the same 5 cores and GPU (11 hard instances, 7 better / 3 worse); −50 % against SCIP alone on one core, most of which cuOpt alone also reaches (−42 %). Code, paper and decision records.">
+<meta property="og:image" content="https://tideseed.github.io/i-trea-ii/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="I-TREA II: −20 % mean primal integral (lower is better) against cuOpt alone on its 11 hard instances; gap over time on neos-3024952-loue for SCIP alone, cuOpt alone and I-TREA II">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="I-TREA II — a GPU evolutionary algorithm coupled with MIP solvers">
+<meta name="twitter:description" content="Interim, 17 public instances we tuned on: −20 % mean primal integral against cuOpt alone on the same cores and GPU; −50 % against SCIP alone, mostly what cuOpt alone also reaches (−42 %).">
+<meta name="twitter:image" content="https://tideseed.github.io/i-trea-ii/social-card.png">
+<style>
+  :root { --ink: #0b0b0b; --ink2: #52514e; --rule: #e6e5e1; --link: #1f5fa8; --surface: #fcfcfb; --card: #ffffff;
+          --blue: #2a78d6; --orange: #eb6834; --aqua: #1baf7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 56rem; margin: 0 auto; padding: 1.9rem 1.25rem 3.5rem; }
+  h1 { font-size: 1.65rem; line-height: 1.25; margin: 0 0 .5rem; }
+  h2 { font-size: 1.15rem; margin: 2.2rem 0 .6rem; border-top: 1px solid var(--rule); padding-top: 1.2rem; }
+  p { margin: .55rem 0; }
+  .lede { font-size: 1.05rem; margin: 0 0 .5rem; }
+  .byline { color: var(--ink2); margin: 0 0 .9rem; font-size: .95rem; }
+  a { color: var(--link); }
+  nav { display: flex; flex-wrap: wrap; gap: .45rem .7rem; margin: 0 0 .4rem; }
+  nav a { border: 1px solid #c9c7c1; border-radius: 6px; padding: .3rem .65rem; text-decoration: none;
+          background: var(--card); font-size: .95rem; }
+  nav a:hover { border-color: var(--link); }
+  #users h2 { margin-top: 1.2rem; padding-top: 1rem; }
+  .answer { font-size: 1.02rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: .7rem 0 .4rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th { font-weight: 600; color: var(--ink2); font-size: .8rem; line-height: 1.3; border-bottom: 2px solid var(--rule); }
+  tbody th { font-weight: normal; }
+  td.big { font-variant-numeric: tabular-nums; }
+  td.big strong { font-size: 1.1rem; color: var(--link); }
+  .nowrap { white-space: nowrap; }
+  .notes { color: var(--ink2); font-size: .82rem; line-height: 1.45; margin: .3rem 0 .8rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  figure { margin: 1rem 0; }
+  figure img { width: 100%; height: auto; display: block; background: #fff; border: 1px solid var(--rule);
+               border-radius: 6px; }
+  .swipe { display: none; color: var(--ink2); font-size: .8rem; margin: .3rem 0 0; }
+  .figlegend { display: none; list-style: none; padding: 0; margin: 0 0 .4rem; font-size: .85rem; }
+  .figlegend li { margin: .15rem 0; padding-left: 2.65rem; text-indent: -2.65rem; }
+  .figlegend .sw { display: inline-block; width: 2.2rem; margin-right: .45rem; vertical-align: middle; }
+  .sw.coupled { border-top: 3px solid #2a78d6; }
+  .sw.cuopt { border-top: 3px dashed #eb6834; }
+  .sw.scip { border-top: 3px dotted #1baf7a; }
+  figcaption { color: var(--ink2); font-size: .85rem; line-height: 1.45; margin-top: .45rem; }
+  .diagram { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .5rem; }
+  .diagram svg { display: block; width: 100%; height: auto; }
+  .diagram .tall { display: none; max-width: 22rem; margin: 0 auto; }
+  pre { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem; overflow-x: auto;
+        font-size: .82rem; line-height: 1.45; }
+  code { font-size: .92em; }
+  dl.more { margin: .4rem 0; }
+  dl.more dt { font-weight: 600; margin-top: .55rem; }
+  dl.more dd { margin: .1rem 0 0; color: var(--ink2); font-size: .95rem; }
+  footer { color: var(--ink2); font-size: .88rem; margin-top: 2.8rem; border-top: 1px solid var(--rule);
+           padding-top: 1rem; }
+  footer p { margin: .3rem 0; }
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    main { padding: 1.6rem 1rem 3rem; }
+    h1 { font-size: 1.4rem; }
+    table.users thead, table.users colgroup { display: none; }
+    table.users, table.users tbody, table.users tr, table.users td, table.users th { display: block; width: 100%; }
+    table.users tr { border: 1px solid var(--rule); border-radius: 8px; background: var(--card);
+                     padding: .45rem .7rem .35rem; margin: 0 0 .7rem; }
+    table.users td, table.users th { border: 0; padding: .18rem 0; }
+    table.users td[data-label]::before { content: attr(data-label); display: block; color: var(--ink2);
+                                         font-size: .74rem; letter-spacing: .01em; }
+    table.users th.solver { font-size: 1rem; padding-bottom: .3rem; border-bottom: 1px solid var(--rule); }
+    .diagram .wide { display: none; }
+    .diagram .tall { display: block; }
+    h1 { font-size: 1.3rem; }
+    .lede { font-size: 1rem; }
+    .byline { font-size: .88rem; margin-bottom: .7rem; }
+    nav a { font-size: .88rem; padding: .25rem .55rem; }
+    .figscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .figscroll img { width: 720px; max-width: none; }
+    .swipe { display: block; }
+    .figlegend { display: block; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>I-TREA II — a GPU evolutionary algorithm coupled with MIP solvers</h1>
+<p class="lede">I-TREA II runs a GPU evolutionary algorithm (EA) beside exact MIP solvers while they run: it trades
+solutions with SCIP both ways and takes NVIDIA cuOpt's, to find good feasible solutions sooner on each solver's hardest
+instances.</p>
+<p class="byline">Berk Orbay &middot; interim report on phase 1 (development), 17 October 2026</p>
+<nav>
+  <a href="https://github.com/Tideseed/i-trea-ii/blob/main/paper/main.pdf">Interim report (PDF)</a>
+  <a href="https://github.com/Tideseed/i-trea-ii">Code</a>
+  <a href="#read-more">Read more</a>
+  <a href="#cite">Cite</a>
+</nav>
+
+<section id="users">
+<h2>What this means for SCIP and cuOpt users</h2>
+<p class="answer"><strong>Short answer: yes, there is a real chance of a large gain on hard instances, but not on every
+one.</strong> On instances where a solver alone struggles to find good solutions in two minutes, running it inside
+I-TREA II found good solutions much sooner in our interim tests: about <strong>half</strong> the primal integral of SCIP
+alone, and <strong>a fifth less</strong> than cuOpt alone on the same share of the machine (5 of its 20 cores and the
+GPU). cuOpt on the whole machine, which is stronger, has not been compared yet. Over all 17 instances, I-TREA II was
+better than cuOpt alone on 8 and worse on 8; where cuOpt alone already finds a good solution within seconds, I-TREA II
+can be slower (<span class="nowrap">chromaticindex1024-7:</span> <span class="nowrap">0.08 → 0.54</span>).</p>
+
+<table class="users">
+  <colgroup><col style="width:19%"><col style="width:11%"><col style="width:27%"><col style="width:25%"><col style="width:18%"></colgroup>
+  <thead>
+    <tr><th>If you use …</th><th>its hard instances</th><th>change in mean P(120) with <span class="nowrap">I-TREA II</span></th>
+        <th>largest gains</th><th>losses</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th scope="row" class="solver"><strong>SCIP</strong> (one CPU core, its default; <span class="nowrap">6–7 October</span>)</th>
+      <td data-label="its hard instances">15 of our 17</td>
+      <td class="big" data-label="change in mean P(120) with I-TREA II"><strong>−50&nbsp;%</strong> (cuOpt alone
+        on the same share: −42&nbsp;%); better on 12, worse on 0 (<span class="nowrap">p = 0.0005</span>)</td>
+      <td data-label="largest gains"><span class="nowrap">neos-960392 1.00 → 0.04</span>,
+        <span class="nowrap">ca 1.00 → 0.26</span></td>
+      <td data-label="losses">none</td>
+    </tr>
+    <tr>
+      <th scope="row" class="solver"><strong>cuOpt</strong> (same 5 of 20 cores + GPU as <span class="nowrap">I-TREA II</span>)</th>
+      <td data-label="its hard instances">11 of our 17</td>
+      <td class="big" data-label="change in mean P(120) with I-TREA II"><strong>−20&nbsp;%</strong>; better on 7,
+        worse on 3 (<span class="nowrap">p = 0.03</span>)</td>
+      <td data-label="largest gains"><span class="nowrap">neos-960392 0.58 → 0.04</span>,
+        <span class="nowrap">ca 0.56 → 0.26</span>, <span class="nowrap">item_placement 0.49 → 0.22</span></td>
+      <td data-label="losses"><span class="nowrap">doon 0.86 → 1.00</span>,
+        <span class="nowrap">toguru 0.55 → 0.61</span>, <span class="nowrap">rail01 0.98 → 1.00</span></td>
+    </tr>
+  </tbody>
+</table>
+<p class="notes"><strong>P(120)</strong> = the average gap to the best known solution over a 2-minute run: 1 = no
+solution (or only one with a gap of 1), 0 = optimal from the first second; lower is better. <strong>Hard</strong> = the
+solver alone had P(120) ≥ 0.5 (for cuOpt, on earlier runs of cuOpt alone on three cores;
+item_placement and sing44 now sit just below). Four seeds for I-TREA II and cuOpt
+alone, two for SCIP alone; p: Wilcoxon signed-rank. For SCIP, the largest gains among the instances where I-TREA II also
+does better than cuOpt alone. ca = ca__Scenario400_reserves_1 (unit commitment), item_placement = item_placement_9903,
+doon = neos-2746589-doon, toguru = neos-4763324-toguru.</p>
+
+<ul>
+  <li><strong>Most of the gain over SCIP alone is what cuOpt alone also reaches</strong> on the same five cores and GPU
+  (mean P on SCIP's 15: SCIP alone 0.889, cuOpt alone 0.517, I-TREA II 0.448). SCIP alone ran on one core without the
+  GPU, on earlier days (6–7 October), so this comparison measures adopting I-TREA II on a GPU machine; and SCIP's 15
+  hard instances were picked on the same runs they are compared with (cuOpt's 11 on earlier runs), which can flatter
+  the gain. The cuOpt row shows what I-TREA II adds beyond cuOpt.</li>
+  <li><strong>When not to expect it:</strong> outside cuOpt's hard set (6 of the 17), I-TREA II was worse than cuOpt
+  alone on 5, by at most 0.022 in P except on chromaticindex1024-7, where the EA's GPU work delays cuOpt's first
+  solution. Where cuOpt alone finds a solution only on some seeds (doon 2 of 4, rail01 1 of 4), I-TREA II found none,
+  and the cause is not yet known; where no solver finds one (cryptanalysis), neither does I-TREA II.</li>
+  <li><strong>How sure:</strong> interim development results — 17 public instances that we tuned on, 2-minute runs, one
+  DGX Spark (GB10), cuOpt 26.08; cuOpt alone crashed on comp21-2idx on 3 of 4 seeds (a segmentation fault, not yet
+  reported upstream; counted as its result). One instance, neos-960392, carries 35&nbsp;% of the gain over cuOpt
+  alone; without it, −20&nbsp;% shrinks to −14&nbsp;% (ratio of mean P 0.858 instead of 0.798). The test on unseen
+  instances, with cuOpt 26.10, follows in November.</li>
+</ul>
+</section>
+
+<section id="how">
+<h2>How it works</h2>
+<div class="diagram">
+<svg class="wide" viewBox="0 0 780 200" role="img" aria-labelledby="dg-wide-t">
+  <title id="dg-wide-t">The coupled system: SCIP and the GPU evolutionary algorithm exchange solutions both ways; cuOpt sends its incumbents to the evolutionary algorithm.</title>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0b0b0b"/>
+    </marker>
+  </defs>
+  <rect x="6" y="6" width="768" height="188" rx="10" fill="none" stroke="#b9b7b1" stroke-dasharray="5 4"/>
+  <text x="20" y="28" font-size="13" fill="#52514e" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">one DGX Spark (GB10): 5 of its 20 CPU cores and the GPU</text>
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">
+    <rect x="24" y="72" width="160" height="96" rx="8" fill="#ffffff" stroke="#1baf7a" stroke-width="2.5"/>
+    <text x="104" y="108" font-size="18" font-weight="700" fill="#0b0b0b">SCIP</text>
+    <text x="104" y="132" font-size="13" fill="#52514e">exact MIP solver</text>
+    <text x="104" y="151" font-size="13" fill="#52514e">1 CPU core</text>
+
+    <rect x="330" y="72" width="170" height="96" rx="8" fill="#ffffff" stroke="#2a78d6" stroke-width="2.5"/>
+    <text x="415" y="102" font-size="17" font-weight="700" fill="#0b0b0b">Evolutionary</text>
+    <text x="415" y="123" font-size="17" font-weight="700" fill="#0b0b0b">algorithm</text>
+    <text x="415" y="151" font-size="13" fill="#52514e">the GPU + 1 CPU core</text>
+
+    <rect x="600" y="72" width="160" height="96" rx="8" fill="#ffffff" stroke="#eb6834" stroke-width="2.5"/>
+    <text x="680" y="108" font-size="18" font-weight="700" fill="#0b0b0b">cuOpt</text>
+    <text x="680" y="132" font-size="13" fill="#52514e">GPU MIP solver</text>
+    <text x="680" y="151" font-size="13" fill="#52514e">the GPU + 3 CPU cores</text>
+
+    <line x1="186" y1="100" x2="327" y2="100" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="257" y="74" font-size="12.5" fill="#0b0b0b">incumbent, pool,</text>
+    <text x="257" y="90" font-size="12.5" fill="#0b0b0b">bound, LP points</text>
+    <line x1="328" y1="142" x2="187" y2="142" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="257" y="162" font-size="12.5" fill="#0b0b0b">solutions better than</text>
+    <text x="257" y="178" font-size="12.5" fill="#0b0b0b">SCIP's incumbent</text>
+    <line x1="598" y1="120" x2="503" y2="120" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="550" y="110" font-size="12.5" fill="#0b0b0b">incumbents</text>
+  </g>
+</svg>
+<svg class="tall" viewBox="0 0 340 540" role="img" aria-labelledby="dg-tall-t">
+  <title id="dg-tall-t">The coupled system: SCIP and the GPU evolutionary algorithm exchange solutions both ways; cuOpt sends its incumbents to the evolutionary algorithm.</title>
+  <defs>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0b0b0b"/>
+    </marker>
+  </defs>
+  <rect x="4" y="4" width="332" height="532" rx="10" fill="none" stroke="#b9b7b1" stroke-dasharray="5 4"/>
+  <text x="18" y="28" font-size="13" fill="#52514e" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">one DGX Spark: 5 of 20 CPU cores + the GPU</text>
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">
+    <rect x="45" y="44" width="250" height="86" rx="8" fill="#ffffff" stroke="#1baf7a" stroke-width="2.5"/>
+    <text x="170" y="76" font-size="18" font-weight="700" fill="#0b0b0b">SCIP</text>
+    <text x="170" y="99" font-size="14" fill="#52514e">exact MIP solver</text>
+    <text x="170" y="118" font-size="14" fill="#52514e">1 CPU core</text>
+
+    <rect x="45" y="244" width="250" height="86" rx="8" fill="#ffffff" stroke="#2a78d6" stroke-width="2.5"/>
+    <text x="170" y="274" font-size="17" font-weight="700" fill="#0b0b0b">Evolutionary algorithm</text>
+    <text x="170" y="299" font-size="14" fill="#52514e">the GPU + 1 CPU core</text>
+
+    <rect x="45" y="434" width="250" height="86" rx="8" fill="#ffffff" stroke="#eb6834" stroke-width="2.5"/>
+    <text x="170" y="466" font-size="18" font-weight="700" fill="#0b0b0b">cuOpt</text>
+    <text x="170" y="489" font-size="14" fill="#52514e">GPU MIP solver</text>
+    <text x="170" y="508" font-size="14" fill="#52514e">the GPU + 3 CPU cores</text>
+  </g>
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13" fill="#0b0b0b">
+    <line x1="130" y1="132" x2="130" y2="241" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah2)"/>
+    <text x="122" y="176" text-anchor="end">incumbent,</text>
+    <text x="122" y="193" text-anchor="end">pool, bound,</text>
+    <text x="122" y="210" text-anchor="end">LP points</text>
+    <line x1="210" y1="242" x2="210" y2="133" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah2)"/>
+    <text x="218" y="176" text-anchor="start">solutions</text>
+    <text x="218" y="193" text-anchor="start">better than</text>
+    <text x="218" y="210" text-anchor="start">SCIP's incumbent</text>
+    <line x1="170" y1="432" x2="170" y2="333" stroke="#0b0b0b" stroke-width="2" marker-end="url(#ah2)"/>
+    <text x="180" y="387" text-anchor="start">incumbents</text>
+  </g>
+</svg>
+</div>
+<p class="notes">SCIP and the EA exchange solutions both ways; cuOpt only sends (on cuOpt 26.08, receiving outside
+solutions disables its presolve). The EA passes to SCIP every solution better than SCIP's incumbent, cuOpt's
+included.</p>
+<ul>
+  <li><strong>Three processes share one GB10,</strong> each on its own cores: SCIP (version 10, one core), the GPU EA
+  (CuPy; the GPU and one core) and cuOpt 26.08 (the GPU and three cores).</li>
+  <li><strong>The EA's population</strong> keeps a capped share of infeasible solutions whose objective is better than
+  the best feasible one, and protects the best feasible ones. An LP worker re-optimises the continuous variables of a
+  few candidates with their integers fixed (LP decoding, with HiGHS).</li>
+  <li><strong>Every incumbent is re-checked</strong> in exact arithmetic before it counts.</li>
+</ul>
+</section>
+
+<section id="findings">
+<h2>Main findings (interim)</h2>
+<figure>
+  <ul class="figlegend" aria-hidden="true">
+    <li><span class="sw coupled"></span>coupled system (<span class="nowrap">I-TREA II</span>): solid blue</li>
+    <li><span class="sw cuopt"></span>cuOpt alone, same cores and GPU: dashed orange</li>
+    <li><span class="sw scip"></span>SCIP alone, one core: dotted green</li>
+  </ul>
+  <div class="figscroll"><img src="figures/fig_pi.png" width="1600" height="590"
+       alt="Gap of the best solution over time on neos-3024952-loue, seeds 0 and 1. The coupled system (I-TREA II) falls to about 0.27 by 120 s; cuOpt alone stays near 0.73 to 0.77; SCIP alone stays at 1 (no solution). P(120): I-TREA II 0.539 and 0.538, cuOpt alone 0.740 and 0.779, SCIP alone 1."></div>
+  <p class="swipe">Swipe sideways for seed 1.</p>
+  <figcaption>Gap of the best solution over time on <code>neos-3024952-loue</code>, one of the 11 instances hard for
+  cuOpt alone, seeds 0 and 1 (“coupled system” = <span class="nowrap">I-TREA II</span>). P(120):
+  <span class="nowrap">I-TREA II</span> 0.539 and 0.538, cuOpt alone 0.740 and
+  0.779, SCIP alone 1 (no solution in 120&nbsp;s; 6 October). Chosen by a rule fixed before plotting: <span class="nowrap">I-TREA II's</span> P
+  closest to the hard set's mean. Reference: MIPLIB's optimum, 26,756. <a href="figures/fig_pi.png">Full-size
+  image</a>.</figcaption>
+</figure>
+<ul>
+  <li><strong>Phase 1 closed at its checkpoint with a go.</strong> Against cuOpt alone on the same cores and GPU, on the
+  11 instances hard for cuOpt alone: mean P(120) 0.690 → 0.550 (−20&nbsp;%), lower on 7, higher on 3, four seeds. Both
+  bars held: the ratio of mean P, 0.798 (needed ≤ 0.95), and the mean per-instance difference over all 17, +0.045
+  (needed ≥ −0.05); 136 runs, all valid (a crashed run is scored up to the crash). The bars only decide whether testing continues; they declare no success.
+  On 16 October the author decided to continue and froze the configuration.</li>
+  <li><strong>Adopted and frozen</strong> (<code>configs/frozen-v2.yaml</code>): the last two changes, added to the
+  13 October default, each tested alone first.
+  <em>LP decoding</em> re-optimises a candidate's continuous variables with its integers fixed (item_placement 0.330 →
+  0.198, sing44 0.473 → 0.411). <em>Yield</em> lets the EA's thread give up its core while it waits on the GPU, so the
+  LP worker on that core gets CPU time (adopted after a follow-up test with a loosened bar; see the paper,
+  Section 4.1). Not adopted: a GPU back-off beside cuOpt and a blocking GPU wait.</li>
+  <li><strong>The known loss:</strong> <code>chromaticindex1024-7</code>, 0.08 → 0.54 against cuOpt alone, because the
+  EA's GPU work delays cuOpt's first solution from 6.5–12.2&nbsp;s to 65&nbsp;s. Where cuOpt alone finds a solution
+  only on some seeds (doon 2 of 4, rail01 1 of 4), I-TREA II found none; the cause is not yet known.</li>
+  <li><strong>Open caveats, carried forward:</strong> how much of the gain needs the EA rather than cuOpt's own
+  solutions is not yet measured; cuOpt alone crashed on comp21-2idx on 3 of 4 seeds, with a segmentation fault (not
+  yet reported upstream; counted as its result, which favours I-TREA II there; on the other 10 hard instances: 6 better, 3 worse, <span class="nowrap">p = 0.055</span>);
+  two harm flags against the 13 October configuration: glass4 (read later, in one window, as day-to-day drift) and
+  comp21-2idx (at the edge of its band).</li>
+  <li><strong>Next — v1, by the end of November 2026:</strong> the frozen configuration on unseen hard instances, with
+  cuOpt 26.10, under rules fixed before the runs, plus our own external benchmark (every compared GPU arm on the same
+  cores and GPU, 600&nbsp;s). Planned after v1: two-way exchange with cuOpt through its solution callback, and GPU sharing
+  through CUDA MPS.</li>
+</ul>
+</section>
+
+<section id="read-more">
+<h2>Read more</h2>
+<dl class="more">
+  <dt><a href="https://github.com/Tideseed/i-trea-ii/blob/main/paper/main.pdf">Interim report on phase 1 (PDF)</a></dt>
+  <dd>15 pages: method, every tested change, the checkpoint result and its main loss, the benchmark harness.</dd>
+  <dt><a href="https://github.com/Tideseed/i-trea-ii#readme">README</a></dt>
+  <dd>The users' answer with all footnotes, how it works, quick start, repository map.</dd>
+  <dt><a href="https://github.com/Tideseed/i-trea-ii/blob/main/vault/30-results/2026-10-17%20Phase%201%20%E2%80%94%20development%20until%20C1.md">Phase 1 results note</a></dt>
+  <dd>Every number and caveat of phase 1.</dd>
+  <dt><a href="https://github.com/Tideseed/i-trea-ii/tree/main/vault/50-decisions">Decision records D-001 … D-033</a></dt>
+  <dd>Every design choice, test and reading, dated; most test rules were fixed before the runs, and the exceptions
+  are listed in the paper's Appendix A.</dd>
+  <dt><a href="https://github.com/Tideseed/i-trea-ii/blob/main/AGENTS.md">AGENTS.md</a></dt>
+  <dd>For AI agents working in the repository: terms, rules and the code map.</dd>
+</dl>
+</section>
+
+<section id="reproduce">
+<h2>Reproduce</h2>
+<p>Research code, tested on one DGX Spark (GB10, arm64); not a packaged solver. The coupled system needs Linux,
+Python 3.12 or later and an NVIDIA GPU with CUDA 13 (CuPy and the cuOpt 26.08 wheel); SCIP 10 (through PySCIPOpt) and
+HiGHS install with the package. The toy run below needs no GPU.</p>
+<pre><code>git clone https://github.com/Tideseed/i-trea-ii &amp;&amp; cd i-trea-ii
+uv venv &amp;&amp; source .venv/bin/activate
+uv pip install -e ".[dev,plots,gpu]"                                     # HiGHS, SCIP, CuPy, tests
+uv pip install -e ".[cuopt]" --extra-index-url https://pypi.nvidia.com   # cuOpt 26.08
+pytest -q                                                                # toy-scale; GPU tests skip without CuPy
+
+# toy run: SCIP alone, 10 s, no GPU
+python -c "from itrea.benchmarks.toy import knapsack, write_mps; write_mps(knapsack(), '/tmp/toy.mps')"
+itrea pair --instance /tmp/toy.mps --arm A0 --seed 0 --budget 10 --set smoke</code></pre>
+<p><strong>Your own instance:</strong> there is no supported way yet to run the coupled system on it. The runner pins
+its processes to fixed cores of the GB10 and starts them in systemd user scopes, and the coupled system needs CuPy and
+cuOpt; it has been run only on the study's instances, on one DGX Spark. The toy run above uses the same runner with SCIP alone.</p>
+<p>The study's chain: job files in <code>jobs/</code> → <code>itrea pool</code> → <code>itrea build-runs</code> (checks
+every incumbent) → the checkpoint readings (<code>tools/d031_report.py</code>) → <code>tools/paper_tables.py
+--check</code>. The raw runs (about 3.5&nbsp;GB) are to be published as a versioned archive; until then, re-running the
+job files on the public instances is a new replication, and wall-clock results will differ on other hardware. See the
+<a href="https://github.com/Tideseed/i-trea-ii#reproducibility">README</a>.</p>
+</section>
+
+<section id="cite">
+<h2>Cite</h2>
+<pre><code>@misc{orbay2026itrea2,
+  author       = {Orbay, Berk},
+  title        = {{I-TREA II}: a {GPU} evolutionary algorithm coupled with {MIP} solvers
+                  --- interim report on development (phase 1)},
+  year         = {2026},
+  month        = oct,
+  howpublished = {Interim report, 17 October 2026},
+  url          = {https://github.com/Tideseed/i-trea-ii/blob/main/paper/main.pdf}
+}</code></pre>
+</section>
+
+<footer>
+  <p>Berk Orbay. Designed and carried out with AgentRA (Agent Research Assistant; mainly Claude Opus 5.5, working
+  through Claude Code), under the author's direction.</p>
+  <p>Code under the <a href="https://github.com/Tideseed/i-trea-ii/blob/main/LICENSE">MIT License</a>. Prose and
+  figures (this site, the paper and the research vault) under
+  <a href="https://github.com/Tideseed/i-trea-ii/blob/main/LICENSE-CC-BY-4.0">CC BY 4.0</a>
+  (<a href="https://creativecommons.org/licenses/by/4.0/legalcode">Creative Commons Attribution 4.0 International</a>).
+  Benchmark data keeps its own terms: <a href="https://github.com/Tideseed/i-trea-ii/blob/main/datasets/README.md">data
+  sources and attribution</a>.</p>
+</footer>
+</main>
+</body>
+</html>

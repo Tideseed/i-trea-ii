@@ -1,7 +1,7 @@
 """Trajectory metrics: primal gap, primal integral P(T), primal-dual integral, times to target (vault D-002 §4,
 `10-design/Trace format and metrics.md`).
 
-Adapted from berkorbay/optopt@4dd48395, MIT (`src/optopt/analysis/metrics.py`): the gap, the integral on exact event
+Adapted from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/analysis/metrics.py`): the gap, the integral on exact event
 times (optopt's 2026-09-24 PDI correction — never round times before the lookup) and the time-to-target logic. What
 changed for I-TREA II, and why:
 

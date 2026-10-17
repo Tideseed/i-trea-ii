@@ -170,7 +170,7 @@ governor's own 85 °C line, a capped GPU clock voids a run, and a 600-s soak at 
   with both LLM servers stopped (measured LLM-off idle on 10-11: 36–45 °C) and the governor is alive; it closes after 2
   thermal or cap voids; if more than 3 % of blocks are skipped for heat over the campaign, runs stop and F is
   re-characterised. Daytime only (07:00–24:00), lease held, rests honoured.
-- **R27 — host safety layer.** Run scopes get unit names `itrea-run-<hash>-<role>-<epoch>`; [other repository]
+- **R27 — host safety layer.** Run scopes get unit names `itrea-run-<hash>-<role>-<epoch>`; the host's
   `thermal-watch` adds `itrea-run` to its 98 °C stop pattern (today it does not match our anonymous scopes). A run
   stopped that way is a **void** (cause `thermal_watch`), never an arm crash.
 - **R28 — thermal record.** Per window, the slices of the 5-s fine log and `fan-governor.log`, the governor's source
@@ -327,7 +327,7 @@ gates: governor alive, cap off, cap voids, `--pause-c`, `thermal_watch` void cau
 harness voids; per-arm start temperature and fan state in run.json; named scopes;
 a project-own CUDA JIT cache (`CUDA_CACHE_PATH`, `CUDA_CACHE_MAXSIZE`) and its entry check; `tools/derive_mipfeas_strata.py`; job writers for M1–M6 and the tiers; analysis (`pt_gams`
 at 600 / 300 on both clocks, shift 1/30, computed race, d_ε, sign test, stratified estimates, `.trc` export); the M0
-replay tool. Outside the repo: the one-line `thermal-watch` pattern edit in [other repository].
+replay tool. Outside the repo: the one-line `thermal-watch` pattern edit in the host's own tools.
 
 ## Review trail
 Blockers: M3 measured under the caps it sizes (now uncensored at 40 / 40 and a symmetric "does not fit F" list);
@@ -502,3 +502,5 @@ byte-identical old vs new (the base's 35,337 plan records and 961 pool blocks, r
 - **R16 (minor):** `gams_trc`'s docstring no longer claims bit-exact read-back by GAMS's `read_csv` (pandas' default
   parser: within ~1e-12 relative; exact with `float_precision="round_trip"`).
 - **Window skill (minor):** the CPU windows' memory is 4 × 9 + 20 = 56 GB (one lane 29), not "4 × 29".
+
+Redacted 2026-10-17 for publication: names of other services/projects replaced by neutral wording; meaning unchanged.

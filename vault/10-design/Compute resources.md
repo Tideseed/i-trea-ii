@@ -17,8 +17,8 @@ Other Claude Code sessions, the host's cron jobs and two local LLM servers use t
 
 | service | unit | port | memory | in a confirmatory window |
 |---|---|---|---|---|
-| vLLM serving Ornith-1.5-35B-A3B (NVFP4) | `ornith-vllm` | 8094 | tens of GB, GPU | **stopped** (Berk's yes, 2026-10-05 23:2x) |
-| llama.cpp serving Qwen3.8-27B (UD-IQ3_XXS) | `llama-qwen38` | 8092 | tens of GB, GPU | **stopped** |
+| vLLM serving a 35B-A3B mixture-of-experts model (NVFP4) | first of `gates.SERVING_UNITS` | 8094 | tens of GB, GPU | **stopped** (Berk's yes, 2026-10-05 23:2x) |
+| llama.cpp serving Qwen3.8-27B (UD-IQ3_XXS) | second of `gates.SERVING_UNITS` | 8092 | tens of GB, GPU | **stopped** |
 | Redis for the exchange (`itrea-redis`, image `redis:7-alpine`) | Docker container | 127.0.0.1:6390 | 2 GB cap, `maxmemory 1536mb` | running, pinned to A725 core 0 |
 
 With both LLM servers up, MemAvailable was about 20–22 GB (2026-10-05 23:00) — below the 30 GB start gate; with both
@@ -67,12 +67,17 @@ About 100 GPU runs per 10-hour night at 300 s plus ~60 s overhead. Per block the
 concurrently if E0 shows ≤ 3 % interference, else serially (+~2 nights). A3r on 8 instances × 2 seeds, A6 one seed,
 tuning (E1/E4) about one night, a 10 % rerun reserve. Total about 5–6 nights.
 
-## Record per window (filled as windows run)
-| window | when (CEST) | lease | LLM servers | runs | MemAvailable min | ACPI max | notes |
-|---|---|---|---|---|---|---|---|
-| W0 | 2026-10-05 23:46 → 2026-10-06 07:30 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38` | stopped (restore timer `itrea-restore-serving.timer` 07:30) | build tests and the SCIP screening pass only | — | — | open |
-| W-cl1 | 2026-10-08 11:07 → 14:08 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38`, --mem 48 | stopped 11:07:15–16, restored 14:04:54 by the chain, healthy and lease released 14:08:14 (timer `itrea-restore-serving.timer` 16:30 stopped) | GPU tests (86 + 6 elite) + D-016 pool: 3 runs void (first attempt 11:11–11:17, kernels compiled on the clock), then 54/54 (11:26–14:04) | 108.6 GB (gates before each run) | 83 °C | one fan-governor rest (12:0x); first attempt stopped with `logs/pool.stop`, chain killed first so it would not restore |
-| W-1009 | 2026-10-09 12:40 → 17:13 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38`, --mem 48 → 73 (re-claimed 14:11 until 17:15, 16:12 until 18:15) | stopped 12:40:14–17, restored 17:13:37 by `logs/chain-bo0.sh` (healthy, lease released, hold lines removed, canaries resumed) | D-016 seeds 2–3 48/48; lp_decode GPU tests + smoke 1; D-017 24/24; back-off GPU tests; D-018 stage 0 13/18 (comp21 block skipped by the deadline) — 0 void, 0 compile on the clock | ≥ 108 GB | 78 °C | fan-governor rests 14:10 and later; restore timer moved twice with the lease |
-| W-1009b | 2026-10-09 19:05 → 19:20 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38`, --mem 73 | stopped 19:06:02–04, restored 19:20:09 by `logs/chain-bo0b.sh` (verified) | D-018 stage 0 comp21 block 5/5 (13 earlier runs skipped) — 0 void, 0 compile on the clock | ≈ 110 GB | — | Berk: "go ahead for one more hour" |
-| W-1011 | 2026-10-11 09:40 → 13:43 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38`, --mem 73 | stopped 09:40:29–31, restored 13:43:32 by `logs/chain-bo1.sh` (healthy, is-enabled, lease released, hold lines removed, canaries resumed; verified 14:06) | D-018 stage 1: seed 0 42/42, seed 1 40 + 2 failed (cuOpt RMM 12-GB limit, ca) — 0 void, 0 compile on the clock | ≥ 106.9 GB | 79 °C (30-s log; 87 °C in the 5-s log at 09:41:44, a fan-AUTO start) | fan-governor rests 10:11 (10 min), 10:54 (20), 11:47 (30), 12:49 (30); both seeds in one lease as two pools |
-| W-1011b | 2026-10-11 15:10 → 18:17 | `i-trea-ii (Claude Code)`, stops `ornith-vllm,llama-qwen38`, --mem 101 | stopped 15:10:41–42, restored 18:16:59 by `logs/chain-itx-m23.sh` (healthy, is-enabled, lease released, hold lines removed, canaries resumed; verified 18:2x) | D-021 M1 smoke 12/12, M2 soak 4/4 (`--pause-c 90`), M3 memory probe 6 + 2 cap hits (recorded, not voided) — 0 void, 0 compile on the clock | ≈ 110 GB | 78.5 °C (M1 in-run); M2 steady p95 ≤ 73 °C, max 76 °C | fan-governor rests 15:43 (20 min), 16:34 (20 min); first window under D-021's gates (governor alive, cap off, cap voids) |
+## Conditions per window (to 2026-10-11)
+What ran in each window and under which conditions: the lowest MemAvailable, the highest ACPI temperature, and what
+affected the runs' validity. The windows' logistics (lease, server stop and restore times, chains, timers) are
+operational notes, kept in the private operations repository `Tideseed/i-trea-ii-ops`. From W-1012 on, a window's
+conditions are recorded with its runs: in the result note and the [[Experiment index]].
+
+| window | when (CEST) | local LLM servers | runs | MemAvailable min | ACPI max | notes on validity |
+|---|---|---|---|---|---|---|
+| W0 | 2026-10-05 23:46 → 2026-10-06 07:30 | stopped | build tests and the SCIP screening pass only | — | — | not recorded |
+| W-cl1 | 2026-10-08 11:07 → 14:08 | stopped | GPU tests (86 + 6 elite) + D-016 pool: 3 runs void (first attempt 11:11–11:17, kernels compiled on the clock), then 54/54 (11:26–14:04) | 108.6 GB (gates before each run) | 83 °C | one fan-governor rest (12:0x); the first attempt was stopped and its 3 runs voided |
+| W-1009 | 2026-10-09 12:40 → 17:13 | stopped | D-016 seeds 2–3 48/48; lp_decode GPU tests + smoke 1; D-017 24/24; back-off GPU tests; D-018 stage 0 13/18 (comp21 block skipped by the deadline) — 0 void, 0 compile on the clock | ≥ 108 GB | 78 °C | fan-governor rests from 14:10 |
+| W-1009b | 2026-10-09 19:05 → 19:20 | stopped | D-018 stage 0 comp21 block 5/5 (13 earlier runs skipped) — 0 void, 0 compile on the clock | ≈ 110 GB | — | — |
+| W-1011 | 2026-10-11 09:40 → 13:43 | stopped | D-018 stage 1: seed 0 42/42, seed 1 40 + 2 failed (cuOpt RMM 12-GB limit, ca) — 0 void, 0 compile on the clock | ≥ 106.9 GB | 79 °C (30-s log; 87 °C in the 5-s log at 09:41:44, a fan-AUTO start) | fan-governor rests 10:11 (10 min), 10:54 (20), 11:47 (30), 12:49 (30) |
+| W-1011b | 2026-10-11 15:10 → 18:17 | stopped | D-021 M1 smoke 12/12, M2 soak 4/4 (`--pause-c 90`), M3 memory probe 6 + 2 cap hits (recorded, not voided) — 0 void, 0 compile on the clock | ≈ 110 GB | 78.5 °C (M1 in-run); M2 steady p95 ≤ 73 °C, max 76 °C | fan-governor rests 15:43 (20 min), 16:34 (20 min); first window under D-021's gates (governor alive, cap off, cap voids) |

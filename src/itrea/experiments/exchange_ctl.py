@@ -2,7 +2,7 @@
 
 The container `itrea-redis` is this project's own (image `redis:7-alpine`, already on the host — never pulled):
 loopback port 6390, no persistence, `maxmemory 1536mb noeviction`, a 2 GB cap, pinned to A725 core 0 (never a timed
-X925 core), `--restart no`. The host runs other Redis instances ([secrets manager], fhub, buzz) that belong to other services;
+X925 core), `--restart no`. The host runs other Redis instances that belong to other services;
 this module only ever touches the container named `itrea-redis` and only keys under `itrea:<run_id>:`.
 
     python -m itrea.experiments.exchange_ctl up        start (or create) itrea-redis and wait for PING

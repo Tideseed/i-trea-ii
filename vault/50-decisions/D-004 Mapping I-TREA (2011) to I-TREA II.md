@@ -1,11 +1,15 @@
-# D-004 Mapping I-TREA (2015) to I-TREA II (2026-10-05, after reading the manuscript)
+# D-004 Mapping I-TREA (2011) to I-TREA II (2026-10-05)
+
+**Source for part I:** Berk Orbay's open M.S. thesis (METU, 2011; `orbay2011itrea`, hdl:11511/20509,
+https://open.metu.edu.tr/handle/11511/20509): ranks §5.3, crossover §5.6.2, mutation with Forced Closure and Second
+Chance §5.6.3, the elimination order §5.6.5, the interactive process §5.6.6, termination §5.6.7, "overly elitist" §7.1.
 
 **Status:** record of where the defaults came from. **Narrowed by [[D-007 Main claim — the coupling beats either method
 alone]] (Berk, 2026-10-06):** part I is the starting point only; the principle that carries over is keeping good
 infeasible solutions (Rank 0). Faithfulness to the rest is not a goal — every row below is an ordinary parameter, tuned
 on the tuning set; the "part-I-faithful configuration" is no longer a planned comparison.
 
-| I-TREA (2015) | I-TREA II (2026) | parameter | faithful? |
+| I-TREA (2011 thesis) | I-TREA II (2026) | parameter | faithful? |
 |---|---|---|---|
 | two objectives (coverage, #facilities) | one objective, the MIP's; "dominated by a feasible solution" ⇔ key ≥ best feasible key | — | adapted |
 | Rank 0 infeasible good: not dominated by any feasible solution | infeasible, key < incumbent key (population's or the solver's) | — | yes |

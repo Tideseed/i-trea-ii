@@ -31,7 +31,7 @@ EA -> solver rows (`to_solver`) carry the EA's uint16 origin bits; in arm A9 (D-
 vector also carries POST_CUOPT (bit 16, above every EA bit: the message's origin is int64), so SCIP records the
 incumbent it makes as source "cuopt", not "ea".
 
-Adapted in part from berkorbay/optopt@4dd48395, MIT (`src/optopt/solvers/common.py`: the gzip JSON solution format
+Adapted in part from berkorbay/optopt@2a3348c0a102, MIT (`src/optopt/solvers/common.py`: the gzip JSON solution format
 and its "never fail the run" rule).
 """
 from __future__ import annotations

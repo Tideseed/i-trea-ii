@@ -44,7 +44,7 @@
   "acpi_max_c": 42.8,
   "lease": {
    "who": "i-trea-ii (Claude Code)",
-   "why": "I-TREA II development: adaptive strategy + LP stream (D-011) on the dev set; [local LLM agent] stopped, [local LLM agent] up",
+   "why": "I-TREA II development: adaptive strategy + LP stream (D-011) on the dev set; the llama.cpp server stopped, the vLLM server up",
    "until": "2026-10-06T17:50:00+02:00",
    "stops": "llama-qwen38",
    "mem": 50,
@@ -117,7 +117,7 @@
   },
   "kernel": "6.17.0-1031-nvidia",
   "machine": "aarch64",
-  "hostname": "spark-865d",
+  "hostname": "dgx-spark (redacted)",
   "hardware": "NVIDIA DGX Spark (GB10: 10x Cortex-X925 + 10x Cortex-A725, 128 GB unified memory)",
   "git": {
    "revision": "2cac6bc6b789ced01e78f65da51719ee23e09353",

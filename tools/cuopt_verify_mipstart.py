@@ -1,8 +1,8 @@
 """cuOpt 26.08 MIP-start + stopping check (< 2 min on the GPU). NOT RUN by the research subagent (GPU forbidden there).
 
-Run only inside a box-window lease held by i-trea-ii, below 80 C, with nothing else on the GPU lane:
-    cd /home/coulson/git_repositories/i-trea-ii
-    OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python /tmp/itrea-cuopt/verify_mipstart.py
+Run only inside a box-window lease held by i-trea-ii, below 80 C, with nothing else on the GPU lane; from the
+repository root:
+    OMP_NUM_THREADS=1 taskset -c 1-3 .venv/bin/python tools/cuopt_verify_mipstart.py
 GPU: RMM limit 12 GB (cuOpt asks for ~5.6-6 GB peak on glass4/warm-up, traces/raw/dev/glass4__A6__*).
 Wall: ~8 solves x 3 s + ~5 s start-up, all in ONE process (one CUDA context).
 
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/home/coulson/git_repositories/i-trea-ii")
+ROOT = Path(__file__).resolve().parents[1]   # the repository root (this file is tools/cuopt_verify_mipstart.py)
 INST = ROOT / "data/miplib/inst/glass4.mps.gz"
 SRC = ROOT / "traces/raw/dev/glass4__A6__s0__120s__6e35f122f659/cuopt.incumbents.npz"
 OUT = Path("/tmp/itrea-cuopt/verify_out")

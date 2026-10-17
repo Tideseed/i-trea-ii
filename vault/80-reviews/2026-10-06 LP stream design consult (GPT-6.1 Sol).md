@@ -2,8 +2,8 @@
 
 **What:** before building [[D-011 Solver streams good infeasible solutions to the EA]], the design question was put to
 Hermes Agent with OpenAI GPT-6.1 Sol (reasoning high), one-shot (`hermes -p gpt chat --oneshot`), 2026-10-06 15:17,
-on Berk's suggestion ("You can use [local LLM agent] to help with the development btw"). The brief contained only the design,
-public instance names and our own measurements — no keys, no private data. Answer received ~15:24.
+on Berk's suggestion ("You can use [the hosted GPT agent] to help with the development btw"). The brief contained only
+the design, public instance names and our own measurements — no keys, no private data. Answer received ~15:24.
 
 **Correction to the brief:** it quoted ~0.1 s per LP read on 117k variables; measured minutes later: ~0.4 µs per
 variable (16.5 ms on radiationm18-12-05, ~50 ms on rail01). The throttling advice is relative, so it stands.

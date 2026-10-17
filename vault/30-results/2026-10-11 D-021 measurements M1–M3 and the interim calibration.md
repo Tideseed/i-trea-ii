@@ -20,20 +20,21 @@ harness and the heat, not for a comparison.
   on the 6 strata-0–1 instances run so far, passes: median first-incumbent offset ours − GAMS −0.119 s (rule
   ≤ +0.3 s); 4 strata-0–1 instances remain (neos-1171448, p200x1188c, seymour, swath3). The footprint ratio R on the
   call clock is 1.390 [1.081, 1.837] over the 19 (1.416 [1.087, 1.903] over the 18 read at 14:4x and quoted in the
-  journal 2026-10-13 14:4x, AGENTS.md and the 2026-10-13 16:00 checkpoint); no INSIDE / OUTSIDE reading is made before 30 of 30.
+  journal 2026-10-13 14:4x, AGENTS.md and the session checkpoint of 2026-10-13 16:00, kept in the private operations
+  repository); no INSIDE / OUTSIDE reading is made before 30 of 30.
 
 ## What ran
 Every pool: `.venv/bin/python -m itrea.experiments.pool <job file> --layout pair --deadline HH:MM` from a chain script
 in `logs/` (not in git), inside a box-window lease held by `i-trea-ii (Claude Code)` with both local LLM servers
-(`ornith-vllm`, `llama-qwen38`) stopped. Run hashes as recorded in the run table (`run_hash`; for the cuOpt-only arms
-it equals `config_hash`).
+(vLLM and llama.cpp; units in `gates.SERVING_UNITS`) stopped. Run hashes as recorded in the run table (`run_hash`; for
+the cuOpt-only arms it equals `config_hash`).
 
 | | when (CEST) · pool | command (chain) | job file · sha256 | instances × arms @ run hash × seed × T | runs | code (`src/`) |
 |---|---|---|---|---|---|---|
 | **M1** smoke | 10-11 15:12–15:33 · 20261011-151204-1160038 | `pool jobs/itx-m1.jsonl --layout pair --deadline 21:00` (`chain-itx-m1.sh`) | `jobs/itx-m1.jsonl` (1c6a684) · `c5575608a773…` | fhnw-binpack4-48, glass4, radiationm18-12-05 × {A9@m1 `28e5a5e9c725` (EA config `0f011a2094a2`), A6F@m1 `82a371305f88`, A6F@m1env `ffae965f6746` (thread variables kept), A2F@m1 `d4d89da16786`} × seed 0 × 120 s, harness ext | 12 / 12 | merge 0708835 (recorded HEADs ba356f6 / 0708835 differ only outside `src/`, `configs/`, `jobs/`, `tools/`) |
 | **M2** soak | 10-11 15:35–16:34 · 20261011-153534-1276706 | `pool jobs/itx-m2.jsonl --layout pair --pause-c 90 --deadline 21:00` (`chain-itx-m23.sh`) | `jobs/itx-m2.jsonl` (1c6a684) · `870ef274a4c8…` | comp21-2idx, neos-4763324-toguru × {A9@m2 `28e5a5e9c725`, A6F@m2 `82a371305f88`} × seed 0 × 600 s, AB / BA written as positions, harness ext | 4 / 4 | 7998ab4 (recorded 266b9cf / 7998ab4) |
 | **M3** memory probe | 10-11 16:34–18:13 · 20261011-163415-1522373 | `pool jobs/itx-m3.jsonl --layout pair --deadline 21:00` (same chain) | `jobs/itx-m3.jsonl` (2fd1809) · `b2e4cf10d96b…` | R29's 8 instances × A6F@m3 `d3aba2773933` (cuOpt RMM 40 GB / host 40 GB, `cuopt_memory_void: false`: a cap hit is recorded, not voided) × seed 0 × 600 s | 8 (6 completed + 2 cap hits) | 7998ab4 (recorded 0613d58) |
-| **M4** calibration, part 1 | 10-12 12:06–12:40 · 20261012-120607-2036840 | `pool jobs/itx-m4.jsonl --layout pair --deadline 22:30` (`chain-itx-m4.sh`) | `jobs/itx-m4.jsonl` (1c6a684) · `a8f02cb7e0e2…` | D-020's 30-instance sample × A6F `82a371305f88` (harness ext: cuOpt gaps 0, thread variables unset, RMM 24 GB / host 24 GB, the project CUDA cache) × seed 0 × 600 s, set `mipfeas` | 5, then stopped (stop file, for [other project]) | 4c3e9fd's runner (recorded 136dba6 / 90b9b72) |
+| **M4** calibration, part 1 | 10-12 12:06–12:40 · 20261012-120607-2036840 | `pool jobs/itx-m4.jsonl --layout pair --deadline 22:30` (`chain-itx-m4.sh`) | `jobs/itx-m4.jsonl` (1c6a684) · `a8f02cb7e0e2…` | D-020's 30-instance sample × A6F `82a371305f88` (harness ext: cuOpt gaps 0, thread variables unset, RMM 24 GB / host 24 GB, the project CUDA cache) × seed 0 × 600 s, set `mipfeas` | 5, then stopped (stop file, for another project's session) | 4c3e9fd's runner (recorded 136dba6 / 90b9b72) |
 | **M4** calibration, part 2 | 10-13 12:32–15:16 · 20261013-123201-3850111 | the same command, resumed (`chain-itx-m4b.sh`; the pool skips completed blocks) | same | same | 14 (+ 5 skipped as done), then stopped (stop file, D-024 rule 0) | 999995f's runner = merge 6f0339d's `src/` (recorded 756944f / 999995f / f6dfcf5) |
 
 Job files' sha256 in full (`sha256sum jobs/itx-m*.jsonl`, 2026-10-13):
@@ -47,19 +48,19 @@ definitive end) was merged between them. A6F's plan and run hash are the same on
 check), and R12 and the kill are off under the `ext` harness, so the 19 runs are one set. `src/` and `configs/` are
 unchanged from 999995f to fd75476.
 
-**Windows** (rows W-1011b, W-1012, W-1013 belong in [[Compute resources]]):
+**Windows** (W-1011b is also in [[Compute resources]]):
 - **W-1011b** (10-11 15:10 → 18:17): lease `--mem 101` (M3's A6F at RMM 40 / host 40), both servers stopped
   15:10:41–42, MemAvailable ≈ 110 GB; GPU tests before M1: `test_cuopt_run.py` (with `ITREA_TEST_CUOPT_GPU_GB=8`),
   `test_pair.py`, `test_three_way.py` — 3 + 3 passed. Restored by the chain 18:13:38–18:16:59 and verified (both units
   active and enabled, :8094 and :8092 healthy, lease free, no hold lines). Fan-governor rests 15:43 (20 min), 16:34
   (20 min), 17:25 (30 min; the M3 pool waited 17:28:34–17:55:17).
 - **W-1012** (10-12 12:05 → 12:43): lease `--mem 69`, servers stopped 12:05:51–52, MemAvailable 110 GB. Paused after
-  5 runs at the request of the [other project] session: [other project]'s hosted model had run out of [hosted model provider] credit and its
-  fallback was `ornith-vllm`, so [other project] on Slack could not answer anyone. Stop file 12:32, pool stopped 12:40:21, servers
+  5 runs at the request of another project's session: its chat agent's hosted model had run out of credit and its
+  fallback was the vLLM server, so the agent could not answer anyone. Stop file 12:32, pool stopped 12:40:21, servers
   restored 12:40:31–12:43:52 (healthy, enabled, canaries resumed, lease released).
 - **W-1013** (10-13 from 12:31; lease until 23:00, moved to 23:45): `--mem 97` (D-022's A9 follows), servers stopped
-  12:31:04–05, MemAvailable 110 GB. Possible because [other project] has answered with Claude Haiku 5.5 on the Anthropic
-  API since 09:32 (Berk's decision). GPU tests before the pool: `test_cuopt_run`, `test_pair`, `test_three_way`,
+  12:31:04–05, MemAvailable 110 GB. Possible because that project's agent has answered with a hosted model
+  since 09:32 (Berk's decision). GPU tests before the pool: `test_cuopt_run`, `test_pair`, `test_three_way`,
   `test_ref_stop` (4 passed, 1 skipped) and one cold-cache EA test (passed). The pool waited on the fan governor's rest
   flag 13:03:59–13:12:30, 13:53:09–14:05:30 and 14:45:46–15:05:49. Stop file 15:11 (D-024 rule 0); the M4 pool ended
   15:15:56 after its current run, and the window went on with D-022 (set `itx-r13`, from 15:16) — not part of this note.
@@ -167,7 +168,7 @@ Per instance (P = GAMS's integral `pt_gams`, 0–2, T = 600 s; "first inc." in s
 | 5 | satellites2-60-fs | — | — | 0.5090 | — | 0.201 |
 | 5 | supportcase22 | 2.0000 | 2.0000 | 2.0000 | — | — |
 
-| reading | 19 instances (at the stop) | 18 instances (read 14:4x; journal 2026-10-13, AGENTS.md, checkpoint 2026-10-13 16:00) |
+| reading | 19 instances (at the stop) | 18 instances (read 14:4x; journal 2026-10-13, AGENTS.md) |
 |---|---|---|
 | R = (SGM_ours + 0.001) / (SGM_GAMS + 0.001), call clock [95 % bootstrap] | **1.390 [1.081, 1.837]** | 1.416 [1.087, 1.903] |
 | R, launch clock | 2.036 [1.572, 2.654] | 2.118 [1.629, 2.799] |
@@ -255,8 +256,9 @@ Both directions of a tolerance mismatch between our checker and the solvers turn
 - The M4 steady-state p95 above was computed for this note by hand from the host log, not by the pool.
 
 ## Failures
-- M4 did not finish: paused 10-12 after 5 runs for [other project] (a user-facing service that needed `ornith-vllm`);
-  stopped 10-13 after 19 runs under D-024 rule 0 — Berk (15:1x): **"We shall also always aim for performance runs
+- M4 did not finish: paused 10-12 after 5 runs for another project's session (a user-facing service that needed the
+  vLLM server); stopped 10-13 after 19 runs under D-024 rule 0 —
+  Berk (15:1x): **"We shall also always aim for performance runs
   unless something structural is buggy in our experimentation methodology."** Its late-clock check had passed. The
   remaining 11 runs are owed: the 4 strata-0–1 instances before v1's first external run (the clock every v1 decision
   reads), the rest to fill otherwise idle daytime hours; the footprint ratio stays INCOMPLETE until 30 of 30.

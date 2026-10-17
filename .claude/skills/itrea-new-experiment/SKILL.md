@@ -11,8 +11,8 @@ description: >
 
 ## 1. Is it allowed, and is it pre-registered?
 - Read `vault/50-decisions/D-002 Pre-registration — hypotheses, arms, analysis.md` (current version) and the newest
-  checkpoint. Is this experiment in the plan (which phase, which hypothesis or gate)? If not, it is **exploratory**:
-  say so in its id, journal entry and result note — or write a decision record first if it changes the plan.
+  session checkpoint (in the private operations repository; skill `itrea-journal`). Is this experiment in the plan
+  (which phase, which hypothesis or gate)? If not, it is **exploratory**: say so in its id, journal entry and result note — or write a decision record first if it changes the plan.
 - Order of gates (D-002 §1): toy tests pass → tag `prereg-v1` → screening → `pool-v1` → references → E0b → E1 gate →
   E4 → `frozen-e2` → E2/E3. Nothing timed on a candidate instance before `prereg-v1`; nothing on the test set before
   `frozen-e2`. `prereg-v1` is tagged (2026-10-06); screening stage 1 ran, stage 2 and the pool freeze are deferred (#1).
@@ -38,8 +38,8 @@ description: >
   - **The hint is written before the runs start:** one one-sided threshold on the targeted runs' own data (e.g. v1
     stage 1's ratio of call-clock `pt_gams` A9 / A6F ≤ 0.95 on the panel + the 5 no-solution instances, D-024's
     addendum; C1's hint is the counterexample — its threshold, ratio of means ≤ 0.95 on the fixed 11, was fixed at
-    15:28:42 after the itx-r13 pool had started at 15:16:11, with 7 of 58 runs done and none read: a near miss in
-    `vault/60-incidents/Mistakes and incidents.md`), the fixed instance set it reads (never
+    15:28:42 after the itx-r13 pool had started at 15:16:11, with 7 of 58 runs done and none read: a near miss, logged
+    in the incident log of the private operations repository), the fixed instance set it reads (never
     re-selected on the runs it judges), how failures and skipped blocks count, and **what it gates** (which line widens,
     which stage runs anyway — v1's guard-only stage runs whatever the hint says). A hint is **futility-only**: it gates
     widening and never declares success; the decisive reading comes later on all instances, the targeted ones
@@ -49,8 +49,9 @@ description: >
   - **Never read a run before the rule is fixed.** The rule and the hint are written, with their numbers, before the
     job file that serves them is launched (D-024 rule 2). If a rule is found missing or wrong while runs execute — a
     recovery, not a permission — fix it before any run of the set is read, date the amendment, state how many runs are
-    done and that none were read, and log the near miss in the incident log (D-022's second amendment: 7 of 58 done,
-    none read). After any reading, a change is a stated deviation or a new record, never a silent re-reading.
+    done and that none were read, and log the near miss in the incident log (private operations repository; D-022's
+    second amendment: 7 of 58 done, none read). After any reading, a change is a stated deviation or a new record,
+    never a silent re-reading.
   - **Breadth no decision reads is not run** (D-024 rule 4): A0 runs only on the instances a comparison reads (v1: the
     81 of H_cu ∪ W_SCIP unseen, the stage-1 instances first; with no hint only the 25 stage-1 instances, D-024 (f)).
 - Timeline (D-019, GitHub milestones `C1 checkpoint (2026-10-23)` and `v1 (end of November 2026)`): development on cuOpt

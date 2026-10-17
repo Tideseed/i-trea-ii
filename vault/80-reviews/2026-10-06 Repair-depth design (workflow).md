@@ -524,7 +524,7 @@ ACCESS NOTES. The live hosts served bot challenges to this machine (not bypassed
 
 ## Code map (verbatim)
 
-**budget_semantics.** Paths are relative to /home/coulson/git_repositories/i-trea-ii. Numbers labelled MEASURED come from the 36 run dirs traces/raw/dev/*__A3@lps{0,1}__*: their ea.summary.json and the `seconds` field of their `gen` events. The scripts that read them are in /tmp/itrea-design/ (gen_stats.py, calls.py, phases.py, series.py, chunks.py).
+**budget_semantics.** Paths are relative to the repository root. Numbers labelled MEASURED come from the 36 run dirs traces/raw/dev/*__A3@lps{0,1}__*: their ea.summary.json and the `seconds` field of their `gen` events. The scripts that read them are in /tmp/itrea-design/ (gen_stats.py, calls.py, phases.py, series.py, chunks.py).
 
 DEFAULTS (src/itrea/config.py RepairCfg 115-138):
 - method "fj" (117)
@@ -902,7 +902,7 @@ FITS THE CODE:
 - The GPU kernel takes these as np.int64 kernel arguments and the CPU path passes int(...) into the same Numba signature, so nothing recompiles.
 - The per-individual strategy gene (row scale x LP guidance) is orthogonal and untouched.
 
-**implementation.** Paths are relative to /home/coulson/git_repositories/i-trea-ii. Nothing here has been written; the repository is untouched.
+**implementation.** Paths are relative to the repository root. Nothing here has been written; the repository is untouched.
 
 1. src/itrea/config.py
 - New dataclass `RepairDepthCfg` with these fields and defaults:
@@ -1199,7 +1199,7 @@ DETERMINISM
 - Sudholt: no fixed depth is safe a priori.
 - Structural difference from those bandits: playing a level reveals every shallower level exactly, so exploration is needed only upward.
 
-**implementation.** Nothing has been edited. All paths are relative to /home/coulson/git_repositories/i-trea-ii.
+**implementation.** Nothing has been edited. All paths are relative to the repository root.
 
 CONFIG — src/itrea/config.py
 - New dataclass RepairClockCfg, top-level field `repair_clock` on EAConfig beside strategy and lp_stream. Fields:

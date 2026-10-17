@@ -123,7 +123,8 @@ Fixed now, before anyone reads an itx-r13 run:
 The headings above give approximate times. From git: the first amendment was committed at 15:10:01 (15a5c81), the
 second amendment ("15:3x" above) at 15:28:42 (f52e3e8) and the one-sided floor-limb clarification ("16:0x" above) at
 15:44:09 (fd75476). The itx-r13 pool started at 15:16:11; when the second amendment was committed, 7 of its 58 runs were
-done and none had been read. The checkpoint 2026-10-13-1600 and the incident log quote the commit times.
+done and none had been read. The session checkpoint of 2026-10-13 16:00 and the incident log (both kept in the
+private operations repository) quote the commit times.
 
 ## Result (2026-10-13 22:2x, final; all 74 runs) — ADOPT R13 + R14 for A9; C1: hint present, guard holds
 **Runs.** Window W-1013, both LLM servers stopped: pool `20261013-151610-335372` (`jobs/itx-r13.jsonl`, 58 runs,

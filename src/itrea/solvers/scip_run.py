@@ -8,7 +8,7 @@ seed parameter varied, as in optopt; common random numbers across arms of a bloc
 
 Why the exchange is a heuristic plugin. Solutions can enter SCIP safely only where SCIP calls a primal heuristic:
 optopt's event-handler injection crashed SCIP on 9 of 80 instances per arm (2026-09-23), the heuristic route
-(`_XchgHeur`, adapted here from berkorbay/optopt@4dd48395, MIT, `src/optopt/solvers/scip.py`) never did. The plugin's
+(`_XchgHeur`, adapted here from berkorbay/optopt@2a3348c0a102, MIT, `src/optopt/solvers/scip.py`) never did. The plugin's
 timing mask BEFOREPRESOL | DURINGPRESOLLOOP | BEFORENODE | DURINGLPLOOP | AFTERLPNODE also covers presolve and the
 root cut loop (critique, systems lens: "SCIP injection window"). There is no callback inside a single simplex solve,
 so an instance that spends long in one root LP has no exchange window; the callback statistics in the summary
@@ -116,7 +116,7 @@ def _parse_emphasis(name: str | None):
 
 def apply_emphasis(m, name: str | None) -> None:
     """Applied BEFORE every other parameter: setEmphasis(DEFAULT-like) calls may reset limits and seeds.
-    Adapted from berkorbay/optopt@4dd48395, MIT (`EMPHASIS` in src/optopt/solvers/scip.py)."""
+    Adapted from berkorbay/optopt@2a3348c0a102, MIT (`EMPHASIS` in src/optopt/solvers/scip.py)."""
     from pyscipopt import SCIP_PARAMEMPHASIS, SCIP_PARAMSETTING
     e = _parse_emphasis(name)
     if e is None:

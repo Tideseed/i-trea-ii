@@ -4,7 +4,7 @@
   algorithm (EA) beside exact MIP solvers — SCIP, and in arm A9 also NVIDIA cuOpt — on one NVIDIA DGX Spark. It asks
   whether the coupling lifts each solver's weakest cases.
 - **Who and where.** Research project by Berk Orbay (berk.orbay@tideseed.com). Repository `Tideseed/i-trea-ii`
-  (private while the study runs).
+  (public); its website, built from `docs/`, is https://tideseed.github.io/i-trea-ii/.
 - **Code and paths.** The code is the Python package `itrea` under `src/`; paths are relative to the repository root.
 
 **This file holds every rule for agents working in the repository** (`CLAUDE.md` points here). Read "At a glance" and
@@ -44,7 +44,7 @@ defined in "Terms" right after this block.
 - **Pin anything you run beside timed runs.** Never run analysis with default thread counts beside timed runs, and keep
   CPU work off the run cores. The concrete form is `OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .venv/bin/python …`:
   cores 10–14 are A725 (efficiency) cores outside the timed-run lanes, except the whole-box A6m calibration lane, and
-  other sessions' CPU-heavy jobs go there too (agreed with the [other project] session 2026-10-15 19:0x).
+  other sessions' CPU-heavy jobs go there too (agreed with another project's forecasting session 2026-10-15 19:0x).
 - **Pausing a pool is not ending a window.** `logs/pool.stop` stops a pool; a chain script that tests it then restores
   the servers. To pause or cut a pool inside a window, kill the chain by its PID first.
 - **Never `pkill -f` / `pgrep -f` from an agent shell**: the pattern matches the shell itself.
@@ -53,8 +53,9 @@ defined in "Terms" right after this block.
 - **No commits to `src/` or `configs/` while a pool can launch runs** (a chained pool included). Develop in a git
   worktree; merge after the pool has ended.
 - **Commit identity:** author and committer `Berk Orbay <5690139+berkorbay@users.noreply.github.com>` (his GitHub
-  noreply), no Claude trailer (`vault/90-checkpoints/2026-10-06-0300.md`). Berk's standing permission (2026-10-06
-  18:5x): commits, pushes and issue management in this repository without asking (`vault/90-checkpoints/2026-10-06-1700.md`).
+  noreply), no Claude trailer (optopt's convention; issue #11). Berk's standing permission (2026-10-06 18:5x): commits,
+  pushes and issue management in this repository without asking. Both are recorded in the session checkpoints of
+  2026-10-06, kept in the private operations repository (see "Where things are").
 - **New GPU code:** the GPU cold-cache tests run inside the window before the first timed run, and must reach the new code.
 - **Trap: the old job-writer default.** `make_jobs.ITX_A9_CONFIG` keeps naming `configs/itrea2-dev-rc-3way.yaml` (the
   old default) on purpose: it is the historical baseline the committed job files were written with (D-033). A writer
@@ -65,7 +66,7 @@ defined in "Terms" right after this block.
 - **Redis:** only the project's own container `itrea-redis` on 127.0.0.1:6390.
 
 **Data and the outside world**
-- **No downloads** (instances, wheels, models) without Berk's explicit ask. **No customer data** (customer) anywhere.
+- **No downloads** (instances, wheels, models) without Berk's explicit ask. **No customer or third-party data** anywhere.
 - **No personal data to outside services** (no e-mail address to any API).
 - **Upstream reports and submissions** (issues, PRs, MIPLIB solutions, arXiv): draft in `vault/70-upstream/`; file only
   with Berk's yes for that one post.
@@ -79,12 +80,15 @@ defined in "Terms" right after this block.
   any confirmatory run.
 - **The test set runs only with the frozen configuration.** Tuning happens on the tuning set only, within the logged E4 budget.
 - **Development results are descriptive.** Label them interim.
-- **Record everything:** journal (append-only), decision records D-NNN, a result note per experiment with its failures,
-  incidents. Skills `itrea-journal`, `itrea-result-note`.
+- **Record everything; research in public, operations in private.** The public journal holds research developments
+  only (Berk 2026-10-17: "Journal must keep only the developments regarding the problem not procedural stuff.");
+  decision records D-NNN and a result note per experiment, failures included, stay public. Operational notes (box
+  windows, leases, server stops, coordination, checkpoints, the incident log) go to the private repository
+  `Tideseed/i-trea-ii-ops`. Skills `itrea-journal`, `itrea-result-note`.
 
 **Writing and publication**
 - Plain, precise English, no hype; never claim "first" or "novel".
-- Author line: Berk Orbay. **No [organisation] in publications** (see "Writing rules").
+- Author line: Berk Orbay. **No other organisation named in publications** (see "Writing rules").
 - Name harnesses and models plainly, e.g. "Claude Code (Anthropic Claude Opus 5.5)"; no internal agent pseudonyms.
 - Cite only works with a legally readable full text (skill `itrea-literature`).
 - Updates to Berk open with a Performance block (Good news / Bad news); quantified, never adjectives.
@@ -178,11 +182,13 @@ window, run analysis pinned: `OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 .ven
 | CPU tests in a worktree beside a pool | `CUDA_VISIBLE_DEVICES="" PYTHONPATH=$PWD/src OMP_NUM_THREADS=1 nice -n 19 taskset -c 10-14 ../i-trea-ii/.venv/bin/python -m pytest -q -m "not gpu"` | on cores outside the run lane (10–14) |
 | GPU tests | `pytest -q -m gpu`, inside the lease | includes the cold-cache tests (see "Validity of a run") |
 
-**Run a window** (skill `itrea-window`; a full example chain: `logs/chain-1016.sh`)
+**Run a window** (skill `itrea-window`; a full example chain: `logs/chain-1016.sh`). The two LLM servers' systemd units
+are named in `SERVING_UNITS` (`src/itrea/experiments/gates.py`); this sets `$U1` (vLLM, :8094) and `$U2` (llama.cpp,
+:8092): `read U1 U2 < <(.venv/bin/python -c 'from itrea.experiments.gates import SERVING_UNITS as u; print(*u)')`.
 
 | step | command |
 |---|---|
-| 1. claim the lease | `box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM [--stops ornith-vllm,llama-qwen38] [--mem GB]` |
+| 1. claim the lease | `box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM [--stops $U1,$U2] [--mem GB]` |
 | 2. schedule the restore | `tools/serving-window.sh schedule 'YYYY-MM-DD HH:MM:00'` (before `stop`) |
 | 3. stop the servers | `ITREA_HOLD_UNTIL=<ISO time ≥ the lease end> tools/serving-window.sh stop` — always set it: the script's default is the next 07:45 (a night-window default), so a daytime window would hold the servers too long |
 | 4. opening gate | `tools/r26-gate.sh --deadline HH:MM` (restore if it does not open) |
@@ -285,15 +291,15 @@ the machine (`vault/10-design/Compute resources.md`).
 ### Predecessor
 - `berkorbay/optopt` (public, MIT, doi:10.5281/zenodo.22947442). Its CPU evolutionary partner beside SCIP (experiment
   X2) found no gain at 60 s and lost to SCIP ‖ SCIP; its strongest result was the SCIP/HiGHS ‖ cuOpt race.
-- Code reused from it carries the line "adapted from berkorbay/optopt@4dd48395, MIT".
+- Code reused from it carries the line "adapted from berkorbay/optopt@2a3348c0a102, MIT".
 
 ## The question, the aim, the v1 targets and the pre-registered hypotheses
 
 ### Main claim (D-007)
 Berk's brief (2026-10-05) and main claim (2026-10-06, `vault/50-decisions/D-007`): *"a GPU-based evolutionary
 algorithm metaheuristic coupled with an exact solver can beat either single solution."*
-- **Starting point:** I-TREA — Berk's master's research (Orbay 2011, METU M.S. thesis, open access, `orbay2011itrea`;
-  thesis, unpublished).
+- **Starting point:** I-TREA — Berk's master's research (Orbay 2011, METU M.S. thesis, open access, `orbay2011itrea`,
+  https://open.metu.edu.tr/handle/11511/20509). The thesis is the only part-I source this repository cites.
 - **The principle carried over** is **keeping good infeasible solutions** (Rank 0). Part I reserved a share of the
   population for them as a floor; part II caps it, as Berk's brief says.
 
@@ -482,6 +488,7 @@ Rows marked "detail § 4" have their full note in the detail note.
 | `src/itrea/analysis/lineage.py` | depth-1 matched Rank 0 odds ratio, Mantel–Haenszel (descriptive) | built |
 | `src/itrea/analysis/prereg.py` | the pre-registered analysis of D-002 v3 from `runs.parquet` (`itrea prereg`) | built |
 | `src/itrea/analysis/reproduce.py` | re-derive `datasets/` and `paper/generated/` and compare (`itrea reproduce`) | built |
+| `src/itrea/analysis/commit_map.py` | old -> new commit hashes after the 2026-10-17 history rewrite (`COMMIT_MAP.tsv`; full or >= 7-hex old SHA, anything else unchanged, no map means no change; an all-zero target is an error); used by build_runs (`git_rev`, `prereg_tag`) and prereg (`_git_descends`). `--from-filter-repo` builds the map (a pruned commit maps to its nearest kept ancestor), `--check-traces` is the post-rewrite acceptance gate — `vault/00-index/History rewrite 2026-10-17.md` | built |
 | `src/itrea/analysis/mipfeas.py` | D-020's MIPfeas calibration (`itrea mipfeas-report`): A6m against GAMS's published cuOpt 26.08 GB10 row, verdict PASS / FAIL / INCOMPLETE; `--arm A6F` = D-021's M4 with the late-clock check, reading INSIDE / OUTSIDE / CLOCK-FAIL — detail § 4 | built |
 | `src/itrea/analysis/backoff.py` | D-018's stage-0 calibration rules and stage-1 criteria, and D-023's stage 1y (`itrea backoff-report --stage 0\|1\|1y`) — detail § 4 | built |
 | `src/itrea/analysis/c1_devtests.py` | what the D-025 / D-026 reports share: the selection by set (reused `#<set>` ids, attempts), each run's `run.json` / `ea.summary.json`, the common validity legs (complete, harness, config = the job's run id, compile, block), the one-sided seed-mean band and the ratio of means | built |
@@ -580,7 +587,7 @@ Full record of every writer and option: detail § 6.
 | `datasets/` | derived tables; `dev_set.csv` and `classprobe_set.csv` are the two lists excluded from the test set; `mipfeas_strata.csv` = D-021's fixed external sets (hashed in prereg-v2); `runs.parquet` / `incumbents_checked.parquet` are rebuilt by `itrea build-runs` and not committed yet; `hardness_from_optopt.csv` is background only | — |
 | `jobs/`, `traces/` | job files; raw traces (not committed) and resource records (committed) | — |
 | `paper/` | LaTeX skeleton (`main.tex`, `sections/`), `refs.bib` (legally readable works only) | skeleton |
-| `vault/` | the research vault (Obsidian): journal, design, decisions D-NNN, results, literature, incidents, reviews, checkpoints | — |
+| `vault/` | the research vault (Obsidian): journal (research developments only), design, decisions D-NNN, results, literature, upstream drafts, reviews. Checkpoints and the incident log are in the private operations repository | — |
 | `.claude/skills/` | repository skills: `itrea-window`, `itrea-journal`, `itrea-result-note`, `itrea-new-experiment`, `itrea-literature`, `itrea-reproduce` | — |
 
 ## Rules for new experiments
@@ -590,7 +597,8 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
 
 ### Box: lease, windows, servers, memory, deadline
 - **Lease first.** No timed run without the box-window lease held by this project:
-  `box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM [--stops ornith-vllm,llama-qwen38] [--mem GB]`;
+  `box-window claim --who "i-trea-ii (Claude Code)" --why "…" --until HH:MM [--stops $U1,$U2] [--mem GB]`
+  (`$U1`, `$U2`: the two server units, set as under "Commands → Run a window");
   `box-window release` when done. Other sessions share the box; a held lease by someone else means wait.
   - `box-window` refuses a lease longer than 12 h ("not a window; split it"). On 2026-10-14 a scheduled chain's
     `--until 20:15` from 07:05 was refused and 7 h 36 min of a window were lost.
@@ -601,9 +609,9 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
   that D-009 asked for his yes for each night).
   - Long run sets (v1's MIPfeas runs, ≈ 78 h) are split into daytime windows.
   - The runner honours the host fan governor's rest flag (D-009): no new run starts while it exists.
-- **Serving window.** Confirmatory runs need both local LLM servers stopped (vLLM `ornith-vllm` :8094, llama.cpp
-  `llama-qwen38` :8092; Berk's yes, 2026-10-05). Development windows stop both too whenever the memory gate needs it —
-  A9 (two CUDA processes) needs ≈ 73 GB.
+- **Serving window.** Confirmatory runs need both local LLM servers stopped (vLLM on :8094, llama.cpp on :8092; units
+  in `gates.SERVING_UNITS`; Berk's yes, 2026-10-05). Development windows stop both too whenever the memory gate needs
+  it — A9 (two CUDA processes) needs ≈ 73 GB.
   - Stop and restore only with `tools/serving-window.sh stop|restore`, and schedule the restore on a timer before starting.
   - Verify after restore: `is-active` **and** `is-enabled`, health endpoints answer, canaries resumed, lease released.
   - Jobs with a harness need both model servers stopped (`--allow-serving` refused).
@@ -616,7 +624,7 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
 - **Pausing a pool is not ending a window.** The stop file `logs/pool.stop` stops a pool before its next block, and a
   chain script that tests it after the pool goes on to restore the servers. To pause or cut a pool inside a window, kill
   the chain first by its PID, then set the stop file, then start a chain that removes it; to end the window, the stop
-  file alone is right (`vault/60-incidents/Mistakes and incidents.md`, 2026-10-13).
+  file alone is right (incident of 2026-10-13; the incident log is in the private operations repository).
 
 ### Layout: one GPU arm at a time, footprint F, harness
 - **One GPU arm at a time.** Timed solvers pinned one per X925 core; the partner footprint (GPU + the same 3 A725
@@ -672,8 +680,8 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
   - A run whose scope thermal-watch stopped at ≥ 98 °C is void (`thermal_watch`, never an arm crash).
   - Run scopes are named `itrea-run-<sha1(run)>-<role>-<epoch_ms>` and stop within 5 s (cuOpt's by SIGKILL).
   - Every run records the fan state at its start and end and its start temperature.
-  - The governor's rests stay as they are (Berk, 2026-10-11). Journal 2026-10-15 14:4x: four 30-min rests by 14:57,
-    about every 1.5–2 h under load, about 25 % of window time (an estimate; 30 min every 1.5–2 h is 25–33 %).
+  - The governor's rests stay as they are (Berk, 2026-10-11). Operational notes of 2026-10-15 14:4x (private
+    operations repository): four 30-min rests by 14:57, about every 1.5–2 h under load, about 25 % of window time (an estimate; 30 min every 1.5–2 h is 25–33 %).
 - **R26's breaker.** After 2 thermal or cap voids in a run set (`--max-heat-voids`; one thermal pause counts once) no
   new block opens and the pool ends `halted`. It fired on 2026-10-15 17:30: two `gpu_cap` voids after a governor rest,
   the hottest zone at 85–87 °C within ~4 min; the next window resumed the unfinished blocks, the voided one whole.
@@ -682,7 +690,7 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
   restores if it does not open. `tools/r26-gate.sh` was written 2026-10-13 after W-1013b opened warm; it opened the
   10-15 and 10-16 windows at 07:08 (median 46.0 °C).
 - **Other sessions' CPU jobs.** Other sessions' CPU-heavy jobs belong on cores 10–14 at nice 19 during our windows
-  (agreed with the [other project] session 2026-10-15 19:0x); unpinned ones can land on the run cores.
+  (agreed with another project's forecasting session 2026-10-15 19:0x); unpinned ones can land on the run cores.
 - **GPU health.** A GPU run with a median SM clock below 2,000 MHz or foreign GPU activity above 2 % of its budget
   voids its whole block (all arms of that instance × seed) and halts the run set.
 - **Cap void (D-021 R25).** A GPU run whose busy SM median is below 2,300 MHz (`--cap-floor-mhz`) or that overlaps a
@@ -739,18 +747,25 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
   narrowed test gets its own rule (`vault/00-index/Home.md`).
 - **Redis.** Only the project's own container `itrea-redis` on 127.0.0.1:6390, keys under `itrea:<run_id>:`, deleted
   at the end of each run. Never the host's other Redis instances.
-- **No downloads** (instances, wheels, models) without Berk's explicit ask. No customer data (customer) anywhere.
+- **No downloads** (instances, wheels, models) without Berk's explicit ask. No customer or third-party data anywhere.
 - **No personal data to outside services.** Never send Berk's (or anyone's) e-mail address or other identifying data
   to an outside API; where an API asks for a contact address (Unpaywall, Crossref, OpenAlex), send none or a project
-  placeholder (incident 2026-10-05, `vault/60-incidents/`).
+  placeholder (incident 2026-10-05; the incident log is in the private operations repository).
 - **Never `pkill -f` / `pgrep -f` from an agent shell**: the pattern is in the shell's own command line, so it matches
   (and kills) the shell itself (exit 144; incident 2026-10-06 01:4x). Stop a helper by the PID it wrote or by the file
   it holds or polls; wait on an output file, not on a process name.
 - **Toy models only in tests**: `itrea.benchmarks.toy` or tiny generated MPS; never a solver or the EA on a real
   MIPLIB / PGLib / ML4CO instance inside a test (parsing one file for a shape check is fine).
-- **Record everything.** Journal entries (`vault/20-journal/`, append-only, host local time — CEST, CET from
-  2026-10-25), decision records D-NNN, a result note per experiment with failures included, incidents in
-  `vault/60-incidents/`. Skills: `itrea-journal`, `itrea-result-note`.
+- **Record everything, in the right place** (skills `itrea-journal`, `itrea-result-note`).
+  - **Public, in this repository:** the journal `vault/20-journal/` (append-only, host local time — CEST, CET from
+    2026-10-25) holds **research developments only**. Berk, 2026-10-17: "Journal must keep only the developments
+    regarding the problem not procedural stuff." That is: what was designed, measured, found and decided, Berk's
+    directing words, and the problems found in a method or a measurement. Decision records D-NNN and a result note per
+    experiment, failures included, stay public too.
+  - **Private, in `Tideseed/i-trea-ii-ops`** (local clone `~/git_repositories/i-trea-ii-ops`): every operational
+    note — box windows, leases, server stops and restores, timers and chains, coordination with other sessions,
+    session checkpoints and the incident log. A run's validity facts (voids, crashes, halts, the window it ran in)
+    still go in its public result note and the experiment index; only the logistics are private.
 - **Upstream reports and submissions** (issues, PRs, MIPLIB solutions, arXiv): drafts in `vault/70-upstream/`, filed
   only with Berk's yes for that one post.
 
@@ -773,8 +788,9 @@ control. Skills: `itrea-window`, `itrea-new-experiment`.
   pseudonyms. AgentRA (Agent Research Assistant) — the AI agent that designs with the author and executes the
   experiments — is mainly Claude Opus 5.5, working through Claude Code.
 - **Author line: Berk Orbay.**
-- **No [organisation] in publications** (Berk, 2026-09-23; a standing rule of his, recorded outside this repository): [organisation]
-  is not named in papers, the author line is his name only, and a public code link must not rely on the [organisation] org.
+- **No other organisation named in publications** (Berk, 2026-09-23; a standing rule of his, recorded outside this
+  repository): papers name no other organisation, the author line is his name only, and a public code link must not
+  rely on another organisation's account.
 - **Citations.** Cite only works with a legally readable full text; paywalled works live only in the vault's paywalled
   list and the paper's paywalled appendix (skill `itrea-literature`).
 
@@ -796,24 +812,24 @@ His rules, 2026-10-06 / 10-08 / 10-11:
 | current state, open issues, interim readings, development decisions, changelog (moved 2026-10-16) | the detail note §§ 7–10 |
 | detail and history moved out of this file | `vault/00-index/Agent companion — detail and history.md` |
 | the vault's front page, the plan, the question | `vault/00-index/Home.md`, `vault/00-index/Roadmap.md`, `vault/00-index/Research question and spec.md` |
-| the newest session checkpoint (read it right after "At a glance" in a new session) | `vault/90-checkpoints/` — newest `2026-10-14-2350.md`; it predates the results of D-025–D-027 and everything from D-028 on |
+| operational notes: session checkpoints (read the newest right after "At a glance" in a new session), the incident log, box windows, leases, server stops, coordination with other sessions | the **private** repository `Tideseed/i-trea-ii-ops` (local clone `~/git_repositories/i-trea-ii-ops`); not public. Notes in this repository that cite a checkpoint or an incident refer to it |
+| old commit hashes (anything recorded before 2026-10-17): the history rewrite, the map and its acceptance gate | `vault/00-index/History rewrite 2026-10-17.md`; `COMMIT_MAP.tsv` at the root; `python -m itrea.analysis.commit_map <hash>` |
 | decisions | `vault/50-decisions/D-001` … `D-033` (each with § Result where it ran) |
-| journal (append-only) | `vault/20-journal/YYYY-MM-DD.md` |
+| journal of research developments (append-only) | `vault/20-journal/YYYY-MM-DD.md` |
 | every development run and reading | `vault/30-results/Development log.md` |
 | every experiment, failures included | `vault/30-results/Experiment index.md` |
 | the phase-1 results note (final) | `vault/30-results/2026-10-17 Phase 1 — development until C1.md` |
 | the external-harness measurements | `vault/30-results/2026-10-11 D-021 measurements M1–M3 and the interim calibration.md` |
 | the C1 diagnosis (R1–R3) | `vault/30-results/2026-10-14 C1 diagnosis and improvement candidates.md` |
-| design: algorithm, processes, traces and metrics, pool, datasets, compute (window log) | `vault/10-design/` |
+| design: algorithm, processes, traces and metrics, pool, datasets, compute (machine, caps and gates) | `vault/10-design/` |
 | literature: prior art, paywalled list | `vault/40-literature/Prior art.md`, `vault/40-literature/Paywalled research.md` |
-| incidents and lessons | `vault/60-incidents/Mistakes and incidents.md` |
 | upstream drafts and records | `vault/70-upstream/` (`drafts/` not posted) |
 | design reviews and consults | `vault/80-reviews/` |
 | job files | `jobs/<set>.jsonl` |
 | raw traces (not committed) | `traces/raw/<set>/`; voided runs in `traces/raw/<set>/void/` with `void.jsonl` |
 | resource records (committed) | `traces/resources/` |
 | benchmark figures | `traces/bench/` (e.g. `traces/bench/bsync/`) |
-| run table | `datasets/runs.parquet`, `datasets/incumbents_checked.parquet` (rebuilt by `itrea build-runs`; not committed yet) |
+| run table | `datasets/runs.parquet`, `datasets/incumbents_checked.parquet` (rebuilt by `itrea build-runs`; not committed: `.gitignore` lists `datasets/*.parquet`) |
 | instance lists and sets | `datasets/dev_set.csv`, `datasets/classprobe_set.csv`, `datasets/mipfeas_strata.csv` |
 | instances | `data/` (MIPLIB 2017 benchmark, PGLib-UC, ML4CO); `data/miplib/benchmark-v2.test`; GAMS's archive `data/mipfeas/gams-2026-09-16/` |
 | pool logs and status | `logs/<job file>-<MMDD>.log` (from chains, e.g. `logs/d031-1016.log`; the pool's own default `logs/pool-<date>.log`), `logs/pool-status.json`, stop file `logs/pool.stop` |
